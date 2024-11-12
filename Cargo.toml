@@ -17,4 +17,5 @@ rand = "0.8.5"
 ratatui = "0.29.0"
 russh = "0.46.0"
 russh-keys = "0.46.0"
+thiserror = "2.0.3"
 tokio = { version = "1", features = ["full"] }
