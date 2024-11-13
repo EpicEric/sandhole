@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use crate::{HttpHandler, Server, ServerHandler};
+use crate::{HttpHandler, Server, CONFIG};
 
 use async_trait::async_trait;
 use russh::{
@@ -16,18 +16,23 @@ impl russh::server::Server for Server {
     fn new_client(&mut self, peer_address: Option<SocketAddr>) -> ServerHandler {
         let (tx, rx) = mpsc::channel(10);
         let peer_address = peer_address.unwrap();
-        self.peers.insert(peer_address.clone(), tx.clone());
         ServerHandler {
             peer: peer_address,
             tx,
             rx: Some(rx),
             server: self.clone(),
+            hosts: Vec::new(),
         }
     }
+}
 
-    fn handle_session_error(&mut self, _error: <Self::Handler as russh::server::Handler>::Error) {
-        eprintln!("Session error: {:#?}", _error);
-    }
+// TODO: impl Drop to handle disconnection
+pub struct ServerHandler {
+    pub peer: SocketAddr,
+    pub tx: mpsc::Sender<Vec<u8>>,
+    pub rx: Option<mpsc::Receiver<Vec<u8>>>,
+    pub hosts: Vec<String>,
+    pub server: Server,
 }
 
 #[async_trait]
@@ -40,7 +45,7 @@ impl Handler for ServerHandler {
         _session: &mut Session,
     ) -> Result<bool, Self::Error> {
         let Some(mut rx) = self.rx.take() else {
-            return Err(russh::Error::RequestDenied);
+            return Err(russh::Error::Disconnect);
         };
         let mut stream = channel.into_stream();
         tokio::spawn(async move {
@@ -53,7 +58,12 @@ impl Handler for ServerHandler {
         Ok(true)
     }
 
-    async fn auth_publickey(&mut self, _: &str, _key: &PublicKey) -> Result<Auth, Self::Error> {
+    // TO-DO: Handle authentication
+    async fn auth_publickey(
+        &mut self,
+        _user: &str,
+        _public_key: &PublicKey,
+    ) -> Result<Auth, Self::Error> {
         Ok(Auth::Accept)
     }
 
@@ -76,28 +86,70 @@ impl Handler for ServerHandler {
         port: &mut u32,
         session: &mut Session,
     ) -> Result<bool, Self::Error> {
-        println!("{} {}", address, port);
+        // TO-DO: Handle more than plain HTTP
+        if *port == 0 {
+            *port = 80;
+        } else if *port != 80 {
+            return Err(russh::Error::RequestDenied);
+        }
         let address = address.to_string();
-        let port = *port as u16;
         let handle = session.handle();
+        // TO-DO: Assign HTTP host through config
+        let key = address.clone();
+        self.hosts.push(key.clone());
+        let _ = self
+            .tx
+            .send(
+                format!(
+                    "Serving HTTP on http://{}:{}\n",
+                    &key,
+                    CONFIG.get().unwrap().http_port
+                )
+                .into_bytes(),
+            )
+            .await;
+        self.server.http.insert(
+            key,
+            (
+                self.peer,
+                HttpHandler {
+                    handle,
+                    address,
+                    port: *port as u16,
+                },
+            ),
+        );
+        // Send connection info through data channel
+        Ok(true)
+    }
+
+    async fn cancel_tcpip_forward(
+        &mut self,
+        address: &str,
+        port: u32,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
         // TO-DO: Handle more than plain HTTP
         if port != 80 {
             return Err(russh::Error::RequestDenied);
         }
-        let _ = self
-            .tx
-            .send(format!("Serving HTTP on {}\n", &address).into_bytes())
-            .await;
-        self.server.http.insert(
-            // TO-DO: Assign HTTP host
-            address.clone(),
-            HttpHandler {
-                handle,
-                address,
-                port,
-            },
-        );
-        // Send connection info through data channel
+        // Remove handler from self.server.http
+        let key = address;
+        self.server
+            .http
+            .remove_if(key, |_, value| value.0 == self.peer);
+        // Remove key from self.hosts
+        self.hosts.retain(|host| host != key);
         Ok(true)
+    }
+}
+
+impl Drop for ServerHandler {
+    fn drop(&mut self) {
+        for host in self.hosts.iter() {
+            self.server
+                .http
+                .remove_if(host, |_, value| value.0 == self.peer);
+        }
     }
 }

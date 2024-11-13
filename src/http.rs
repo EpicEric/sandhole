@@ -15,8 +15,7 @@ const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 pub async fn proxy_handler(
     mut request: Request<Incoming>,
     tcp_address: SocketAddr,
-    conn_manager: Arc<DashMap<String, HttpHandler>>,
-    // ) -> anyhow::Result<Response<Incoming>> {
+    conn_manager: Arc<DashMap<String, (SocketAddr, HttpHandler)>>,
 ) -> anyhow::Result<Response<Body>> {
     let host = request
         .headers()
@@ -33,21 +32,22 @@ pub async fn proxy_handler(
         port,
     }) = conn_manager
         .get(&host)
-        .map(|handler| handler.value().clone())
+        .map(|handler| handler.value().1.clone())
     else {
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
-
     request.headers_mut().insert(
         X_FORWARDED_FOR,
         tcp_address.ip().to_string().parse().unwrap(),
     );
+
     let channel = handle
         .channel_open_forwarded_tcpip(address, port as u32, "1.2.3.4", 1234)
         .await?
         .into_stream();
     let io = TokioIo::new(channel);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
+
     match request.headers().get(UPGRADE) {
         None => {
             tokio::spawn(async move {
@@ -55,8 +55,13 @@ pub async fn proxy_handler(
                     println!("Connection failed: {:?}", err);
                 }
             });
-            Ok(sender.send_request(request).await?.into_response())
+            let method = request.method().to_string();
+            let uri = request.uri().to_string();
+            let response = sender.send_request(request).await?;
+            println!("{} {} {}", response.status().as_u16(), method, uri);
+            Ok(response.into_response())
         }
+
         Some(request_upgrade) => {
             tokio::spawn(async move {
                 if let Err(err) = conn.with_upgrades().await {
@@ -64,8 +69,11 @@ pub async fn proxy_handler(
                 }
             });
             let request_type = request_upgrade.to_str()?.to_string();
+            let method = request.method().to_string();
+            let uri = request.uri().to_string();
             let upgraded_request = hyper::upgrade::on(&mut request);
             let mut response = sender.send_request(request).await?;
+            println!("{} {} {}", response.status().as_u16(), method, uri);
             match response.status() {
                 StatusCode::SWITCHING_PROTOCOLS => {
                     if request_type
@@ -80,9 +88,9 @@ pub async fn proxy_handler(
                             let mut upgraded_request =
                                 TokioIo::new(upgraded_request.await.unwrap());
                             let mut upgraded_response = TokioIo::new(upgraded_response);
-                            copy_bidirectional(&mut upgraded_response, &mut upgraded_request)
-                                .await
-                                .unwrap();
+                            let _ =
+                                copy_bidirectional(&mut upgraded_response, &mut upgraded_request)
+                                    .await;
                         });
                     }
                     Ok(response.into_response())
