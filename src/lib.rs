@@ -11,7 +11,7 @@ use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
 use hyper_util::rt::TokioIo;
 use russh::server::{Config, Server as _};
 use russh_keys::decode_secret_key;
-use tokio::{fs, net::TcpListener, sync::mpsc};
+use tokio::{fs, net::TcpListener};
 
 pub mod error;
 pub mod http;
