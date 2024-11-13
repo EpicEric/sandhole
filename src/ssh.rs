@@ -5,7 +5,7 @@ use crate::{HttpHandler, Server, CONFIG};
 use async_trait::async_trait;
 use russh::{
     server::{Auth, Handler, Msg, Session},
-    Channel, ChannelId,
+    Channel, ChannelId, MethodSet,
 };
 use russh_keys::key::PublicKey;
 use tokio::{io::AsyncWriteExt, sync::mpsc};
@@ -58,13 +58,28 @@ impl Handler for ServerHandler {
         Ok(true)
     }
 
-    // TO-DO: Handle authentication
+    async fn auth_none(&mut self, _user: &str) -> Result<Auth, Self::Error> {
+        Ok(Auth::Reject {
+            proceed_with_methods: Some(MethodSet::PUBLICKEY),
+        })
+    }
+
     async fn auth_publickey(
         &mut self,
         _user: &str,
-        _public_key: &PublicKey,
+        public_key: &PublicKey,
     ) -> Result<Auth, Self::Error> {
-        Ok(Auth::Accept)
+        if self
+            .server
+            .allowed_key_fingerprints
+            .contains(&public_key.fingerprint())
+        {
+            Ok(Auth::Accept)
+        } else {
+            Ok(Auth::Reject {
+                proceed_with_methods: None,
+            })
+        }
     }
 
     async fn data(

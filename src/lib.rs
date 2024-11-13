@@ -1,11 +1,8 @@
-use std::{
-    net::SocketAddr,
-    path::PathBuf,
-    sync::{Arc, OnceLock},
-};
+use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Context;
-use dashmap::DashMap;
+use config::CONFIG;
+use dashmap::{DashMap, DashSet};
 use http::proxy_handler;
 use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
 use hyper_util::rt::TokioIo;
@@ -13,9 +10,13 @@ use russh::server::{Config, Server as _};
 use russh_keys::decode_secret_key;
 use tokio::{fs, net::TcpListener};
 
-pub mod error;
-pub mod http;
-pub mod ssh;
+use crate::files::watch_public_keys_directory;
+
+pub mod config;
+mod error;
+mod files;
+mod http;
+mod ssh;
 
 #[derive(Clone)]
 pub struct HttpHandler {
@@ -27,18 +28,8 @@ pub struct HttpHandler {
 #[derive(Clone)]
 pub struct Server {
     pub http: Arc<DashMap<String, (SocketAddr, HttpHandler)>>,
+    pub allowed_key_fingerprints: Arc<DashSet<String>>,
 }
-
-#[derive(Debug)]
-pub struct ApplicationConfig {
-    pub private_key_file: PathBuf,
-    pub private_key_password: Option<String>,
-    pub listen_address: String,
-    pub ssh_port: u16,
-    pub http_port: u16,
-}
-
-pub static CONFIG: OnceLock<ApplicationConfig> = OnceLock::new();
 
 pub async fn entrypoint() -> anyhow::Result<()> {
     let config = CONFIG.get().unwrap();
@@ -49,7 +40,7 @@ pub async fn entrypoint() -> anyhow::Result<()> {
         .with_context(|| "Error decoding secret key")?;
     let ssh_config = Config {
         inactivity_timeout: Some(std::time::Duration::from_secs(3600)),
-        auth_rejection_time: std::time::Duration::from_secs(3),
+        auth_rejection_time: std::time::Duration::from_secs(1),
         auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
         keys: vec![key],
         ..Default::default()
@@ -57,7 +48,9 @@ pub async fn entrypoint() -> anyhow::Result<()> {
     let ssh_config = Arc::new(ssh_config);
     let mut sh = Server {
         http: Arc::new(DashMap::new()),
+        allowed_key_fingerprints: Arc::new(DashSet::new()),
     };
+
     let http_listener = TcpListener::bind((config.listen_address.clone(), config.http_port))
         .await
         .with_context(|| "Error listening to HTTP port and address")?;
@@ -78,6 +71,12 @@ pub async fn entrypoint() -> anyhow::Result<()> {
             });
         }
     });
+
+    watch_public_keys_directory(
+        config.public_keys_directory.clone(),
+        Arc::clone(&sh.allowed_key_fingerprints),
+    )?;
+
     sh.run_on_address(ssh_config, (config.listen_address.clone(), config.ssh_port))
         .await
         .with_context(|| "Error listening to SSH port and address")?;
