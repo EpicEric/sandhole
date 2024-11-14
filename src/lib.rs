@@ -1,8 +1,8 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::Context;
 use config::CONFIG;
-use dashmap::{DashMap, DashSet};
+use dashmap::DashSet;
 use http::proxy_handler;
 use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
 use hyper_util::rt::TokioIo;
@@ -10,7 +10,7 @@ use russh::server::{Config, Server as _};
 use russh_keys::decode_secret_key;
 use tokio::{fs, net::TcpListener};
 
-use crate::files::watch_public_keys_directory;
+use crate::{files::watch_public_keys_directory, http::ConnectionMap};
 
 pub mod config;
 mod error;
@@ -27,7 +27,7 @@ pub struct HttpHandler {
 
 #[derive(Clone)]
 pub struct Server {
-    pub http: Arc<DashMap<String, (SocketAddr, HttpHandler)>>,
+    pub http: Arc<ConnectionMap>,
     pub allowed_key_fingerprints: Arc<DashSet<String>>,
 }
 
@@ -47,7 +47,7 @@ pub async fn entrypoint() -> anyhow::Result<()> {
     };
     let ssh_config = Arc::new(ssh_config);
     let mut sh = Server {
-        http: Arc::new(DashMap::new()),
+        http: Arc::new(ConnectionMap::new()),
         allowed_key_fingerprints: Arc::new(DashSet::new()),
     };
 

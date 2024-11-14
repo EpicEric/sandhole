@@ -8,14 +8,45 @@ use hyper::header::{HOST, UPGRADE};
 use hyper::{body::Incoming, Response};
 use hyper::{Request, StatusCode};
 use hyper_util::rt::TokioIo;
+use rand::seq::SliceRandom;
 use tokio::io::copy_bidirectional;
 
 const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 
+pub struct ConnectionMap(DashMap<String, Vec<(SocketAddr, HttpHandler)>>);
+
+impl ConnectionMap {
+    pub fn new() -> Self {
+        ConnectionMap(DashMap::new())
+    }
+
+    pub fn insert(&self, host: String, addr: SocketAddr, handler: HttpHandler) {
+        self.0.entry(host).or_default().push((addr, handler));
+    }
+
+    pub fn get(&self, host: &str) -> Option<HttpHandler> {
+        let mut rng = rand::thread_rng();
+        self.0.get(host).and_then(|handler| {
+            handler
+                .value()
+                .as_slice()
+                .choose(&mut rng)
+                .map(|(_, handler)| handler.clone())
+        })
+    }
+
+    pub fn remove(&self, host: &str, addr: SocketAddr) {
+        self.0.remove_if_mut(host, |_, value| {
+            value.retain(|(address, _)| *address != addr);
+            value.is_empty()
+        });
+    }
+}
+
 pub async fn proxy_handler(
     mut request: Request<Incoming>,
     tcp_address: SocketAddr,
-    conn_manager: Arc<DashMap<String, (SocketAddr, HttpHandler)>>,
+    conn_manager: Arc<ConnectionMap>,
 ) -> anyhow::Result<Response<Body>> {
     let host = request
         .headers()
@@ -30,9 +61,7 @@ pub async fn proxy_handler(
         handle,
         address,
         port,
-    }) = conn_manager
-        .get(&host)
-        .map(|handler| handler.value().1.clone())
+    }) = conn_manager.get(&host)
     else {
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };

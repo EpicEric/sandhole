@@ -30,7 +30,7 @@ pub fn watch_public_keys_directory(
         let _watcher = watcher;
         while let Ok(_) = pubkeys_rx.changed().await {
             // TO-DO: Improve set re-population according to different Notify.rs events
-            // (maybe switch to a DashMap to store file names as values...)
+            // (maybe create a separate HashMap to store "file name => fingerprint(s)" mappings...)
             fingerprint_set.clear();
             if let Ok(mut read_dir) = read_dir(directory.as_path()).await {
                 while let Ok(Some(entry)) = read_dir.next_entry().await {

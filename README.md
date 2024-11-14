@@ -10,12 +10,13 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 
 ### TO-DO
 
+Roughly in the order I intend to work on:
+
 - HTTPS handling
-- Alternate addressing options
-- Load balancing
+- Alternate address assignment options
 - Better terminal logging for client and server
-- TCP forwarding
-- Local port forwarding
 - Domain authorization with DNS
+- Local port forwarding
+- TCP forwarding
 - API-based password authentication
 - And more

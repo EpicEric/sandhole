@@ -125,14 +125,12 @@ impl Handler for ServerHandler {
             .await;
         self.server.http.insert(
             key,
-            (
-                self.peer,
-                HttpHandler {
-                    handle,
-                    address,
-                    port: *port as u16,
-                },
-            ),
+            self.peer,
+            HttpHandler {
+                handle,
+                address,
+                port: *port as u16,
+            },
         );
         // Send connection info through data channel
         Ok(true)
@@ -150,9 +148,7 @@ impl Handler for ServerHandler {
         }
         // Remove handler from self.server.http
         let key = address;
-        self.server
-            .http
-            .remove_if(key, |_, value| value.0 == self.peer);
+        self.server.http.remove(key, self.peer);
         // Remove key from self.hosts
         self.hosts.retain(|host| host != key);
         Ok(true)
@@ -162,9 +158,7 @@ impl Handler for ServerHandler {
 impl Drop for ServerHandler {
     fn drop(&mut self) {
         for host in self.hosts.iter() {
-            self.server
-                .http
-                .remove_if(host, |_, value| value.0 == self.peer);
+            self.server.http.remove(host, self.peer);
         }
     }
 }
