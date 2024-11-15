@@ -12,11 +12,11 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 
 Roughly in the order I intend to work on:
 
-- HTTPS handling
 - Better terminal logging for client and server
 - Domain authorization with DNS
 - Testing
 - ACME for certificates
+- HTTPS redirection
 - Alternate address assignment options
 - Local port forwarding
 - Generic TCP forwarding

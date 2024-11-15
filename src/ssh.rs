@@ -71,6 +71,8 @@ impl Handler for ServerHandler {
         if self
             .server
             .allowed_key_fingerprints
+            .read()
+            .unwrap()
             .contains(&public_key.fingerprint())
         {
             Ok(Auth::Accept)

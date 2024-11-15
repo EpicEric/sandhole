@@ -50,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
     CONFIG
         .set(ApplicationConfig {
             public_keys_directory: args.public_keys_directory,
+            certificates_directory: args.certificates_directory,
             private_key_file: args.private_key_file,
             private_key_password: args.private_key_password,
             listen_address: args.listen_address,

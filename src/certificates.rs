@@ -1,6 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
 };
 
 use notify::{Event, EventKind, INotifyWatcher, RecommendedWatcher, RecursiveMode, Watcher};
@@ -17,13 +17,15 @@ use webpki::{types::CertificateDer, EndEntityCert};
 
 #[derive(Debug)]
 pub(crate) struct CertificateResolver {
-    certs: Arc<Mutex<Trie<String, Arc<CertifiedKey>>>>,
-    watcher: INotifyWatcher,
+    pub(crate) certificates: Arc<RwLock<Trie<String, Arc<CertifiedKey>>>>,
+    _watcher: INotifyWatcher,
 }
 
-impl CertificateResolver {
-    pub(crate) fn new(directory: PathBuf) -> anyhow::Result<Self> {
-        let certs = Arc::new(Mutex::new(TrieBuilder::new().build()));
+impl TryFrom<PathBuf> for CertificateResolver {
+    type Error = anyhow::Error;
+
+    fn try_from(directory: PathBuf) -> Result<Self, Self::Error> {
+        let certificates = Arc::new(RwLock::new(TrieBuilder::new().build()));
         let (certificates_tx, mut certificates_rx) = watch::channel(());
         certificates_rx.mark_changed();
         let mut watcher = RecommendedWatcher::new(
@@ -40,10 +42,9 @@ impl CertificateResolver {
             notify::Config::default(),
         )?;
         watcher.watch(directory.as_path(), RecursiveMode::Recursive)?;
-        let certs_clone = Arc::clone(&certs);
+        let certs_clone = Arc::clone(&certificates);
         tokio::spawn(async move {
             while let Ok(_) = certificates_rx.changed().await {
-                // TO-DO: Do not recreate whole Trie for every Notify.rs event
                 let mut builder = TrieBuilder::new();
                 if let Ok(mut read_dir) = read_dir(directory.as_path()).await {
                     while let Ok(Some(entry)) = read_dir.next_entry().await {
@@ -59,6 +60,10 @@ impl CertificateResolver {
                             })
                             .await
                             else {
+                                eprintln!(
+                                    "Unable to load certificate in {:?}",
+                                    entry.path().join("fullchain.pem")
+                                );
                                 continue;
                             };
                             let path = entry.path();
@@ -67,9 +72,14 @@ impl CertificateResolver {
                             })
                             .await
                             else {
+                                eprintln!(
+                                    "Unable to load key in {:?}",
+                                    entry.path().join("privkey.pem")
+                                );
                                 continue;
                             };
                             let Ok(key) = any_supported_type(&key) else {
+                                eprintln!("Invalid key in {:?}", entry.path().join("privkey.pem"));
                                 continue;
                             };
                             let ck = Arc::new(CertifiedKey::new(cert, key));
@@ -79,19 +89,26 @@ impl CertificateResolver {
                                 .filter_map(|&cert| EndEntityCert::try_from(cert).ok())
                             {
                                 for name in eec.valid_dns_names() {
-                                    let path =
-                                        name.split('.').rev().map(String::from).collect::<Vec<_>>();
+                                    let path = name
+                                        .trim_start_matches("*.")
+                                        .split('.')
+                                        .rev()
+                                        .map(String::from)
+                                        .collect::<Vec<_>>();
                                     builder.push(path, ck.clone());
                                 }
                             }
                         }
                     }
+                    let trie = builder.build();
+                    *certs_clone.write().unwrap() = trie;
                 }
-                let trie = builder.build();
-                *certs_clone.lock().unwrap() = trie;
             }
         });
-        Ok(CertificateResolver { certs, watcher })
+        Ok(CertificateResolver {
+            certificates,
+            _watcher: watcher,
+        })
     }
 }
 
@@ -102,8 +119,8 @@ impl ResolvesServerCert for CertificateResolver {
             else {
                 return None;
             };
-            self.certs
-                .lock()
+            self.certificates
+                .read()
                 .unwrap()
                 .common_prefix_search(
                     &server_name_str
