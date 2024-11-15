@@ -26,13 +26,12 @@ impl russh::server::Server for Server {
     }
 }
 
-// TODO: impl Drop to handle disconnection
-pub struct ServerHandler {
-    pub peer: SocketAddr,
-    pub tx: mpsc::Sender<Vec<u8>>,
-    pub rx: Option<mpsc::Receiver<Vec<u8>>>,
-    pub hosts: Vec<String>,
-    pub server: Server,
+pub(crate) struct ServerHandler {
+    pub(crate) peer: SocketAddr,
+    pub(crate) tx: mpsc::Sender<Vec<u8>>,
+    pub(crate) rx: Option<mpsc::Receiver<Vec<u8>>>,
+    pub(crate) hosts: Vec<String>,
+    pub(crate) server: Server,
 }
 
 #[async_trait]

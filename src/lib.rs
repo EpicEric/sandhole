@@ -10,25 +10,26 @@ use russh::server::{Config, Server as _};
 use russh_keys::decode_secret_key;
 use tokio::{fs, net::TcpListener};
 
-use crate::{files::watch_public_keys_directory, http::ConnectionMap};
+use crate::{fingerprints::watch_public_keys_directory, http::ConnectionMap};
 
+mod certificates;
 pub mod config;
 mod error;
-mod files;
+mod fingerprints;
 mod http;
 mod ssh;
 
 #[derive(Clone)]
-pub struct HttpHandler {
-    pub handle: russh::server::Handle,
-    pub address: String,
-    pub port: u16,
+pub(crate) struct HttpHandler {
+    pub(crate) handle: russh::server::Handle,
+    pub(crate) address: String,
+    pub(crate) port: u16,
 }
 
 #[derive(Clone)]
-pub struct Server {
-    pub http: Arc<ConnectionMap>,
-    pub allowed_key_fingerprints: Arc<DashSet<String>>,
+pub(crate) struct Server {
+    pub(crate) http: Arc<ConnectionMap>,
+    pub(crate) allowed_key_fingerprints: Arc<DashSet<String>>,
 }
 
 pub async fn entrypoint() -> anyhow::Result<()> {
@@ -59,6 +60,27 @@ pub async fn entrypoint() -> anyhow::Result<()> {
         loop {
             let map_clone = http_map.clone();
             let (stream, address) = http_listener.accept().await.unwrap();
+            let service = service_fn(move |req: Request<Incoming>| {
+                proxy_handler(req, address, map_clone.clone())
+            });
+            let io = TokioIo::new(stream);
+            tokio::spawn(async move {
+                let conn = http1::Builder::new()
+                    .serve_connection(io, service)
+                    .with_upgrades();
+                let _ = conn.await;
+            });
+        }
+    });
+
+    let https_listener = TcpListener::bind((config.listen_address.clone(), config.https_port))
+        .await
+        .with_context(|| "Error listening to HTTP port and address")?;
+    let http_map = Arc::clone(&sh.http);
+    tokio::spawn(async move {
+        loop {
+            let map_clone = http_map.clone();
+            let (stream, address) = https_listener.accept().await.unwrap();
             let service = service_fn(move |req: Request<Incoming>| {
                 proxy_handler(req, address, map_clone.clone())
             });

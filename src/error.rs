@@ -1,7 +1,5 @@
-use thiserror::Error;
-
-#[derive(Error, Debug)]
-pub enum ServerError {
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum ServerError {
     #[error("Missing Host header")]
     MissingHostHeader,
     #[error("Invalid Host header")]

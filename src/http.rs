@@ -13,18 +13,18 @@ use tokio::io::copy_bidirectional;
 
 const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 
-pub struct ConnectionMap(DashMap<String, Vec<(SocketAddr, HttpHandler)>>);
+pub(crate) struct ConnectionMap(DashMap<String, Vec<(SocketAddr, HttpHandler)>>);
 
 impl ConnectionMap {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         ConnectionMap(DashMap::new())
     }
 
-    pub fn insert(&self, host: String, addr: SocketAddr, handler: HttpHandler) {
+    pub(crate) fn insert(&self, host: String, addr: SocketAddr, handler: HttpHandler) {
         self.0.entry(host).or_default().push((addr, handler));
     }
 
-    pub fn get(&self, host: &str) -> Option<HttpHandler> {
+    pub(crate) fn get(&self, host: &str) -> Option<HttpHandler> {
         let mut rng = rand::thread_rng();
         self.0.get(host).and_then(|handler| {
             handler
@@ -35,7 +35,7 @@ impl ConnectionMap {
         })
     }
 
-    pub fn remove(&self, host: &str, addr: SocketAddr) {
+    pub(crate) fn remove(&self, host: &str, addr: SocketAddr) {
         self.0.remove_if_mut(host, |_, value| {
             value.retain(|(address, _)| *address != addr);
             value.is_empty()

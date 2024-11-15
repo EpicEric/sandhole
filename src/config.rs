@@ -8,6 +8,7 @@ pub struct ApplicationConfig {
     pub listen_address: String,
     pub ssh_port: u16,
     pub http_port: u16,
+    pub https_port: u16,
 }
 
 pub static CONFIG: OnceLock<ApplicationConfig> = OnceLock::new();
