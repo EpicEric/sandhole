@@ -17,6 +17,7 @@ use tokio_rustls::TlsAcceptor;
 
 use crate::{fingerprints::FingerprintsResolver, http::ConnectionMap};
 
+mod addressing;
 mod certificates;
 pub mod config;
 mod error;

@@ -1,6 +1,6 @@
-use std::net::SocketAddr;
+use std::{collections::HashMap, net::SocketAddr};
 
-use crate::{HttpHandler, Server, CONFIG};
+use crate::{addressing::get_address, HttpHandler, Server, CONFIG};
 
 use async_trait::async_trait;
 use russh::{
@@ -18,19 +18,25 @@ impl russh::server::Server for Server {
         let peer_address = peer_address.unwrap();
         ServerHandler {
             peer: peer_address,
+            user: None,
+            key_fingerprint: None,
             tx,
             rx: Some(rx),
-            server: self.clone(),
             hosts: Vec::new(),
+            addressing: HashMap::new(),
+            server: self.clone(),
         }
     }
 }
 
 pub(crate) struct ServerHandler {
     pub(crate) peer: SocketAddr,
+    pub(crate) user: Option<String>,
+    pub(crate) key_fingerprint: Option<String>,
     pub(crate) tx: mpsc::Sender<Vec<u8>>,
     pub(crate) rx: Option<mpsc::Receiver<Vec<u8>>>,
     pub(crate) hosts: Vec<String>,
+    pub(crate) addressing: HashMap<(String, u32), String>,
     pub(crate) server: Server,
 }
 
@@ -65,16 +71,19 @@ impl Handler for ServerHandler {
 
     async fn auth_publickey(
         &mut self,
-        _user: &str,
+        user: &str,
         public_key: &PublicKey,
     ) -> Result<Auth, Self::Error> {
+        let fingerprint = public_key.fingerprint();
         if self
             .server
             .allowed_key_fingerprints
             .read()
             .unwrap()
-            .contains(&public_key.fingerprint())
+            .contains(&fingerprint)
         {
+            self.key_fingerprint = Some(fingerprint);
+            self.user = Some(user.to_string());
             Ok(Auth::Accept)
         } else {
             Ok(Auth::Reject {
@@ -110,26 +119,46 @@ impl Handler for ServerHandler {
         }
         let address = address.to_string();
         let handle = session.handle();
-        // TO-DO: Assign HTTP host through config
-        let key = address.clone();
-        self.hosts.push(key.clone());
+        // Assign HTTP host through config
+        let assigned_host =
+            get_address(&address, &self.user, &self.key_fingerprint, &self.peer).await;
+        self.hosts.push(assigned_host.clone());
+        self.addressing
+            .insert((address, *port), assigned_host.clone());
         let _ = self
             .tx
             .send(
                 format!(
-                    "Serving HTTP on http://{}:{}\r\n",
-                    &key,
-                    CONFIG.get().unwrap().http_port
+                    "Serving HTTP on http://{}{}\r\n",
+                    &assigned_host,
+                    match CONFIG.get().unwrap().http_port {
+                        80 => "".into(),
+                        port => format!(":{}", port),
+                    }
+                )
+                .into_bytes(),
+            )
+            .await;
+        let _ = self
+            .tx
+            .send(
+                format!(
+                    "Serving HTTPS on https://{}{}\r\n",
+                    &assigned_host,
+                    match CONFIG.get().unwrap().https_port {
+                        443 => "".into(),
+                        port => format!(":{}", port),
+                    }
                 )
                 .into_bytes(),
             )
             .await;
         self.server.http.insert(
-            key,
+            assigned_host.clone(),
             self.peer,
             HttpHandler {
                 handle,
-                address,
+                address: assigned_host,
                 tx: self.tx.clone(),
                 port: *port as u16,
             },
@@ -148,12 +177,15 @@ impl Handler for ServerHandler {
         if port != 80 {
             return Err(russh::Error::RequestDenied);
         }
-        // Remove handler from self.server.http
-        let key = address;
-        self.server.http.remove(key, self.peer);
-        // Remove key from self.hosts
-        self.hosts.retain(|host| host != key);
-        Ok(true)
+        if let Some(assigned_host) = self.addressing.remove(&(address.to_string(), port)) {
+            // Remove handler from self.server.http
+            self.server.http.remove(&assigned_host, self.peer);
+            // Remove key from self.hosts
+            self.hosts.retain(|host| host != &assigned_host);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }
 

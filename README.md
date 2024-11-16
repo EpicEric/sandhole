@@ -12,8 +12,6 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 
 Roughly in the order I intend to work on:
 
-- Domain authorization with DNS
-- Alternate address assignment options
 - Testing
 - ACME for certificates
 - HTTPS redirection
@@ -21,4 +19,5 @@ Roughly in the order I intend to work on:
 - Generic TCP forwarding
 - API-based password authentication
 - Admin interface through SSH
+- Improve technical debts
 - And more
