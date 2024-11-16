@@ -1885,6 +1885,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "pretty-duration"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8868e7264af614b3634ff0abbe37b178e61000611b8a75221aea40221924aba"
+
+[[package]]
 name = "prettyplease"
 version = "0.2.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2320,12 +2326,14 @@ dependencies = [
  "async-trait",
  "axum",
  "bytes",
+ "chrono",
  "clap",
  "dashmap",
  "http-body-util",
  "hyper",
  "hyper-util",
  "notify",
+ "pretty-duration",
  "rand",
  "ratatui",
  "russh",

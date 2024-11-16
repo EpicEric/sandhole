@@ -14,7 +14,7 @@ impl russh::server::Server for Server {
     type Handler = ServerHandler;
 
     fn new_client(&mut self, peer_address: Option<SocketAddr>) -> ServerHandler {
-        let (tx, rx) = mpsc::channel(10);
+        let (tx, rx) = mpsc::channel(32);
         let peer_address = peer_address.unwrap();
         ServerHandler {
             peer: peer_address,
@@ -117,7 +117,7 @@ impl Handler for ServerHandler {
             .tx
             .send(
                 format!(
-                    "Serving HTTP on http://{}:{}\n",
+                    "Serving HTTP on http://{}:{}\r\n",
                     &key,
                     CONFIG.get().unwrap().http_port
                 )
@@ -130,6 +130,7 @@ impl Handler for ServerHandler {
             HttpHandler {
                 handle,
                 address,
+                tx: self.tx.clone(),
                 port: *port as u16,
             },
         );

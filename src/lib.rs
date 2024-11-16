@@ -12,7 +12,7 @@ use hyper_util::rt::TokioIo;
 use russh::server::{Config, Server as _};
 use russh_keys::decode_secret_key;
 use rustls::ServerConfig;
-use tokio::{fs, net::TcpListener};
+use tokio::{fs, net::TcpListener, sync::mpsc};
 use tokio_rustls::TlsAcceptor;
 
 use crate::{fingerprints::FingerprintsResolver, http::ConnectionMap};
@@ -29,6 +29,7 @@ pub(crate) struct HttpHandler {
     pub(crate) handle: russh::server::Handle,
     pub(crate) address: String,
     pub(crate) port: u16,
+    pub(crate) tx: mpsc::Sender<Vec<u8>>,
 }
 
 #[derive(Clone)]

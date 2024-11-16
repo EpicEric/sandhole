@@ -12,13 +12,13 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 
 Roughly in the order I intend to work on:
 
-- Better terminal logging for client and server
 - Domain authorization with DNS
+- Alternate address assignment options
 - Testing
 - ACME for certificates
 - HTTPS redirection
-- Alternate address assignment options
 - Local port forwarding
 - Generic TCP forwarding
 - API-based password authentication
+- Admin interface through SSH
 - And more

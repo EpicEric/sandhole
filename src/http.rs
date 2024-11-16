@@ -1,3 +1,4 @@
+use std::time::{Duration, Instant};
 use std::{net::SocketAddr, sync::Arc};
 
 use super::{error::ServerError, HttpHandler};
@@ -10,6 +11,7 @@ use hyper::{Request, StatusCode};
 use hyper_util::rt::TokioIo;
 use rand::seq::SliceRandom;
 use tokio::io::copy_bidirectional;
+use tokio::sync::mpsc;
 
 const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 
@@ -43,11 +45,40 @@ impl ConnectionMap {
     }
 }
 
+fn http_log(
+    status: u16,
+    method: String,
+    uri: String,
+    elapsed_time: Duration,
+    tx: mpsc::Sender<Vec<u8>>,
+) {
+    let status_escape_color = match status {
+        100..=199 => "\x1b[37m",
+        200..=299 => "\x1b[34m",
+        300..=399 => "\x1b[32m",
+        400..=499 => "\x1b[33m",
+        500..=599 => "\x1b[31m",
+        _ => unreachable!(),
+    };
+    let line = format!(
+        "\x1b[2m{:19}\x1b[22m {}[{:3}] \x1b[0;1;44m{:^7}\x1b[0m {} \x1b[2m{}\x1b[0m\r\n",
+        chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
+        status_escape_color,
+        status,
+        method,
+        uri,
+        pretty_duration::pretty_duration(&elapsed_time, None)
+    );
+    print!("{}", line);
+    let _ = tx.try_send(line.into_bytes());
+}
+
 pub async fn proxy_handler(
     mut request: Request<Incoming>,
     tcp_address: SocketAddr,
     conn_manager: Arc<ConnectionMap>,
 ) -> anyhow::Result<Response<Body>> {
+    let timer = Instant::now();
     let host = request
         .headers()
         .get(HOST)
@@ -61,6 +92,7 @@ pub async fn proxy_handler(
         handle,
         address,
         port,
+        tx,
     }) = conn_manager.get(&host)
     else {
         return Ok((StatusCode::NOT_FOUND, "").into_response());
@@ -77,6 +109,8 @@ pub async fn proxy_handler(
     let io = TokioIo::new(channel);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
 
+    let method = request.method().to_string();
+    let uri = request.uri().to_string();
     match request.headers().get(UPGRADE) {
         None => {
             tokio::spawn(async move {
@@ -84,10 +118,9 @@ pub async fn proxy_handler(
                     println!("Connection failed: {:?}", err);
                 }
             });
-            let method = request.method().to_string();
-            let uri = request.uri().to_string();
             let response = sender.send_request(request).await?;
-            println!("{} {} {}", response.status().as_u16(), method, uri);
+            let elapsed = timer.elapsed();
+            http_log(response.status().as_u16(), method, uri, elapsed, tx);
             Ok(response.into_response())
         }
 
@@ -98,11 +131,10 @@ pub async fn proxy_handler(
                 }
             });
             let request_type = request_upgrade.to_str()?.to_string();
-            let method = request.method().to_string();
-            let uri = request.uri().to_string();
             let upgraded_request = hyper::upgrade::on(&mut request);
             let mut response = sender.send_request(request).await?;
-            println!("{} {} {}", response.status().as_u16(), method, uri);
+            let elapsed = timer.elapsed();
+            http_log(response.status().as_u16(), method, uri, elapsed, tx);
             match response.status() {
                 StatusCode::SWITCHING_PROTOCOLS => {
                     if request_type
