@@ -13,7 +13,6 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 Roughly in the order I intend to work on:
 
 - Testing
-  - `addressing.rs`: Mock DNS resolver and test address function; also simulate PRNG to see if results are deterministic.
   - `http.rs`: Mock ConnectionMap and try out different combinations of requests.
   - `ssh.rs`: Test different flows for SSH clients.
   - `certificates.rs`: Test that it can correctly select certificates based on SNI.

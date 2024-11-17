@@ -3,15 +3,64 @@ use std::{
     net::SocketAddr,
 };
 
+use async_trait::async_trait;
 use hickory_resolver::TokioAsyncResolver;
+#[cfg(test)]
+use mockall::automock;
 use rand::{seq::SliceRandom, thread_rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use webpki::types::DnsName;
 
 use crate::config::RandomSubdomainSeed;
 
-pub(crate) struct AddressDelegator {
-    resolver: TokioAsyncResolver,
+pub(crate) struct DnsResolver(TokioAsyncResolver);
+
+#[cfg_attr(test, automock)]
+#[async_trait]
+pub(crate) trait Resolver {
+    async fn has_txt_record_for_fingerprint(
+        &self,
+        txt_record_prefix: &str,
+        requested_address: &str,
+        fingerprint: &str,
+    ) -> bool;
+}
+
+impl DnsResolver {
+    pub(crate) fn new() -> Self {
+        DnsResolver(TokioAsyncResolver::tokio(
+            Default::default(),
+            Default::default(),
+        ))
+    }
+}
+
+#[async_trait]
+impl Resolver for DnsResolver {
+    async fn has_txt_record_for_fingerprint(
+        &self,
+        txt_record_prefix: &str,
+        requested_address: &str,
+        fingerprint: &str,
+    ) -> bool {
+        // TO-DO: Allow verifying whole subdomain chain for a matching fingerprint
+        if let Ok(lookup) = self
+            .0
+            .txt_lookup(format!("{}.{}.", txt_record_prefix, requested_address))
+            .await
+        {
+            lookup
+                .iter()
+                .flat_map(|txt| txt.iter())
+                .any(|data| data.ends_with(fingerprint.as_bytes()))
+        } else {
+            false
+        }
+    }
+}
+
+pub(crate) struct AddressDelegator<R> {
+    resolver: R,
     txt_record_prefix: String,
     root_domain: String,
     seed: u64,
@@ -20,9 +69,9 @@ pub(crate) struct AddressDelegator {
     force_random_subdomains: bool,
 }
 
-impl AddressDelegator {
+impl<R: Resolver> AddressDelegator<R> {
     pub(crate) fn new(
-        resolver: TokioAsyncResolver,
+        resolver: R,
         txt_record_prefix: String,
         root_domain: String,
         bind_any_host: bool,
@@ -52,24 +101,23 @@ impl AddressDelegator {
         if self.bind_any_host {
             return requested_address.to_string();
         }
-        if DnsName::try_from(requested_address).is_ok() {
-            if let Some(fingerprint) = fingerprint {
-                // Verify requested address through DNS
-                // TO-DO: Allow verifying whole subdomain chain for a matching fingerprint
-                if let Ok(lookup) = self
-                    .resolver
-                    .txt_lookup(format!("{}.{}.", self.txt_record_prefix, requested_address))
-                    .await
-                {
-                    for data in lookup.iter().flat_map(|txt| txt.iter()) {
-                        if data.ends_with(fingerprint.as_bytes()) {
-                            return requested_address.to_string();
-                        }
+        if !self.force_random_subdomains {
+            if DnsName::try_from(requested_address).is_ok() {
+                if let Some(fingerprint) = fingerprint {
+                    // Verify requested address through DNS
+                    if self
+                        .resolver
+                        .has_txt_record_for_fingerprint(
+                            &self.txt_record_prefix,
+                            requested_address,
+                            fingerprint,
+                        )
+                        .await
+                    {
+                        return requested_address.to_string();
                     }
+                    eprintln!("Invalid credentials for address: {}", requested_address);
                 }
-                eprintln!("Invalid credentials for address: {}", requested_address);
-            }
-            if !self.force_random_subdomains {
                 // Assign specified subdomain under the root domain
                 let address = requested_address.trim_end_matches(&format!(".{}", self.root_domain));
                 if !address.is_empty() {
@@ -80,23 +128,24 @@ impl AddressDelegator {
                         requested_address
                     );
                 }
+            } else {
+                eprintln!(
+                    "Invalid address requested, defaulting to random: {}",
+                    requested_address
+                );
             }
-        } else if !self.force_random_subdomains {
-            eprintln!(
-                "Invalid address requested, defaulting to random: {}",
-                requested_address
-            );
         }
         // Assign random subdomain under the root domain
         format!(
             "{}.{}",
-            self.get_random_subdomain(user, fingerprint, socket_address),
+            self.get_random_subdomain(requested_address, user, fingerprint, socket_address),
             self.root_domain
         )
     }
 
     fn get_random_subdomain(
         &self,
+        requested_address: &str,
         user: &Option<String>,
         fingerprint: &Option<String>,
         socket_address: &SocketAddr,
@@ -108,6 +157,7 @@ impl AddressDelegator {
             match strategy {
                 RandomSubdomainSeed::User => {
                     if let Some(user) = user {
+                        requested_address.hash(&mut hasher);
                         user.hash(&mut hasher);
                         hash_initialized = true;
                     } else {
@@ -116,6 +166,7 @@ impl AddressDelegator {
                 }
                 RandomSubdomainSeed::KeyFingerprint => {
                     if let Some(fingerprint) = fingerprint {
+                        requested_address.hash(&mut hasher);
                         fingerprint.hash(&mut hasher);
                         hash_initialized = true;
                     } else {
@@ -125,7 +176,9 @@ impl AddressDelegator {
                     }
                 }
                 RandomSubdomainSeed::SocketAddress => {
+                    requested_address.hash(&mut hasher);
                     socket_address.hash(&mut hasher);
+                    hash_initialized = true;
                 }
             }
         }
@@ -144,5 +197,386 @@ impl AddressDelegator {
                 .collect(),
         )
         .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AddressDelegator, MockResolver};
+    use mockall::predicate::*;
+    use std::net::SocketAddr;
+
+    #[tokio::test]
+    async fn address_delegator_returns_provided_address_when_binding_any_host() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            true,
+            false,
+            None,
+        );
+        let address = delegator
+            .get_address(
+                "some.address",
+                &None,
+                &None,
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address, "some.address");
+    }
+
+    #[tokio::test]
+    async fn address_delegator_returns_provided_address_if_txt_record_matches_fingerprint() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint()
+            .with(eq("_some_prefix"), eq("some.address"), eq("fingerprint1"))
+            .return_const(true);
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            false,
+            false,
+            None,
+        );
+        let address = delegator
+            .get_address(
+                "some.address",
+                &None,
+                &Some("fingerprint1".into()),
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address, "some.address");
+    }
+
+    #[tokio::test]
+    async fn address_delegator_returns_provided_subdomain_if_no_fingerprint() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint()
+            .never()
+            .return_const(true);
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            false,
+            false,
+            None,
+        );
+        let address = delegator
+            .get_address(
+                "subdomain",
+                &None,
+                &None,
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address, "subdomain.root.tld");
+    }
+
+    #[tokio::test]
+    async fn address_delegator_returns_subdomain_if_no_txt_record_matches_fingerprint() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint()
+            .with(eq("_some_prefix"), eq("some.address"), eq("fingerprint1"))
+            .return_const(false);
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            false,
+            false,
+            None,
+        );
+        let address = delegator
+            .get_address(
+                "some.address",
+                &None,
+                &Some("fingerprint1".into()),
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address, "some.address.root.tld");
+    }
+
+    #[tokio::test]
+    async fn address_delegator_returns_subdomain_if_requested_subdomain_of_host_domain() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            false,
+            false,
+            None,
+        );
+        let address = delegator
+            .get_address(
+                "prefix.root.tld",
+                &None,
+                &None,
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address, "prefix.root.tld");
+    }
+
+    #[tokio::test]
+    async fn address_delegator_returns_host_domain_if_address_equals_host_domain_and_has_fingerprint(
+    ) {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint()
+            .once()
+            .return_const(true);
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            false,
+            false,
+            None,
+        );
+        let address = delegator
+            .get_address(
+                "root.tld",
+                &None,
+                &Some("fingerprint1".into()),
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address, "root.tld");
+    }
+
+    #[tokio::test]
+    async fn address_delegator_returns_subdomain_if_address_equals_host_domain_and_doesnt_have_fingerprint(
+    ) {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint()
+            .once()
+            .return_const(false);
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            false,
+            false,
+            None,
+        );
+        let address = delegator
+            .get_address(
+                "root.tld",
+                &None,
+                &Some("fingerprint1".into()),
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address, "root.tld.root.tld");
+    }
+
+    #[tokio::test]
+    async fn address_delegator_returns_random_subdomain_if_invalid_address() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            false,
+            false,
+            None,
+        );
+        let address = delegator
+            .get_address(
+                ".",
+                &None,
+                &Some("fingerprint1".into()),
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert!(address.ends_with(".root.tld"));
+        assert!(!address.trim_end_matches(".root.tld").is_empty());
+    }
+
+    #[tokio::test]
+    async fn address_delegator_returns_unique_random_subdomains_if_forced() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            false,
+            true,
+            None,
+        );
+        let mut set = std::collections::HashSet::new();
+        for _ in 0..100 {
+            let address = delegator
+                .get_address(
+                    "some.address",
+                    &None,
+                    &Some("fingerprint1".into()),
+                    &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+                )
+                .await;
+            assert!(address.ends_with(".root.tld"));
+            assert!(!address.trim_end_matches(".root.tld").is_empty());
+            assert!(!set.contains(&address));
+            set.insert(address);
+        }
+    }
+
+    #[tokio::test]
+    async fn address_delegator_returns_unique_random_subdomains_per_user_and_address_if_forced() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            false,
+            true,
+            Some(crate::config::RandomSubdomainSeed::User),
+        );
+        let address1_u1_a1 = delegator
+            .get_address(
+                "a1",
+                &Some("u1".into()),
+                &None,
+                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address2_u1_a1 = delegator
+            .get_address(
+                "a1",
+                &Some("u1".into()),
+                &None,
+                &"127.0.0.1:12342".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address3_u2_a1 = delegator
+            .get_address(
+                "a1",
+                &Some("u2".into()),
+                &None,
+                &"127.0.0.1:12343".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address4_u1_a2 = delegator
+            .get_address(
+                "a2",
+                &Some("u1".into()),
+                &None,
+                &"127.0.0.1:12344".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address1_u1_a1, address2_u1_a1);
+        assert_ne!(address1_u1_a1, address3_u2_a1);
+        assert_ne!(address1_u1_a1, address4_u1_a2);
+    }
+
+    #[tokio::test]
+    async fn address_delegator_returns_unique_random_subdomains_per_fingerprint_and_address_if_forced(
+    ) {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            false,
+            true,
+            Some(crate::config::RandomSubdomainSeed::KeyFingerprint),
+        );
+        let address1_f1_a1 = delegator
+            .get_address(
+                "a1",
+                &None,
+                &Some("f1".into()),
+                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address2_f1_a1 = delegator
+            .get_address(
+                "a1",
+                &None,
+                &Some("f1".into()),
+                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address3_f2_a1 = delegator
+            .get_address(
+                "a1",
+                &None,
+                &Some("f2".into()),
+                &"127.0.0.1:12342".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address4_f1_a2 = delegator
+            .get_address(
+                "a2",
+                &None,
+                &Some("f1".into()),
+                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address1_f1_a1, address2_f1_a1);
+        assert_ne!(address1_f1_a1, address3_f2_a1);
+        assert_ne!(address1_f1_a1, address4_f1_a2);
+    }
+
+    #[tokio::test]
+    async fn address_delegator_returns_unique_random_subdomains_per_socket_and_address_if_forced() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            false,
+            true,
+            Some(crate::config::RandomSubdomainSeed::SocketAddress),
+        );
+        let address1_s1_a1 = delegator
+            .get_address(
+                "a1",
+                &None,
+                &None,
+                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address2_s1_a1 = delegator
+            .get_address(
+                "a1",
+                &None,
+                &None,
+                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address3_s2_a1 = delegator
+            .get_address(
+                "a1",
+                &None,
+                &None,
+                &"127.0.0.1:12342".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address4_s1_a2 = delegator
+            .get_address(
+                "a2",
+                &None,
+                &None,
+                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address1_s1_a1, address2_s1_a1);
+        assert_ne!(address1_s1_a1, address3_s2_a1);
+        assert_ne!(address1_s1_a1, address4_s1_a2);
     }
 }

@@ -8,11 +8,11 @@ use sandhole::{
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum RandomSubdomainSeed {
-    /// From SSH user.
+    /// From SSH user and requested address.
     User,
-    /// From SSH key fingerprint.
+    /// From SSH key fingerprint and requested address.
     Fingerprint,
-    /// From SSH connection socket (address + port).
+    /// From SSH connection socket (address + port) and requested address.
     Address,
 }
 

@@ -1,6 +1,9 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
-use crate::{addressing::AddressDelegator, HttpHandler, Server};
+use crate::{
+    addressing::{AddressDelegator, DnsResolver},
+    HttpHandler, Server,
+};
 
 use async_trait::async_trait;
 use russh::{
@@ -18,7 +21,7 @@ pub(crate) struct ServerHandler {
     pub(crate) rx: Option<mpsc::Receiver<Vec<u8>>>,
     pub(crate) hosts: Vec<String>,
     pub(crate) addressing: HashMap<(String, u32), String>,
-    pub(crate) address_delegator: Arc<AddressDelegator>,
+    pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
     pub(crate) server: Server,
 }
 
@@ -79,7 +82,7 @@ impl Handler for ServerHandler {
         let fingerprint = public_key.fingerprint();
         if self
             .server
-            .allowed_key_fingerprints
+            .fingerprints_validator
             .is_key_allowed(&fingerprint)
         {
             self.key_fingerprint = Some(fingerprint);

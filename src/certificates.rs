@@ -11,7 +11,10 @@ use rustls::{
     server::{ClientHello, ParsedCertificate, ResolvesServerCert},
     sign::CertifiedKey,
 };
-use tokio::{fs::read_dir, sync::watch};
+use tokio::{
+    fs::read_dir,
+    sync::{oneshot, watch},
+};
 use trie_rs::map::{Trie, TrieBuilder};
 use webpki::{types::CertificateDer, EndEntityCert};
 
@@ -22,7 +25,7 @@ pub(crate) struct CertificateResolver {
 }
 
 impl CertificateResolver {
-    pub(crate) async fn new(directory: PathBuf) -> anyhow::Result<Self> {
+    pub(crate) async fn watch(directory: PathBuf) -> anyhow::Result<Self> {
         let certificates = Arc::new(RwLock::new(TrieBuilder::new().build()));
         let (certificates_tx, mut certificates_rx) = watch::channel(());
         certificates_rx.mark_changed();
@@ -41,7 +44,9 @@ impl CertificateResolver {
         )?;
         watcher.watch(directory.as_path(), RecursiveMode::Recursive)?;
         let certs_clone = Arc::clone(&certificates);
+        let (tx, rx) = oneshot::channel::<()>();
         tokio::spawn(async move {
+            let mut tx = Some(tx);
             while let Ok(_) = certificates_rx.changed().await {
                 let mut builder = TrieBuilder::new();
                 if let Ok(mut read_dir) = read_dir(directory.as_path()).await {
@@ -100,9 +105,11 @@ impl CertificateResolver {
                     }
                     let trie = builder.build();
                     *certs_clone.write().unwrap() = trie;
+                    tx.take().map(|tx| tx.send(()));
                 }
             }
         });
+        rx.await.unwrap();
         Ok(CertificateResolver {
             certificates,
             _watcher: watcher,

@@ -13,7 +13,9 @@ use tokio::{fs, net::TcpListener, sync::mpsc};
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
-    addressing::AddressDelegator, fingerprints::FingerprintsResolver, http::ConnectionMap,
+    addressing::{AddressDelegator, DnsResolver},
+    fingerprints::FingerprintsValidator,
+    http::ConnectionMap,
 };
 
 mod addressing;
@@ -35,8 +37,8 @@ pub(crate) struct HttpHandler {
 #[derive(Clone)]
 pub(crate) struct Server {
     pub(crate) http: Arc<ConnectionMap<HttpHandler>>,
-    pub(crate) allowed_key_fingerprints: Arc<FingerprintsResolver>,
-    pub(crate) address_delegator: Arc<AddressDelegator>,
+    pub(crate) fingerprints_validator: Arc<FingerprintsValidator>,
+    pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
     pub(crate) http_port: u16,
     pub(crate) https_port: u16,
 }
@@ -51,12 +53,12 @@ pub async fn entrypoint() -> anyhow::Result<()> {
 
     let http_connections = Arc::new(ConnectionMap::new());
     let fingerprints = Arc::new(
-        FingerprintsResolver::new(config.public_keys_directory.clone())
+        FingerprintsValidator::watch(config.public_keys_directory.clone())
             .await
             .with_context(|| "Error setting up public keys watcher")?,
     );
     let certificates = Arc::new(
-        CertificateResolver::new(config.certificates_directory.clone())
+        CertificateResolver::watch(config.certificates_directory.clone())
             .await
             .with_context(|| "Error setting up certificates watcher")?,
     );
@@ -124,11 +126,11 @@ pub async fn entrypoint() -> anyhow::Result<()> {
     let ssh_config = Arc::new(ssh_config);
     let mut sh = Server {
         http: http_connections,
-        allowed_key_fingerprints: fingerprints,
+        fingerprints_validator: fingerprints,
         http_port: config.http_port,
         https_port: config.https_port,
         address_delegator: Arc::new(AddressDelegator::new(
-            hickory_resolver::TokioAsyncResolver::tokio(Default::default(), Default::default()),
+            DnsResolver::new(),
             config.txt_record_prefix.trim_matches('.').to_string(),
             config.domain.trim_matches('.').to_string(),
             config.bind_any_host,

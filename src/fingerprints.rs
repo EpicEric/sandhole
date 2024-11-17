@@ -6,16 +6,19 @@ use std::{
 
 use notify::{Event, EventKind, INotifyWatcher, RecommendedWatcher, RecursiveMode, Watcher};
 use russh_keys::load_public_key;
-use tokio::{fs::read_dir, sync::watch};
+use tokio::{
+    fs::read_dir,
+    sync::{oneshot, watch},
+};
 
 #[derive(Debug)]
-pub(crate) struct FingerprintsResolver {
+pub(crate) struct FingerprintsValidator {
     pub(crate) fingerprints: Arc<RwLock<HashSet<String>>>,
     _watcher: INotifyWatcher,
 }
 
-impl FingerprintsResolver {
-    pub(crate) async fn new(directory: PathBuf) -> anyhow::Result<Self> {
+impl FingerprintsValidator {
+    pub(crate) async fn watch(directory: PathBuf) -> anyhow::Result<Self> {
         let fingerprints = Arc::new(RwLock::new(HashSet::new()));
         let (pubkeys_tx, mut pubkeys_rx) = watch::channel(());
         pubkeys_rx.mark_changed();
@@ -34,7 +37,9 @@ impl FingerprintsResolver {
         )?;
         watcher.watch(directory.as_path(), RecursiveMode::Recursive)?;
         let fingerprints_clone = Arc::clone(&fingerprints);
+        let (tx, rx) = oneshot::channel::<()>();
         tokio::spawn(async move {
+            let mut tx = Some(tx);
             while let Ok(_) = pubkeys_rx.changed().await {
                 // TO-DO: Improve set re-population according to different Notify.rs events
                 // (maybe create a separate HashMap to store "file name => fingerprint(s)" mappings...)
@@ -56,10 +61,12 @@ impl FingerprintsResolver {
                         }
                     }
                     *fingerprints_clone.write().unwrap() = set;
+                    tx.take().map(|tx| tx.send(()));
                 }
             }
         });
-        Ok(FingerprintsResolver {
+        rx.await.unwrap();
+        Ok(FingerprintsValidator {
             fingerprints,
             _watcher: watcher,
         })

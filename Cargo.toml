@@ -28,3 +28,6 @@ thiserror = "2.0.3"
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = "0.26.0"
 trie-rs = "0.4.2"
+
+[dev-dependencies]
+mockall = "0.13.0"
