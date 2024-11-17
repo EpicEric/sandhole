@@ -13,11 +13,19 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 Roughly in the order I intend to work on:
 
 - Testing
-- ACME for certificates
+  - `addressing.rs`: Mock DNS resolver and test address function; also simulate PRNG to see if results are deterministic.
+  - `http.rs`: Mock ConnectionMap and try out different combinations of requests.
+  - `ssh.rs`: Test different flows for SSH clients.
+  - `certificates.rs`: Test that it can correctly select certificates based on SNI.
+    - Maybe mock file system...?
+  - `fingerprints.rs`: Test that it can correctly authorize SSH keys.
+    - Maybe mock file system...?
+  - `lib.rs`: Integration tests...?
 - HTTPS redirection
-- Local port forwarding
-- Generic TCP forwarding
 - API-based password authentication
+- ACME for certificates
 - Admin interface through SSH
+- Generic TCP forwarding
+- Local port forwarding
 - Improve technical debts
 - And more

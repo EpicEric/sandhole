@@ -15,18 +15,18 @@ use tokio::sync::mpsc;
 
 const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 
-pub(crate) struct ConnectionMap(DashMap<String, Vec<(SocketAddr, HttpHandler)>>);
+pub(crate) struct ConnectionMap<H>(DashMap<String, Vec<(SocketAddr, H)>>);
 
-impl ConnectionMap {
+impl<H: Clone> ConnectionMap<H> {
     pub(crate) fn new() -> Self {
         ConnectionMap(DashMap::new())
     }
 
-    pub(crate) fn insert(&self, host: String, addr: SocketAddr, handler: HttpHandler) {
+    pub(crate) fn insert(&self, host: String, addr: SocketAddr, handler: H) {
         self.0.entry(host).or_default().push((addr, handler));
     }
 
-    pub(crate) fn get(&self, host: &str) -> Option<HttpHandler> {
+    pub(crate) fn get(&self, host: &str) -> Option<H> {
         let mut rng = rand::thread_rng();
         self.0.get(host).and_then(|handler| {
             handler
@@ -42,6 +42,38 @@ impl ConnectionMap {
             value.retain(|(address, _)| *address != addr);
             value.is_empty()
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ConnectionMap;
+
+    #[test]
+    fn connection_map_inserts_and_removes_one_handler() {
+        let map = ConnectionMap::<usize>::new();
+        map.insert("host".into(), "127.0.0.1:1".parse().unwrap(), 1);
+        assert_eq!(map.get("host"), Some(1));
+        map.remove("host".into(), "127.0.0.1:1".parse().unwrap());
+        assert_eq!(map.get("host"), None);
+    }
+
+    #[test]
+    fn connection_map_returns_none_for_missing_host() {
+        let map = ConnectionMap::<usize>::new();
+        map.insert("host".into(), "127.0.0.1:1".parse().unwrap(), 1);
+        map.insert("other".into(), "127.0.0.1:2".parse().unwrap(), 2);
+        assert_eq!(map.get("unknown"), None);
+    }
+
+    #[test]
+    fn connection_map_returns_one_of_several_handlers() {
+        let map = ConnectionMap::<usize>::new();
+        map.insert("host".into(), "127.0.0.1:1".parse().unwrap(), 1);
+        map.insert("host".into(), "127.0.0.1:2".parse().unwrap(), 2);
+        for _ in 0..100 {
+            assert!(matches!(map.get("host"), Some(1) | Some(2)));
+        }
     }
 }
 
@@ -76,7 +108,7 @@ fn http_log(
 pub async fn proxy_handler(
     mut request: Request<Incoming>,
     tcp_address: SocketAddr,
-    conn_manager: Arc<ConnectionMap>,
+    conn_manager: Arc<ConnectionMap<HttpHandler>>,
 ) -> anyhow::Result<Response<Body>> {
     let timer = Instant::now();
     let host = request

@@ -21,10 +21,8 @@ pub(crate) struct CertificateResolver {
     _watcher: INotifyWatcher,
 }
 
-impl TryFrom<PathBuf> for CertificateResolver {
-    type Error = anyhow::Error;
-
-    fn try_from(directory: PathBuf) -> Result<Self, Self::Error> {
+impl CertificateResolver {
+    pub(crate) async fn new(directory: PathBuf) -> anyhow::Result<Self> {
         let certificates = Arc::new(RwLock::new(TrieBuilder::new().build()));
         let (certificates_tx, mut certificates_rx) = watch::channel(());
         certificates_rx.mark_changed();

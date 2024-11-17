@@ -14,10 +14,8 @@ pub(crate) struct FingerprintsResolver {
     _watcher: INotifyWatcher,
 }
 
-impl TryFrom<PathBuf> for FingerprintsResolver {
-    type Error = anyhow::Error;
-
-    fn try_from(directory: PathBuf) -> Result<Self, Self::Error> {
+impl FingerprintsResolver {
+    pub(crate) async fn new(directory: PathBuf) -> anyhow::Result<Self> {
         let fingerprints = Arc::new(RwLock::new(HashSet::new()));
         let (pubkeys_tx, mut pubkeys_rx) = watch::channel(());
         pubkeys_rx.mark_changed();
@@ -37,7 +35,6 @@ impl TryFrom<PathBuf> for FingerprintsResolver {
         watcher.watch(directory.as_path(), RecursiveMode::Recursive)?;
         let fingerprints_clone = Arc::clone(&fingerprints);
         tokio::spawn(async move {
-            // Keep watcher alive in spawned task
             while let Ok(_) = pubkeys_rx.changed().await {
                 // TO-DO: Improve set re-population according to different Notify.rs events
                 // (maybe create a separate HashMap to store "file name => fingerprint(s)" mappings...)
@@ -66,5 +63,9 @@ impl TryFrom<PathBuf> for FingerprintsResolver {
             fingerprints,
             _watcher: watcher,
         })
+    }
+
+    pub(crate) fn is_key_allowed(&self, fingerprint: &str) -> bool {
+        self.fingerprints.read().unwrap().contains(fingerprint)
     }
 }

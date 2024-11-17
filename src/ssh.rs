@@ -1,6 +1,6 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
-use crate::{addressing::get_address, HttpHandler, Server, CONFIG};
+use crate::{addressing::AddressDelegator, HttpHandler, Server};
 
 use async_trait::async_trait;
 use russh::{
@@ -9,6 +9,18 @@ use russh::{
 };
 use russh_keys::key::PublicKey;
 use tokio::{io::AsyncWriteExt, sync::mpsc};
+
+pub(crate) struct ServerHandler {
+    pub(crate) peer: SocketAddr,
+    pub(crate) user: Option<String>,
+    pub(crate) key_fingerprint: Option<String>,
+    pub(crate) tx: mpsc::Sender<Vec<u8>>,
+    pub(crate) rx: Option<mpsc::Receiver<Vec<u8>>>,
+    pub(crate) hosts: Vec<String>,
+    pub(crate) addressing: HashMap<(String, u32), String>,
+    pub(crate) address_delegator: Arc<AddressDelegator>,
+    pub(crate) server: Server,
+}
 
 impl russh::server::Server for Server {
     type Handler = ServerHandler;
@@ -24,20 +36,10 @@ impl russh::server::Server for Server {
             rx: Some(rx),
             hosts: Vec::new(),
             addressing: HashMap::new(),
+            address_delegator: Arc::clone(&self.address_delegator),
             server: self.clone(),
         }
     }
-}
-
-pub(crate) struct ServerHandler {
-    pub(crate) peer: SocketAddr,
-    pub(crate) user: Option<String>,
-    pub(crate) key_fingerprint: Option<String>,
-    pub(crate) tx: mpsc::Sender<Vec<u8>>,
-    pub(crate) rx: Option<mpsc::Receiver<Vec<u8>>>,
-    pub(crate) hosts: Vec<String>,
-    pub(crate) addressing: HashMap<(String, u32), String>,
-    pub(crate) server: Server,
 }
 
 #[async_trait]
@@ -78,9 +80,7 @@ impl Handler for ServerHandler {
         if self
             .server
             .allowed_key_fingerprints
-            .read()
-            .unwrap()
-            .contains(&fingerprint)
+            .is_key_allowed(&fingerprint)
         {
             self.key_fingerprint = Some(fingerprint);
             self.user = Some(user.to_string());
@@ -120,8 +120,10 @@ impl Handler for ServerHandler {
         let address = address.to_string();
         let handle = session.handle();
         // Assign HTTP host through config
-        let assigned_host =
-            get_address(&address, &self.user, &self.key_fingerprint, &self.peer).await;
+        let assigned_host = self
+            .address_delegator
+            .get_address(&address, &self.user, &self.key_fingerprint, &self.peer)
+            .await;
         self.hosts.push(assigned_host.clone());
         self.addressing
             .insert((address, *port), assigned_host.clone());
@@ -131,7 +133,7 @@ impl Handler for ServerHandler {
                 format!(
                     "Serving HTTP on http://{}{}\r\n",
                     &assigned_host,
-                    match CONFIG.get().unwrap().http_port {
+                    match self.server.http_port {
                         80 => "".into(),
                         port => format!(":{}", port),
                     }
@@ -145,7 +147,7 @@ impl Handler for ServerHandler {
                 format!(
                     "Serving HTTPS on https://{}{}\r\n",
                     &assigned_host,
-                    match CONFIG.get().unwrap().https_port {
+                    match self.server.https_port {
                         443 => "".into(),
                         port => format!(":{}", port),
                     }
