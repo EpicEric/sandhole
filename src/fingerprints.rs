@@ -8,11 +8,12 @@ use std::{
 use crate::directory::watch_directory;
 use notify::RecommendedWatcher;
 use russh_keys::{key::PublicKey, load_public_key};
-use tokio::{fs::read_dir, sync::oneshot};
+use tokio::{fs::read_dir, sync::oneshot, task::JoinHandle};
 
 #[derive(Debug)]
 pub(crate) struct FingerprintsValidator {
     pub(crate) fingerprints: Arc<RwLock<HashSet<String>>>,
+    join_handle: JoinHandle<()>,
     _watcher: RecommendedWatcher,
 }
 
@@ -23,7 +24,7 @@ impl FingerprintsValidator {
         pubkeys_rx.mark_changed();
         let fingerprints_clone = Arc::clone(&fingerprints);
         let (init_tx, init_rx) = oneshot::channel::<()>();
-        tokio::spawn(async move {
+        let join_handle = tokio::spawn(async move {
             let mut init_tx = Some(init_tx);
             while let Ok(_) = pubkeys_rx.changed().await {
                 let mut set = HashSet::new();
@@ -61,6 +62,7 @@ impl FingerprintsValidator {
         init_rx.await.unwrap();
         Ok(FingerprintsValidator {
             fingerprints,
+            join_handle,
             _watcher: watcher,
         })
     }
@@ -70,6 +72,12 @@ impl FingerprintsValidator {
             .read()
             .unwrap()
             .contains(&key.fingerprint())
+    }
+}
+
+impl Drop for FingerprintsValidator {
+    fn drop(&mut self) {
+        self.join_handle.abort();
     }
 }
 
@@ -110,7 +118,7 @@ mod fingerprints_validator_tests {
     }
 
     #[tokio::test]
-    async fn disallows_unknown_keys() {
+    async fn forbids_unknown_keys() {
         let validator = FingerprintsValidator::watch(PUBLIC_KEYS_DIRECTORY.parse().unwrap())
             .await
             .unwrap();

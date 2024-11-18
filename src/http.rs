@@ -339,7 +339,6 @@ mod proxy_handler_tests {
         jh.abort();
     }
 
-    // TO-DO: Test WebSockets
     #[tokio::test]
     async fn returns_websocket_upgrade_for_existing_handler() {
         let conn_manager: Arc<ConnectionMap<Arc<MockHttpHandler<DuplexStream>>>> =

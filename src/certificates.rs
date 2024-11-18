@@ -13,13 +13,14 @@ use rustls::{
     server::{ClientHello, ParsedCertificate, ResolvesServerCert},
     sign::CertifiedKey,
 };
-use tokio::{fs::read_dir, sync::oneshot};
+use tokio::{fs::read_dir, sync::oneshot, task::JoinHandle};
 use trie_rs::map::{Trie, TrieBuilder};
 use webpki::{types::CertificateDer, EndEntityCert};
 
 #[derive(Debug)]
 pub(crate) struct CertificateResolver {
     pub(crate) certificates: Arc<RwLock<Trie<String, Arc<CertifiedKey>>>>,
+    join_handle: JoinHandle<()>,
     _watcher: RecommendedWatcher,
 }
 
@@ -31,7 +32,7 @@ impl CertificateResolver {
         certificates_rx.mark_changed();
         let certs_clone = Arc::clone(&certificates);
         let (init_tx, init_rx) = oneshot::channel::<()>();
-        tokio::spawn(async move {
+        let join_handle = tokio::spawn(async move {
             let mut init_tx = Some(init_tx);
             while let Ok(_) = certificates_rx.changed().await {
                 let mut builder = TrieBuilder::new();
@@ -114,37 +115,79 @@ impl CertificateResolver {
         init_rx.await.unwrap();
         Ok(CertificateResolver {
             certificates,
+            join_handle,
             _watcher: watcher,
         })
+    }
+
+    fn resolve_server_name(&self, server_name: &str) -> Option<Arc<CertifiedKey>> {
+        let Ok(dns_server_name) = DnsName::try_from(server_name).map(ServerName::DnsName) else {
+            return None;
+        };
+        self.certificates
+            .read()
+            .unwrap()
+            .common_prefix_search(
+                &server_name
+                    .split('.')
+                    .rev()
+                    .map(String::from)
+                    .collect::<Vec<_>>(),
+            )
+            .find(|(_, ck): &(String, &Arc<CertifiedKey>)| {
+                ck.end_entity_cert().is_ok_and(|eec| {
+                    ParsedCertificate::try_from(eec)
+                        .is_ok_and(|cert| verify_server_name(&cert, &dns_server_name).is_ok())
+                })
+            })
+            .map(|(_, ck)| Arc::clone(ck))
     }
 }
 
 impl ResolvesServerCert for CertificateResolver {
     fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
-        if let Some(server_name_str) = client_hello.server_name() {
-            let Ok(server_name) = DnsName::try_from(server_name_str).map(ServerName::DnsName)
-            else {
-                return None;
-            };
-            self.certificates
-                .read()
-                .unwrap()
-                .common_prefix_search(
-                    &server_name_str
-                        .split('.')
-                        .rev()
-                        .map(String::from)
-                        .collect::<Vec<_>>(),
-                )
-                .find(|(_, ck): &(String, &Arc<CertifiedKey>)| {
-                    ck.end_entity_cert().is_ok_and(|eec| {
-                        ParsedCertificate::try_from(eec)
-                            .is_ok_and(|cert| verify_server_name(&cert, &server_name).is_ok())
-                    })
-                })
-                .map(|(_, ck)| ck.clone())
-        } else {
-            None
+        client_hello
+            .server_name()
+            .and_then(|server_name| self.resolve_server_name(server_name))
+    }
+}
+
+impl Drop for CertificateResolver {
+    fn drop(&mut self) {
+        self.join_handle.abort();
+    }
+}
+
+#[cfg(test)]
+mod certificate_resolver_tests {
+    use super::CertificateResolver;
+
+    static CERTIFICATES_DIRECTORY: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/test_data/certificates");
+    static DOMAINS_FOOBAR: &[&str] = &["foobar.tld", "something.foobar.tld", "other.foobar.tld"];
+    static DOMAINS_LOCALHOST: &[&str] = &["localhost"];
+    static UNKNOWN_DOMAINS: &[&str] = &[".invalid.", "tld", "example.com", "too.nested.foobar.tld"];
+
+    #[tokio::test]
+    async fn allows_valid_domains() {
+        let resolver = CertificateResolver::watch(CERTIFICATES_DIRECTORY.parse().unwrap())
+            .await
+            .unwrap();
+        for domain in DOMAINS_FOOBAR {
+            assert!(resolver.resolve_server_name(domain).is_some());
+        }
+        for domain in DOMAINS_LOCALHOST {
+            assert!(resolver.resolve_server_name(domain).is_some());
+        }
+    }
+
+    #[tokio::test]
+    async fn forbids_invalid_domains() {
+        let resolver = CertificateResolver::watch(CERTIFICATES_DIRECTORY.parse().unwrap())
+            .await
+            .unwrap();
+        for domain in UNKNOWN_DOMAINS {
+            assert!(resolver.resolve_server_name(domain).is_none());
         }
     }
 }
