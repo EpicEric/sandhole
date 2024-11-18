@@ -1,19 +1,32 @@
+use std::error::Error;
 use std::time::{Duration, Instant};
 use std::{net::SocketAddr, sync::Arc};
 
-use super::{error::ServerError, HttpHandler};
-use axum::body::Body;
+use super::error::ServerError;
+use async_trait::async_trait;
+use axum::body::Body as AxumBody;
 use axum::response::IntoResponse;
 use dashmap::DashMap;
+use hyper::body::Body;
 use hyper::header::{HOST, UPGRADE};
-use hyper::{body::Incoming, Response};
+use hyper::Response;
 use hyper::{Request, StatusCode};
 use hyper_util::rt::TokioIo;
+#[cfg(test)]
+use mockall::automock;
 use rand::seq::SliceRandom;
-use tokio::io::copy_bidirectional;
+use tokio::io::{copy_bidirectional, AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 
 const X_FORWARDED_FOR: &str = "X-Forwarded-For";
+const X_FORWARDED_HOST: &str = "X-Forwarded-Host";
+
+#[cfg_attr(test, automock)]
+#[async_trait]
+pub(crate) trait HttpHandler<T: Sync> {
+    fn log_channel(&self) -> mpsc::Sender<Vec<u8>>;
+    async fn tunneling_channel(&self) -> anyhow::Result<TokioIo<T>>;
+}
 
 pub(crate) struct ConnectionMap<H>(DashMap<String, Vec<(SocketAddr, H)>>);
 
@@ -46,11 +59,11 @@ impl<H: Clone> ConnectionMap<H> {
 }
 
 #[cfg(test)]
-mod tests {
+mod connection_map_tests {
     use super::ConnectionMap;
 
     #[test]
-    fn connection_map_inserts_and_removes_one_handler() {
+    fn inserts_and_removes_one_handler() {
         let map = ConnectionMap::<usize>::new();
         map.insert("host".into(), "127.0.0.1:1".parse().unwrap(), 1);
         assert_eq!(map.get("host"), Some(1));
@@ -59,7 +72,7 @@ mod tests {
     }
 
     #[test]
-    fn connection_map_returns_none_for_missing_host() {
+    fn returns_none_for_missing_host() {
         let map = ConnectionMap::<usize>::new();
         map.insert("host".into(), "127.0.0.1:1".parse().unwrap(), 1);
         map.insert("other".into(), "127.0.0.1:2".parse().unwrap(), 2);
@@ -67,13 +80,26 @@ mod tests {
     }
 
     #[test]
-    fn connection_map_returns_one_of_several_handlers() {
+    fn returns_one_of_several_handlers() {
         let map = ConnectionMap::<usize>::new();
         map.insert("host".into(), "127.0.0.1:1".parse().unwrap(), 1);
         map.insert("host".into(), "127.0.0.1:2".parse().unwrap(), 2);
-        for _ in 0..100 {
-            assert!(matches!(map.get("host"), Some(1) | Some(2)));
+        map.insert("host".into(), "127.0.0.1:3".parse().unwrap(), 3);
+        let mut results: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for _ in 0..10_000 {
+            let map_item = map.get("host");
+            match map_item {
+                Some(key @ 1) | Some(key @ 2) | Some(key @ 3) => {
+                    *results.entry(key).or_default() += 1;
+                }
+                unknown => panic!("Unexpected {:?}", unknown),
+            }
         }
+        assert_eq!(results.len(), 3);
+        assert_eq!(
+            results.into_iter().fold(0usize, |acc, (_, i)| acc + i),
+            10_000
+        );
     }
 }
 
@@ -102,14 +128,22 @@ fn http_log(
         pretty_duration::pretty_duration(&elapsed_time, None)
     );
     print!("{}", line);
+    // TO-DO: Check from config if we should log back to client
     let _ = tx.try_send(line.into_bytes());
 }
 
-pub async fn proxy_handler(
-    mut request: Request<Incoming>,
+pub(crate) async fn proxy_handler<B, H, T>(
+    mut request: Request<B>,
     tcp_address: SocketAddr,
-    conn_manager: Arc<ConnectionMap<HttpHandler>>,
-) -> anyhow::Result<Response<Body>> {
+    conn_manager: Arc<ConnectionMap<Arc<H>>>,
+) -> anyhow::Result<Response<AxumBody>>
+where
+    H: HttpHandler<T>,
+    T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    B: Body + Send + 'static,
+    <B as Body>::Data: Send + Sync + 'static,
+    <B as Body>::Error: Error + Send + Sync + 'static,
+{
     let timer = Instant::now();
     let host = request
         .headers()
@@ -120,25 +154,19 @@ pub async fn proxy_handler(
         .next()
         .ok_or(ServerError::InvalidHostHeader)?
         .to_owned();
-    let Some(HttpHandler {
-        handle,
-        address,
-        port,
-        tx,
-    }) = conn_manager.get(&host)
-    else {
+    let Some(handler) = conn_manager.get(&host) else {
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
     request.headers_mut().insert(
         X_FORWARDED_FOR,
         tcp_address.ip().to_string().parse().unwrap(),
     );
+    request
+        .headers_mut()
+        .insert(X_FORWARDED_HOST, host.parse().unwrap());
 
-    let channel = handle
-        .channel_open_forwarded_tcpip(address, port as u32, "1.2.3.4", 1234)
-        .await?
-        .into_stream();
-    let io = TokioIo::new(channel);
+    let io = handler.tunneling_channel().await?;
+    let tx = handler.log_channel();
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
 
     let method = request.method().to_string();
@@ -191,5 +219,195 @@ pub async fn proxy_handler(
                 _ => Ok(response.into_response()),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod proxy_handler_tests {
+    use bytes::Bytes;
+    use futures_util::StreamExt;
+    use http_body_util::Empty;
+    use hyper::{body::Incoming, service::service_fn, HeaderMap, Request, StatusCode};
+    use hyper_util::rt::TokioIo;
+    use std::sync::Arc;
+    use tokio::{io::DuplexStream, sync::mpsc};
+    use tokio_tungstenite::client_async;
+    use tower::Service;
+
+    use super::{proxy_handler, ConnectionMap, MockHttpHandler};
+
+    #[tokio::test]
+    async fn errors_on_missing_host_header() {
+        let conn_manager: Arc<ConnectionMap<Arc<MockHttpHandler<DuplexStream>>>> =
+            Arc::new(ConnectionMap::new());
+        let request = Request::builder()
+            .method("GET")
+            .uri("/index.html")
+            .body(Empty::<Bytes>::new())
+            .unwrap();
+        let response = proxy_handler(
+            request,
+            "127.0.0.1:12345".parse().unwrap(),
+            Arc::clone(&conn_manager),
+        )
+        .await;
+        assert!(response.is_err());
+    }
+
+    #[tokio::test]
+    async fn returns_not_found_on_missing_handler() {
+        let conn_manager: Arc<ConnectionMap<Arc<MockHttpHandler<DuplexStream>>>> =
+            Arc::new(ConnectionMap::new());
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://no.handler/index.html")
+            .header("host", "no.handler")
+            .body(Empty::<Bytes>::new())
+            .unwrap();
+        dbg!(&request);
+        let response = proxy_handler(
+            request,
+            "127.0.0.1:12345".parse().unwrap(),
+            Arc::clone(&conn_manager),
+        )
+        .await;
+        assert!(response.is_ok());
+        let response = response.unwrap();
+        assert_eq!(response.status(), hyper::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn returns_response_for_existing_handler() {
+        let conn_manager: Arc<ConnectionMap<Arc<MockHttpHandler<DuplexStream>>>> =
+            Arc::new(ConnectionMap::new());
+        let (server, handler) = tokio::io::duplex(1024);
+        let (logging_tx, logging_rx) = mpsc::channel::<Vec<u8>>(1);
+        let mut mock = MockHttpHandler::new();
+        mock.expect_log_channel()
+            .once()
+            .return_once(move || logging_tx);
+        mock.expect_tunneling_channel()
+            .once()
+            .return_once(move || Ok(TokioIo::new(handler)));
+        conn_manager.insert(
+            "with.handler".into(),
+            "127.0.0.1:12345".parse().unwrap(),
+            Arc::new(mock),
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("http://with.handler/api/endpoint")
+            .header("host", "with.handler")
+            .body(String::from("Hello world"))
+            .unwrap();
+        let router = axum::Router::new()
+            .route(
+                "/api/endpoint",
+                axum::routing::post(|headers: HeaderMap, body: String| async move {
+                    if headers.get("X-Forwarded-For").unwrap() == "127.0.0.1"
+                        && headers.get("X-Forwarded-Host").unwrap() == "with.handler"
+                        && body == "Hello world"
+                    {
+                        "Success."
+                    } else {
+                        "Failure."
+                    }
+                }),
+            )
+            .into_service();
+        let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
+        let jh = tokio::spawn(async move {
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection(TokioIo::new(server), router_service)
+                .await
+                .expect("Invalid request");
+        });
+        assert!(logging_rx.is_empty());
+        let response = proxy_handler(
+            request,
+            "127.0.0.1:12345".parse().unwrap(),
+            Arc::clone(&conn_manager),
+        )
+        .await;
+        assert!(!logging_rx.is_empty());
+        assert!(response.is_ok());
+        let response = response.unwrap();
+        assert_eq!(response.status(), hyper::StatusCode::OK);
+        let body = response.into_body();
+        let body = axum::body::to_bytes(body, 32).await.unwrap();
+        assert_eq!(body, bytes::Bytes::from("Success."));
+        jh.abort();
+    }
+
+    // TO-DO: Test WebSockets
+    #[tokio::test]
+    async fn returns_websocket_upgrade_for_existing_handler() {
+        let conn_manager: Arc<ConnectionMap<Arc<MockHttpHandler<DuplexStream>>>> =
+            Arc::new(ConnectionMap::new());
+        let (server, handler) = tokio::io::duplex(1024);
+        let (logging_tx, logging_rx) = mpsc::channel::<Vec<u8>>(1);
+        let mut mock = MockHttpHandler::new();
+        mock.expect_log_channel()
+            .once()
+            .return_once(move || logging_tx);
+        mock.expect_tunneling_channel()
+            .once()
+            .return_once(move || Ok(TokioIo::new(handler)));
+        conn_manager.insert(
+            "with.websocket".into(),
+            "127.0.0.1:12345".parse().unwrap(),
+            Arc::new(mock),
+        );
+        let (socket, stream) = tokio::io::duplex(1024);
+        let router = axum::Router::new()
+            .route(
+                "/ws",
+                axum::routing::any(|ws: axum::extract::WebSocketUpgrade| async move {
+                    ws.on_upgrade(|mut socket| async move {
+                        let _ = socket
+                            .send(axum::extract::ws::Message::Text("Success.".into()))
+                            .await;
+                        let _ = socket.close().await;
+                    })
+                }),
+            )
+            .into_service();
+        let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
+        let jh = tokio::spawn(async move {
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection_with_upgrades(TokioIo::new(server), router_service)
+                .await
+                .expect("Invalid request");
+        });
+        assert!(logging_rx.is_empty());
+        let proxy_service = service_fn(move |request| {
+            proxy_handler(
+                request,
+                "127.0.0.1:12345".parse().unwrap(),
+                Arc::clone(&conn_manager),
+            )
+        });
+        let jh2 = tokio::spawn(async move {
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection_with_upgrades(TokioIo::new(socket), proxy_service)
+                .await
+                .expect("Invalid request");
+        });
+        let (mut websocket, response) = client_async("ws://with.websocket/ws", stream)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+        assert_eq!(
+            websocket
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+                .into_text()
+                .unwrap(),
+            "Success."
+        );
+        jh.abort();
+        jh2.abort();
     }
 }

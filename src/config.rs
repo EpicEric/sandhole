@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::OnceLock};
+use std::path::PathBuf;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RandomSubdomainSeed {
@@ -23,5 +23,3 @@ pub struct ApplicationConfig {
     pub random_subdomain_seed: Option<RandomSubdomainSeed>,
     pub txt_record_prefix: String,
 }
-
-pub static CONFIG: OnceLock<ApplicationConfig> = OnceLock::new();

@@ -190,10 +190,13 @@ impl<R: Resolver> AddressDelegator<R> {
         // TODO: Use more entropy than 64 bits
         let mut rng = ChaCha20Rng::seed_from_u64(hasher.finish());
         String::from_utf8(
-            "0123456789abcdefghijklmnopqrstuvwxyz"
-                .as_bytes()
-                .choose_multiple(&mut rng, 6)
-                .copied()
+            (0..6)
+                .flat_map(|_| {
+                    "0123456789abcdefghijklmnopqrstuvwxyz"
+                        .as_bytes()
+                        .choose(&mut rng)
+                        .copied()
+                })
                 .collect(),
         )
         .unwrap()
@@ -201,13 +204,13 @@ impl<R: Resolver> AddressDelegator<R> {
 }
 
 #[cfg(test)]
-mod tests {
+mod address_delegator_tests {
     use super::{AddressDelegator, MockResolver};
     use mockall::predicate::*;
     use std::net::SocketAddr;
 
     #[tokio::test]
-    async fn address_delegator_returns_provided_address_when_binding_any_host() {
+    async fn returns_provided_address_when_binding_any_host() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(
@@ -230,7 +233,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn address_delegator_returns_provided_address_if_txt_record_matches_fingerprint() {
+    async fn returns_provided_address_if_txt_record_matches_fingerprint() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .with(eq("_some_prefix"), eq("some.address"), eq("fingerprint1"))
@@ -255,7 +258,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn address_delegator_returns_provided_subdomain_if_no_fingerprint() {
+    async fn returns_provided_subdomain_if_no_fingerprint() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .never()
@@ -280,7 +283,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn address_delegator_returns_subdomain_if_no_txt_record_matches_fingerprint() {
+    async fn returns_subdomain_if_no_txt_record_matches_fingerprint() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .with(eq("_some_prefix"), eq("some.address"), eq("fingerprint1"))
@@ -305,7 +308,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn address_delegator_returns_subdomain_if_requested_subdomain_of_host_domain() {
+    async fn returns_subdomain_if_requested_subdomain_of_host_domain() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(
@@ -328,8 +331,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn address_delegator_returns_host_domain_if_address_equals_host_domain_and_has_fingerprint(
-    ) {
+    async fn returns_host_domain_if_address_equals_host_domain_and_has_fingerprint() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .once()
@@ -354,8 +356,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn address_delegator_returns_subdomain_if_address_equals_host_domain_and_doesnt_have_fingerprint(
-    ) {
+    async fn returns_subdomain_if_address_equals_host_domain_and_doesnt_have_fingerprint() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .once()
@@ -380,7 +381,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn address_delegator_returns_random_subdomain_if_invalid_address() {
+    async fn returns_random_subdomain_if_invalid_address() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(
@@ -404,7 +405,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn address_delegator_returns_unique_random_subdomains_if_forced() {
+    async fn returns_unique_random_subdomains_if_forced() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(
@@ -433,7 +434,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn address_delegator_returns_unique_random_subdomains_per_user_and_address_if_forced() {
+    async fn returns_unique_random_subdomains_per_user_and_address_if_forced() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(
@@ -479,11 +480,11 @@ mod tests {
         assert_eq!(address1_u1_a1, address2_u1_a1);
         assert_ne!(address1_u1_a1, address3_u2_a1);
         assert_ne!(address1_u1_a1, address4_u1_a2);
+        assert_ne!(address3_u2_a1, address4_u1_a2);
     }
 
     #[tokio::test]
-    async fn address_delegator_returns_unique_random_subdomains_per_fingerprint_and_address_if_forced(
-    ) {
+    async fn returns_unique_random_subdomains_per_fingerprint_and_address_if_forced() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(
@@ -529,10 +530,11 @@ mod tests {
         assert_eq!(address1_f1_a1, address2_f1_a1);
         assert_ne!(address1_f1_a1, address3_f2_a1);
         assert_ne!(address1_f1_a1, address4_f1_a2);
+        assert_ne!(address3_f2_a1, address4_f1_a2);
     }
 
     #[tokio::test]
-    async fn address_delegator_returns_unique_random_subdomains_per_socket_and_address_if_forced() {
+    async fn returns_unique_random_subdomains_per_socket_and_address_if_forced() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(
@@ -578,5 +580,6 @@ mod tests {
         assert_eq!(address1_s1_a1, address2_s1_a1);
         assert_ne!(address1_s1_a1, address3_s2_a1);
         assert_ne!(address1_s1_a1, address4_s1_a2);
+        assert_ne!(address3_s2_a1, address4_s1_a2);
     }
 }

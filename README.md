@@ -13,12 +13,11 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 Roughly in the order I intend to work on:
 
 - Testing
-  - `http.rs`: Mock ConnectionMap and try out different combinations of requests.
-  - `ssh.rs`: Test different flows for SSH clients.
   - `certificates.rs`: Test that it can correctly select certificates based on SNI.
     - Maybe mock file system...?
   - `fingerprints.rs`: Test that it can correctly authorize SSH keys.
     - Maybe mock file system...?
+  - `ssh.rs`: Test different flows for SSH clients.
   - `lib.rs`: Integration tests...?
 - HTTPS redirection
 - API-based password authentication
@@ -26,5 +25,6 @@ Roughly in the order I intend to work on:
 - Admin interface through SSH
 - Generic TCP forwarding
 - Local port forwarding
+- Use env_logger
 - Improve technical debts
 - And more

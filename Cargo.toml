@@ -30,4 +30,8 @@ tokio-rustls = "0.26.0"
 trie-rs = "0.4.2"
 
 [dev-dependencies]
+axum = { version = "0.7.7", features = ["ws"] }
+futures-util = "0.3.31"
 mockall = "0.13.0"
+tokio-tungstenite = "0.24.0"
+tower = "0.5.1"

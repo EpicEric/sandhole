@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{command, Parser, ValueEnum};
 use sandhole::{
-    config::{ApplicationConfig, RandomSubdomainSeed as Seed, CONFIG},
+    config::{ApplicationConfig, RandomSubdomainSeed as Seed},
     entrypoint,
 };
 
@@ -91,22 +91,20 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    CONFIG
-        .set(ApplicationConfig {
-            domain: args.domain,
-            public_keys_directory: args.public_keys_directory,
-            certificates_directory: args.certificates_directory,
-            private_key_file: args.private_key_file,
-            private_key_password: args.private_key_password,
-            listen_address: args.listen_address,
-            ssh_port: args.ssh_port,
-            http_port: args.http_port,
-            https_port: args.https_port,
-            bind_any_host: args.bind_any_host,
-            force_random_subdomains: args.force_random_subdomains,
-            random_subdomain_seed: args.random_subdomain_seed.map(Into::into),
-            txt_record_prefix: args.txt_record_prefix,
-        })
-        .unwrap();
-    entrypoint().await
+    let config = ApplicationConfig {
+        domain: args.domain,
+        public_keys_directory: args.public_keys_directory,
+        certificates_directory: args.certificates_directory,
+        private_key_file: args.private_key_file,
+        private_key_password: args.private_key_password,
+        listen_address: args.listen_address,
+        ssh_port: args.ssh_port,
+        http_port: args.http_port,
+        https_port: args.https_port,
+        bind_any_host: args.bind_any_host,
+        force_random_subdomains: args.force_random_subdomains,
+        random_subdomain_seed: args.random_subdomain_seed.map(Into::into),
+        txt_record_prefix: args.txt_record_prefix,
+    };
+    entrypoint(config).await
 }

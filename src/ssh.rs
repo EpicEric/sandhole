@@ -2,16 +2,57 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use crate::{
     addressing::{AddressDelegator, DnsResolver},
-    HttpHandler, Server,
+    http::HttpHandler,
+    SandholeServer,
 };
 
 use async_trait::async_trait;
+use hyper_util::rt::TokioIo;
 use russh::{
     server::{Auth, Handler, Msg, Session},
-    Channel, ChannelId, MethodSet,
+    Channel, ChannelId, ChannelStream, MethodSet,
 };
 use russh_keys::key::PublicKey;
 use tokio::{io::AsyncWriteExt, sync::mpsc};
+
+#[derive(Clone)]
+pub(crate) struct SshTunnelHandler {
+    handle: russh::server::Handle,
+    tx: mpsc::Sender<Vec<u8>>,
+    address: String,
+    port: u32,
+}
+
+impl SshTunnelHandler {
+    pub(crate) fn new(
+        handle: russh::server::Handle,
+        tx: mpsc::Sender<Vec<u8>>,
+        address: String,
+        port: u32,
+    ) -> Self {
+        SshTunnelHandler {
+            handle,
+            address,
+            port,
+            tx,
+        }
+    }
+}
+
+#[async_trait]
+impl HttpHandler<ChannelStream<Msg>> for SshTunnelHandler {
+    fn log_channel(&self) -> mpsc::Sender<Vec<u8>> {
+        self.tx.clone()
+    }
+    async fn tunneling_channel(&self) -> anyhow::Result<TokioIo<ChannelStream<Msg>>> {
+        let channel = self
+            .handle
+            .channel_open_forwarded_tcpip(self.address.clone(), self.port, "1.2.3.4", 1234)
+            .await?
+            .into_stream();
+        Ok(TokioIo::new(channel))
+    }
+}
 
 pub(crate) struct ServerHandler {
     pub(crate) peer: SocketAddr,
@@ -22,10 +63,10 @@ pub(crate) struct ServerHandler {
     pub(crate) hosts: Vec<String>,
     pub(crate) addressing: HashMap<(String, u32), String>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
-    pub(crate) server: Server,
+    pub(crate) server: SandholeServer,
 }
 
-impl russh::server::Server for Server {
+impl russh::server::Server for SandholeServer {
     type Handler = ServerHandler;
 
     fn new_client(&mut self, peer_address: Option<SocketAddr>) -> ServerHandler {
@@ -161,12 +202,12 @@ impl Handler for ServerHandler {
         self.server.http.insert(
             assigned_host.clone(),
             self.peer,
-            HttpHandler {
+            Arc::new(SshTunnelHandler::new(
                 handle,
-                address: assigned_host,
-                tx: self.tx.clone(),
-                port: *port as u16,
-            },
+                self.tx.clone(),
+                assigned_host,
+                *port,
+            )),
         );
         // Send connection info through data channel
         Ok(true)

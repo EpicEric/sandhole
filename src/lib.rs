@@ -2,14 +2,15 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use certificates::CertificateResolver;
-use config::CONFIG;
+use config::ApplicationConfig;
 use http::proxy_handler;
 use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
 use hyper_util::rt::TokioIo;
 use russh::server::{Config, Server as _};
 use russh_keys::decode_secret_key;
 use rustls::ServerConfig;
-use tokio::{fs, net::TcpListener, sync::mpsc};
+use ssh::SshTunnelHandler;
+use tokio::{fs, net::TcpListener};
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
@@ -27,24 +28,15 @@ mod http;
 mod ssh;
 
 #[derive(Clone)]
-pub(crate) struct HttpHandler {
-    pub(crate) handle: russh::server::Handle,
-    pub(crate) address: String,
-    pub(crate) port: u16,
-    pub(crate) tx: mpsc::Sender<Vec<u8>>,
-}
-
-#[derive(Clone)]
-pub(crate) struct Server {
-    pub(crate) http: Arc<ConnectionMap<HttpHandler>>,
+pub(crate) struct SandholeServer {
+    pub(crate) http: Arc<ConnectionMap<Arc<SshTunnelHandler>>>,
     pub(crate) fingerprints_validator: Arc<FingerprintsValidator>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
     pub(crate) http_port: u16,
     pub(crate) https_port: u16,
 }
 
-pub async fn entrypoint() -> anyhow::Result<()> {
-    let config = CONFIG.get().unwrap();
+pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let key = fs::read_to_string(config.private_key_file.as_path())
         .await
         .with_context(|| "Error reading secret key")?;
@@ -69,10 +61,10 @@ pub async fn entrypoint() -> anyhow::Result<()> {
     let http_map = Arc::clone(&http_connections);
     tokio::spawn(async move {
         loop {
-            let map_clone = http_map.clone();
+            let map_clone = Arc::clone(&http_map);
             let (stream, address) = http_listener.accept().await.unwrap();
             let service = service_fn(move |req: Request<Incoming>| {
-                proxy_handler(req, address, map_clone.clone())
+                proxy_handler(req, address, Arc::clone(&map_clone))
             });
             let io = TokioIo::new(stream);
             tokio::spawn(async move {
@@ -94,11 +86,11 @@ pub async fn entrypoint() -> anyhow::Result<()> {
     let http_map = Arc::clone(&http_connections);
     tokio::spawn(async move {
         loop {
-            let map_clone = http_map.clone();
+            let map_clone = Arc::clone(&http_map);
             let acceptor = acceptor.clone();
             let (stream, address) = https_listener.accept().await.unwrap();
             let service = service_fn(move |req: Request<Incoming>| {
-                proxy_handler(req, address, map_clone.clone())
+                proxy_handler(req, address, Arc::clone(&map_clone))
             });
             let io = match acceptor.accept(stream).await {
                 Ok(stream) => TokioIo::new(stream),
@@ -124,7 +116,7 @@ pub async fn entrypoint() -> anyhow::Result<()> {
         ..Default::default()
     };
     let ssh_config = Arc::new(ssh_config);
-    let mut sh = Server {
+    let mut sandhole = SandholeServer {
         http: http_connections,
         fingerprints_validator: fingerprints,
         http_port: config.http_port,
@@ -138,7 +130,9 @@ pub async fn entrypoint() -> anyhow::Result<()> {
             config.random_subdomain_seed,
         )),
     };
-    sh.run_on_address(ssh_config, (config.listen_address.clone(), config.ssh_port))
+    println!("sandhole is now running.");
+    sandhole
+        .run_on_address(ssh_config, (config.listen_address.clone(), config.ssh_port))
         .await
         .with_context(|| "Error listening to SSH port and address")?;
     Ok(())
