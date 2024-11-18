@@ -13,6 +13,7 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 Roughly in the order I intend to work on:
 
 - Option to time out responses that take too long
+- Option to verify that binding hostnames are valid in public suffix list
 - HTTPS redirection
 - API-based password authentication
 - ACME for certificates

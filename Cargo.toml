@@ -38,5 +38,6 @@ trie-rs = "0.4.2"
 axum = { version = "0.7.7", features = ["ws"] }
 futures-util = "0.3.31"
 mockall = "0.13.0"
+regex = "1.11.1"
 tokio-tungstenite = "0.24.0"
 tower = "0.5.1"

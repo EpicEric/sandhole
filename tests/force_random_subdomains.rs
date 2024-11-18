@@ -1,11 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use axum::{
-    extract::{Path, Request},
-    routing::get,
-    Router,
-};
+use axum::{extract::Request, routing::get, Router};
 use http_body_util::BodyExt;
 use hyper::{body::Incoming, service::service_fn, StatusCode};
 use hyper_util::{
@@ -30,7 +26,7 @@ use tokio_rustls::TlsConnector;
 use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn bind_any_host() {
+async fn force_random_subdomains() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),
@@ -45,7 +41,7 @@ async fn bind_any_host() {
         ssh_port: 18022,
         http_port: 18080,
         https_port: 18443,
-        bind_any_host: true,
+        bind_any_host: false,
         force_random_subdomains: true,
         random_subdomain_seed: None,
         txt_record_prefix: "_sandhole".into(),
@@ -69,10 +65,7 @@ async fn bind_any_host() {
     .expect("Missing file key1");
     let ssh_config = Arc::new(russh::client::Config::default());
     let ssh_client = SshClient {
-        router: Router::new().route(
-            "/:user",
-            get(|Path(user): Path<String>| async move { format!("Hello, {user}!") }),
-        ),
+        router: Router::new().route("/", get(|| async move { format!("This was a triumph.") })),
     };
     let mut session = russh::client::connect(ssh_config, "127.0.0.1:18022", ssh_client)
         .await
@@ -81,14 +74,40 @@ async fn bind_any_host() {
         .authenticate_publickey("user", Arc::new(key))
         .await
         .expect("SSH authentication failed"));
-    // let channel = session
-    //     .channel_open_session()
-    //     .await
-    //     .expect("channel_open_session failed");
+    let mut channel = session
+        .channel_open_session()
+        .await
+        .expect("channel_open_session failed");
     session
-        .tcpip_forward("test.foobar.tld", 80)
+        .tcpip_forward("some.random.hostname", 80)
         .await
         .expect("tcpip_forward failed");
+    let regex = regex::Regex::new(r"https://(\S+)").unwrap();
+    let (address, hostname) = async move {
+        while let Some(message) = channel.wait().await {
+            match message {
+                russh::ChannelMsg::Data { data } => {
+                    let data =
+                        String::from_utf8(data.to_vec()).expect("Invalid UTF-8 from message");
+                    if let Some(captures) = regex.captures(&data) {
+                        let address = captures.get(0).unwrap().as_str().to_string();
+                        let hostname = captures
+                            .get(1)
+                            .unwrap()
+                            .as_str()
+                            .split(':')
+                            .next()
+                            .unwrap()
+                            .to_string();
+                        return (address, hostname);
+                    }
+                }
+                message => panic!("Unexpected message {:?}", message),
+            }
+        }
+        panic!("Unexpected end of channel");
+    }
+    .await;
 
     // 3. Connect to the HTTPS port of our proxy
     let mut root_store = RootCertStore::empty();
@@ -110,7 +129,7 @@ async fn bind_any_host() {
         .await
         .expect("TCP connection failed");
     let tls_stream = connector
-        .connect("test.foobar.tld".try_into().unwrap(), tcp_stream)
+        .connect(hostname.clone().try_into().unwrap(), tcp_stream)
         .await
         .unwrap();
     let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls_stream))
@@ -123,8 +142,8 @@ async fn bind_any_host() {
     });
     let request = Request::builder()
         .method("GET")
-        .uri("https://test.foobar.tld:18443/world")
-        .header("host", "test.foobar.tld")
+        .uri(address)
+        .header("host", hostname)
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();
     let Ok(response) = timeout(Duration::from_secs(5), async move {
@@ -148,7 +167,7 @@ async fn bind_any_host() {
             .into(),
     )
     .expect("Invalid response body");
-    assert_eq!(response_body, "Hello, world!");
+    assert_eq!(response_body, "This was a triumph.");
 }
 
 struct SshClient {

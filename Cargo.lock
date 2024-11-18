@@ -2585,6 +2585,7 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rand_seeder",
+ "regex",
  "russh",
  "russh-keys",
  "rustls",
