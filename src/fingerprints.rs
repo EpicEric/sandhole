@@ -89,7 +89,7 @@ mod fingerprints_validator_tests {
     use russh_keys::{key::PublicKey, parse_public_key_base64};
 
     static PUBLIC_KEYS_DIRECTORY: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/test_data/public_keys");
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/public_keys");
     static KEY_ONE: LazyLock<PublicKey> = LazyLock::new(|| {
         parse_public_key_base64(
             "AAAAC3NzaC1lZDI1NTE5AAAAIMYVfXHTqf3/0W8ZQ/I8zmMirvmosV78n1qtYgVQX58W",

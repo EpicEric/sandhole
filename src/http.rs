@@ -5,7 +5,7 @@ use std::{net::SocketAddr, sync::Arc};
 use super::error::ServerError;
 use async_trait::async_trait;
 use axum::body::Body as AxumBody;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Redirect};
 use dashmap::DashMap;
 use hyper::body::Body;
 use hyper::header::{HOST, UPGRADE};
@@ -136,6 +136,7 @@ pub(crate) async fn proxy_handler<B, H, T>(
     mut request: Request<B>,
     tcp_address: SocketAddr,
     conn_manager: Arc<ConnectionMap<Arc<H>>>,
+    domain_redirect: Arc<(String, String)>,
 ) -> anyhow::Result<Response<AxumBody>>
 where
     H: HttpHandler<T>,
@@ -155,6 +156,9 @@ where
         .ok_or(ServerError::InvalidHostHeader)?
         .to_owned();
     let Some(handler) = conn_manager.get(&host) else {
+        if &domain_redirect.0 == &host {
+            return Ok(Redirect::to(&domain_redirect.1).into_response());
+        }
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
     request.headers_mut().insert(
@@ -249,6 +253,7 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
+            Arc::new(("main.domain".into(), "https://example.com".into())),
         )
         .await;
         assert!(response.is_err());
@@ -264,16 +269,42 @@ mod proxy_handler_tests {
             .header("host", "no.handler")
             .body(Empty::<Bytes>::new())
             .unwrap();
-        dbg!(&request);
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
+            Arc::new(("main.domain".into(), "https://example.com".into())),
         )
         .await;
         assert!(response.is_ok());
         let response = response.unwrap();
         assert_eq!(response.status(), hyper::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn returns_redirect_for_root_domain_and_missing_handler() {
+        let conn_manager: Arc<ConnectionMap<Arc<MockHttpHandler<DuplexStream>>>> =
+            Arc::new(ConnectionMap::new());
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://main.domain/index.html")
+            .header("host", "main.domain")
+            .body(Empty::<Bytes>::new())
+            .unwrap();
+        let response = proxy_handler(
+            request,
+            "127.0.0.1:12345".parse().unwrap(),
+            Arc::clone(&conn_manager),
+            Arc::new(("main.domain".into(), "https://example.com".into())),
+        )
+        .await;
+        assert!(response.is_ok());
+        let response = response.unwrap();
+        assert_eq!(response.status(), hyper::StatusCode::SEE_OTHER);
+        assert_eq!(
+            response.headers().get("location").unwrap(),
+            "https://example.com"
+        );
     }
 
     #[tokio::test]
@@ -327,6 +358,71 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
+            Arc::new(("main.domain".into(), "https://example.com".into())),
+        )
+        .await;
+        assert!(!logging_rx.is_empty());
+        assert!(response.is_ok());
+        let response = response.unwrap();
+        assert_eq!(response.status(), hyper::StatusCode::OK);
+        let body = response.into_body();
+        let body = axum::body::to_bytes(body, 32).await.unwrap();
+        assert_eq!(body, bytes::Bytes::from("Success."));
+        jh.abort();
+    }
+
+    #[tokio::test]
+    async fn returns_response_for_handler_of_root_domain() {
+        let conn_manager: Arc<ConnectionMap<Arc<MockHttpHandler<DuplexStream>>>> =
+            Arc::new(ConnectionMap::new());
+        let (server, handler) = tokio::io::duplex(1024);
+        let (logging_tx, logging_rx) = mpsc::channel::<Vec<u8>>(1);
+        let mut mock = MockHttpHandler::new();
+        mock.expect_log_channel()
+            .once()
+            .return_once(move || logging_tx);
+        mock.expect_tunneling_channel()
+            .once()
+            .return_once(move || Ok(TokioIo::new(handler)));
+        conn_manager.insert(
+            "root.domain".into(),
+            "127.0.0.1:12345".parse().unwrap(),
+            Arc::new(mock),
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("http://root.domain/test")
+            .header("host", "root.domain")
+            .body(String::from("My body"))
+            .unwrap();
+        let router = axum::Router::new()
+            .route(
+                "/test",
+                axum::routing::post(|headers: HeaderMap, body: String| async move {
+                    if headers.get("X-Forwarded-For").unwrap() == "192.168.0.1"
+                        && headers.get("X-Forwarded-Host").unwrap() == "root.domain"
+                        && body == "My body"
+                    {
+                        "Success."
+                    } else {
+                        "Failure."
+                    }
+                }),
+            )
+            .into_service();
+        let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
+        let jh = tokio::spawn(async move {
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection(TokioIo::new(server), router_service)
+                .await
+                .expect("Invalid request");
+        });
+        assert!(logging_rx.is_empty());
+        let response = proxy_handler(
+            request,
+            "192.168.0.1:12345".parse().unwrap(),
+            Arc::clone(&conn_manager),
+            Arc::new(("root.domain".into(), "https://this.is.ignored".into())),
         )
         .await;
         assert!(!logging_rx.is_empty());
@@ -384,6 +480,7 @@ mod proxy_handler_tests {
                 request,
                 "127.0.0.1:12345".parse().unwrap(),
                 Arc::clone(&conn_manager),
+                Arc::new(("main.domain".into(), "https://example.com".into())),
             )
         });
         let jh2 = tokio::spawn(async move {

@@ -10,6 +10,7 @@ pub enum RandomSubdomainSeed {
 #[derive(Debug)]
 pub struct ApplicationConfig {
     pub domain: String,
+    pub domain_redirect: String,
     pub public_keys_directory: PathBuf,
     pub certificates_directory: PathBuf,
     pub private_key_file: PathBuf,

@@ -1,14 +1,12 @@
-use std::{
-    hash::{DefaultHasher, Hash, Hasher},
-    net::SocketAddr,
-};
+use std::{hash::Hash, net::SocketAddr};
 
 use async_trait::async_trait;
 use hickory_resolver::TokioAsyncResolver;
 #[cfg(test)]
 use mockall::automock;
-use rand::{seq::SliceRandom, thread_rng, RngCore, SeedableRng};
+use rand::{seq::SliceRandom, thread_rng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
+use rand_seeder::SipHasher;
 use webpki::types::DnsName;
 
 use crate::config::RandomSubdomainSeed;
@@ -99,7 +97,14 @@ impl<R: Resolver> AddressDelegator<R> {
         socket_address: &SocketAddr,
     ) -> String {
         if self.bind_any_host {
-            return requested_address.to_string();
+            if DnsName::try_from(requested_address).is_ok() {
+                return requested_address.to_string();
+            } else if self.force_random_subdomains {
+                eprintln!(
+                    "Invalid address requested, defaulting to random: {}",
+                    requested_address
+                );
+            }
         }
         if !self.force_random_subdomains {
             if DnsName::try_from(requested_address).is_ok() {
@@ -150,7 +155,7 @@ impl<R: Resolver> AddressDelegator<R> {
         fingerprint: &Option<String>,
         socket_address: &SocketAddr,
     ) -> String {
-        let mut hasher = DefaultHasher::default();
+        let mut hasher = SipHasher::default();
         self.seed.hash(&mut hasher);
         let mut hash_initialized = false;
         if let Some(strategy) = self.random_subdomain_seed {
@@ -187,8 +192,9 @@ impl<R: Resolver> AddressDelegator<R> {
             thread_rng().next_u64().hash(&mut hasher);
         }
         // Generate random subdomain from hashed state
-        // TODO: Use more entropy than 64 bits
-        let mut rng = ChaCha20Rng::seed_from_u64(hasher.finish());
+        let mut seed: <ChaCha20Rng as SeedableRng>::Seed = Default::default();
+        hasher.into_rng().fill(&mut seed);
+        let mut rng = ChaCha20Rng::from_seed(seed);
         String::from_utf8(
             (0..6)
                 .flat_map(|_| {

@@ -163,8 +163,10 @@ mod certificate_resolver_tests {
     use super::CertificateResolver;
 
     static CERTIFICATES_DIRECTORY: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/test_data/certificates");
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates");
+    // Certificate is valid for "foobar.tld" and "*.foobar.tld"
     static DOMAINS_FOOBAR: &[&str] = &["foobar.tld", "something.foobar.tld", "other.foobar.tld"];
+    // Certificate is valid for "localhost"
     static DOMAINS_LOCALHOST: &[&str] = &["localhost"];
     static UNKNOWN_DOMAINS: &[&str] = &[".invalid.", "tld", "example.com", "too.nested.foobar.tld"];
 

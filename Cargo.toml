@@ -2,6 +2,11 @@
 name = "sandhole"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/EpicEric/sandhole"
+license = "MIT"
+authors = ["Eric Rodrigues Pires <eric@eric.dev.br>"]
+readme = "README.md"
+categories = ["network-programming", "web-programming", "authentication"]
 
 [dependencies]
 anyhow = "1.0.93"
@@ -14,12 +19,12 @@ dashmap = "6.1.0"
 hickory-resolver = "0.24.1"
 http-body-util = "0.1.2"
 hyper = { version = "1.5.0", features = ["full"] }
-hyper-util = { version = "0.1.10", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
 notify = "7.0.0"
 pretty-duration = "0.1.1"
 rand = "0.8.5"
 rand_chacha = "0.3.1"
-ratatui = "0.29.0"
+rand_seeder = "0.3.0"
 russh = "0.46.0"
 russh-keys = "0.46.0"
 rustls = "0.23.16"

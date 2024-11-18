@@ -154,7 +154,7 @@ impl Handler for ServerHandler {
         port: &mut u32,
         session: &mut Session,
     ) -> Result<bool, Self::Error> {
-        // TO-DO: Handle more than plain HTTP
+        // TO-DO: Handle more than HTTP
         if *port == 0 {
             *port = 80;
         } else if *port != 80 {
@@ -218,7 +218,7 @@ impl Handler for ServerHandler {
         port: u32,
         _session: &mut Session,
     ) -> Result<bool, Self::Error> {
-        // TO-DO: Handle more than plain HTTP
+        // TO-DO: Handle more than HTTP
         if port != 80 {
             return Err(russh::Error::RequestDenied);
         }

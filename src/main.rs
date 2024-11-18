@@ -5,6 +5,7 @@ use sandhole::{
     config::{ApplicationConfig, RandomSubdomainSeed as Seed},
     entrypoint,
 };
+use webpki::types::DnsName;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum RandomSubdomainSeed {
@@ -30,26 +31,35 @@ impl From<RandomSubdomainSeed> for Seed {
 #[command(version, about, long_about = None)]
 struct Args {
     /// The root domain of the application.
-    #[arg(long)]
+    #[arg(long, value_parser = validate_domain)]
     domain: String,
 
+    /// Where to redirect requests to the root domain.
+    #[arg(long, default_value_t = String::from(env!("CARGO_PKG_REPOSITORY")))]
+    domain_redirect: String,
+
     /// Directory containing authorized public keys.
+    /// Each file must contain exactly one key.
     #[arg(long, default_value_os = "./deploy/public_keys/")]
     public_keys_directory: PathBuf,
 
     /// Directory containing SSL certificates and keys.
-    /// Each sub-directory inside of this one must contain a certificate in a
+    /// Each sub-directory inside of this one must contain a certificate chain in a
     /// `fullchain.pem` file and its private key in a `privkey.pem` file.
     #[arg(long, default_value_os = "./deploy/certificates/")]
     certificates_directory: PathBuf,
 
     /// File path to the server's secret key.
-    #[arg(long, default_value_os = "./deploy/server_keys/ssh_key")]
+    #[arg(long, default_value_os = "./deploy/server_keys/ssh")]
     private_key_file: PathBuf,
 
     /// Password to use for the server's secret key, if any.
     #[arg(long)]
     private_key_password: Option<String>,
+
+    /// Whether to create a private key file if missing.
+    // #[arg(long, default_value_t = true)]
+    // create_private_key_file: bool,
 
     /// Address to listen for all client connections.
     #[arg(long, default_value_t = String::from("0.0.0.0"))]
@@ -76,15 +86,18 @@ struct Args {
     force_random_subdomains: bool,
 
     /// Which value to seed with when generating random subdomains, for determinism. This allows binding to the same
-    /// random address, as long as Sandhole isn't restarted, but can lead to collisions if misused.
+    /// random address until Sandhole is restarted.
+    ///
+    /// Beware that this can lead to collisions if misused!
     ///
     /// If unset, defaults to a random seed.
     #[arg(long, value_enum)]
     random_subdomain_seed: Option<RandomSubdomainSeed>,
 
     /// Prefix for TXT DNS records containing key fingerprints, for authorization to bind under a specific domain.
+    ///
     /// In other words, valid records will be of the form: `TXT PREFIX.CUSTOM_DOMAIN SHA256:...`
-    #[arg(long, default_value_t = String::from("_sandhole"))]
+    #[arg(long, default_value_t = String::from("_sandhole"), value_parser = validate_txt_record_prefix)]
     txt_record_prefix: String,
 }
 
@@ -93,6 +106,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = ApplicationConfig {
         domain: args.domain,
+        domain_redirect: args.domain_redirect,
         public_keys_directory: args.public_keys_directory,
         certificates_directory: args.certificates_directory,
         private_key_file: args.private_key_file,
@@ -107,4 +121,18 @@ async fn main() -> anyhow::Result<()> {
         txt_record_prefix: args.txt_record_prefix,
     };
     entrypoint(config).await
+}
+
+fn validate_domain(domain: &str) -> Result<String, String> {
+    DnsName::try_from(domain).map_err(|_| "invalid domain")?;
+    Ok(domain.to_string())
+}
+
+fn validate_txt_record_prefix(prefix: &str) -> Result<String, String> {
+    DnsName::try_from(prefix).map_err(|_| "invalid prefix")?;
+    if prefix.find('.').is_some() {
+        Err("prefix cannot contain period".into())
+    } else {
+        Ok(prefix.to_string())
+    }
 }

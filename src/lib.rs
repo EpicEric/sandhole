@@ -38,11 +38,33 @@ pub(crate) struct SandholeServer {
 }
 
 pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
-    let key = fs::read_to_string(config.private_key_file.as_path())
-        .await
-        .with_context(|| "Error reading secret key")?;
-    let key = decode_secret_key(&key, config.private_key_password.as_deref())
-        .with_context(|| "Error decoding secret key")?;
+    let key = match fs::read_to_string(config.private_key_file.as_path()).await {
+        Ok(key) => decode_secret_key(&key, config.private_key_password.as_deref())
+            .with_context(|| "Error decoding secret key")?,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Err(err).with_context(|| "Error reading secret key");
+            // TO-DO: Allow generating key file on startup
+            // println!("Key file not found. Creating...");
+            // let key = russh_keys::key::KeyPair::generate_ed25519();
+            // fs::create_dir_all(
+            //     config
+            //         .private_key_file
+            //         .as_path()
+            //         .parent()
+            //         .ok_or(ServerError::InvalidFilePath)
+            //         .with_context(|| "Error parsing secret key path")?,
+            // )
+            // .await
+            // .with_context(|| "Error creating secret key directory")?;
+            // fs::write(
+            //     config
+            //         .private_key_file
+            //         .as_path(),
+            //         ...
+            // )
+        }
+        Err(err) => return Err(err).with_context(|| "Error reading secret key"),
+    };
 
     let http_connections = Arc::new(ConnectionMap::new());
     let fingerprints = Arc::new(
@@ -63,17 +85,25 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         config.force_random_subdomains,
         config.random_subdomain_seed,
     ));
+    let domain_redirect = Arc::new((config.domain, config.domain_redirect));
 
     let http_listener = TcpListener::bind((config.listen_address.clone(), config.http_port))
         .await
         .with_context(|| "Error listening to HTTP port and address")?;
     let http_map = Arc::clone(&http_connections);
+    let redirect = Arc::clone(&domain_redirect);
     tokio::spawn(async move {
         loop {
-            let map_clone = Arc::clone(&http_map);
+            let http_map = Arc::clone(&http_map);
+            let domain_redirect = Arc::clone(&redirect);
             let (stream, address) = http_listener.accept().await.unwrap();
             let service = service_fn(move |req: Request<Incoming>| {
-                proxy_handler(req, address, Arc::clone(&map_clone))
+                proxy_handler(
+                    req,
+                    address,
+                    Arc::clone(&http_map),
+                    Arc::clone(&domain_redirect),
+                )
             });
             let io = TokioIo::new(stream);
             tokio::spawn(async move {
@@ -95,11 +125,17 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let http_map = Arc::clone(&http_connections);
     tokio::spawn(async move {
         loop {
-            let map_clone = Arc::clone(&http_map);
+            let http_map = Arc::clone(&http_map);
+            let domain_redirect = Arc::clone(&domain_redirect);
             let acceptor = acceptor.clone();
             let (stream, address) = https_listener.accept().await.unwrap();
             let service = service_fn(move |req: Request<Incoming>| {
-                proxy_handler(req, address, Arc::clone(&map_clone))
+                proxy_handler(
+                    req,
+                    address,
+                    Arc::clone(&http_map),
+                    Arc::clone(&domain_redirect),
+                )
             });
             let io = match acceptor.accept(stream).await {
                 Ok(stream) => TokioIo::new(stream),
