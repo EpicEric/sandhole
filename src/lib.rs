@@ -22,6 +22,7 @@ use crate::{
 mod addressing;
 mod certificates;
 pub mod config;
+mod directory;
 mod error;
 mod fingerprints;
 mod http;
@@ -54,6 +55,14 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             .await
             .with_context(|| "Error setting up certificates watcher")?,
     );
+    let addressing = Arc::new(AddressDelegator::new(
+        DnsResolver::new(),
+        config.txt_record_prefix.trim_matches('.').to_string(),
+        config.domain.trim_matches('.').to_string(),
+        config.bind_any_host,
+        config.force_random_subdomains,
+        config.random_subdomain_seed,
+    ));
 
     let http_listener = TcpListener::bind((config.listen_address.clone(), config.http_port))
         .await
@@ -119,16 +128,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let mut sandhole = SandholeServer {
         http: http_connections,
         fingerprints_validator: fingerprints,
+        address_delegator: addressing,
         http_port: config.http_port,
         https_port: config.https_port,
-        address_delegator: Arc::new(AddressDelegator::new(
-            DnsResolver::new(),
-            config.txt_record_prefix.trim_matches('.').to_string(),
-            config.domain.trim_matches('.').to_string(),
-            config.bind_any_host,
-            config.force_random_subdomains,
-            config.random_subdomain_seed,
-        )),
     };
     println!("sandhole is now running.");
     sandhole

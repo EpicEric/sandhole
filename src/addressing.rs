@@ -208,6 +208,7 @@ mod address_delegator_tests {
     use super::{AddressDelegator, MockResolver};
     use mockall::predicate::*;
     use std::net::SocketAddr;
+    use webpki::types::DnsName;
 
     #[tokio::test]
     async fn returns_provided_address_when_binding_any_host() {
@@ -230,6 +231,7 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "some.address");
+        assert!(DnsName::try_from(address).is_ok());
     }
 
     #[tokio::test]
@@ -255,6 +257,7 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "some.address");
+        assert!(DnsName::try_from(address).is_ok());
     }
 
     #[tokio::test]
@@ -280,6 +283,7 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "subdomain.root.tld");
+        assert!(DnsName::try_from(address).is_ok());
     }
 
     #[tokio::test]
@@ -305,6 +309,7 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "some.address.root.tld");
+        assert!(DnsName::try_from(address).is_ok());
     }
 
     #[tokio::test]
@@ -328,6 +333,7 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "prefix.root.tld");
+        assert!(DnsName::try_from(address).is_ok());
     }
 
     #[tokio::test]
@@ -353,6 +359,7 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "root.tld");
+        assert!(DnsName::try_from(address).is_ok());
     }
 
     #[tokio::test]
@@ -378,6 +385,7 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "root.tld.root.tld");
+        assert!(DnsName::try_from(address).is_ok());
     }
 
     #[tokio::test]
@@ -402,6 +410,7 @@ mod address_delegator_tests {
             .await;
         assert!(address.ends_with(".root.tld"));
         assert!(!address.trim_end_matches(".root.tld").is_empty());
+        assert!(DnsName::try_from(address).is_ok());
     }
 
     #[tokio::test]
@@ -428,6 +437,7 @@ mod address_delegator_tests {
                 .await;
             assert!(address.ends_with(".root.tld"));
             assert!(!address.trim_end_matches(".root.tld").is_empty());
+            assert!(DnsName::try_from(address.clone()).is_ok());
             assert!(!set.contains(&address));
             set.insert(address);
         }
@@ -481,6 +491,10 @@ mod address_delegator_tests {
         assert_ne!(address1_u1_a1, address3_u2_a1);
         assert_ne!(address1_u1_a1, address4_u1_a2);
         assert_ne!(address3_u2_a1, address4_u1_a2);
+        assert!(DnsName::try_from(address1_u1_a1).is_ok());
+        assert!(DnsName::try_from(address2_u1_a1).is_ok());
+        assert!(DnsName::try_from(address3_u2_a1).is_ok());
+        assert!(DnsName::try_from(address4_u1_a2).is_ok());
     }
 
     #[tokio::test]
@@ -531,6 +545,10 @@ mod address_delegator_tests {
         assert_ne!(address1_f1_a1, address3_f2_a1);
         assert_ne!(address1_f1_a1, address4_f1_a2);
         assert_ne!(address3_f2_a1, address4_f1_a2);
+        assert!(DnsName::try_from(address1_f1_a1).is_ok());
+        assert!(DnsName::try_from(address2_f1_a1).is_ok());
+        assert!(DnsName::try_from(address3_f2_a1).is_ok());
+        assert!(DnsName::try_from(address4_f1_a2).is_ok());
     }
 
     #[tokio::test]
@@ -581,5 +599,9 @@ mod address_delegator_tests {
         assert_ne!(address1_s1_a1, address3_s2_a1);
         assert_ne!(address1_s1_a1, address4_s1_a2);
         assert_ne!(address3_s2_a1, address4_s1_a2);
+        assert!(DnsName::try_from(address1_s1_a1).is_ok());
+        assert!(DnsName::try_from(address2_s1_a1).is_ok());
+        assert!(DnsName::try_from(address3_s2_a1).is_ok());
+        assert!(DnsName::try_from(address4_s1_a2).is_ok());
     }
 }

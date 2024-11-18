@@ -1,9 +1,11 @@
 use std::{
     path::PathBuf,
     sync::{Arc, RwLock},
+    time::Duration,
 };
 
-use notify::{Event, EventKind, INotifyWatcher, RecommendedWatcher, RecursiveMode, Watcher};
+use crate::directory::watch_directory;
+use notify::RecommendedWatcher;
 use rustls::{
     client::verify_server_name,
     crypto::aws_lc_rs::sign::any_supported_type,
@@ -11,105 +13,105 @@ use rustls::{
     server::{ClientHello, ParsedCertificate, ResolvesServerCert},
     sign::CertifiedKey,
 };
-use tokio::{
-    fs::read_dir,
-    sync::{oneshot, watch},
-};
+use tokio::{fs::read_dir, sync::oneshot};
 use trie_rs::map::{Trie, TrieBuilder};
 use webpki::{types::CertificateDer, EndEntityCert};
 
 #[derive(Debug)]
 pub(crate) struct CertificateResolver {
     pub(crate) certificates: Arc<RwLock<Trie<String, Arc<CertifiedKey>>>>,
-    _watcher: INotifyWatcher,
+    _watcher: RecommendedWatcher,
 }
 
 impl CertificateResolver {
     pub(crate) async fn watch(directory: PathBuf) -> anyhow::Result<Self> {
         let certificates = Arc::new(RwLock::new(TrieBuilder::new().build()));
-        let (certificates_tx, mut certificates_rx) = watch::channel(());
+        let (watcher, mut certificates_rx) =
+            watch_directory::<RecommendedWatcher>(directory.as_path())?;
         certificates_rx.mark_changed();
-        let mut watcher = RecommendedWatcher::new(
-            move |res: notify::Result<Event>| {
-                if let Ok(res) = res {
-                    match res.kind {
-                        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
-                            certificates_tx.send_replace(());
-                        }
-                        _ => (),
-                    }
-                };
-            },
-            notify::Config::default(),
-        )?;
-        watcher.watch(directory.as_path(), RecursiveMode::Recursive)?;
         let certs_clone = Arc::clone(&certificates);
-        let (tx, rx) = oneshot::channel::<()>();
+        let (init_tx, init_rx) = oneshot::channel::<()>();
         tokio::spawn(async move {
-            let mut tx = Some(tx);
+            let mut init_tx = Some(init_tx);
             while let Ok(_) = certificates_rx.changed().await {
                 let mut builder = TrieBuilder::new();
-                if let Ok(mut read_dir) = read_dir(directory.as_path()).await {
-                    while let Ok(Some(entry)) = read_dir.next_entry().await {
-                        if entry
-                            .file_type()
-                            .await
-                            .is_ok_and(|filetype| filetype.is_dir())
-                        {
-                            let path = entry.path();
-                            let Ok(Ok(Ok(cert))) = tokio::task::spawn_blocking(move || {
-                                CertificateDer::pem_file_iter(path.join("fullchain.pem"))
-                                    .map(|iter| iter.collect::<Result<Vec<_>, _>>())
-                            })
-                            .await
-                            else {
-                                eprintln!(
-                                    "Unable to load certificate in {:?}",
-                                    entry.path().join("fullchain.pem")
-                                );
-                                continue;
-                            };
-                            let path = entry.path();
-                            let Ok(Ok(key)) = tokio::task::spawn_blocking(move || {
-                                PrivateKeyDer::from_pem_file(path.join("privkey.pem"))
-                            })
-                            .await
-                            else {
-                                eprintln!(
-                                    "Unable to load key in {:?}",
-                                    entry.path().join("privkey.pem")
-                                );
-                                continue;
-                            };
-                            let Ok(key) = any_supported_type(&key) else {
-                                eprintln!("Invalid key in {:?}", entry.path().join("privkey.pem"));
-                                continue;
-                            };
-                            let ck = Arc::new(CertifiedKey::new(cert, key));
-                            for eec in ck
-                                .end_entity_cert()
-                                .iter()
-                                .filter_map(|&cert| EndEntityCert::try_from(cert).ok())
+                match read_dir(directory.as_path()).await {
+                    Ok(mut read_dir) => {
+                        while let Ok(Some(entry)) = read_dir.next_entry().await {
+                            if entry
+                                .file_type()
+                                .await
+                                .is_ok_and(|filetype| filetype.is_dir())
                             {
-                                for name in eec.valid_dns_names() {
-                                    let path = name
-                                        .trim_start_matches("*.")
-                                        .split('.')
-                                        .rev()
-                                        .map(String::from)
-                                        .collect::<Vec<_>>();
-                                    builder.push(path, ck.clone());
+                                let cert = match CertificateDer::pem_file_iter(
+                                    entry.path().join("fullchain.pem"),
+                                )
+                                .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
+                                {
+                                    Ok(cert) => cert,
+                                    Err(err) => {
+                                        eprintln!(
+                                            "Unable to load certificate chain in {:?}: {}",
+                                            entry.path().join("fullchain.pem"),
+                                            err
+                                        );
+                                        continue;
+                                    }
+                                };
+                                let key = match PrivateKeyDer::from_pem_file(
+                                    entry.path().join("privkey.pem"),
+                                ) {
+                                    Ok(key) => key,
+                                    Err(err) => {
+                                        eprintln!(
+                                            "Unable to load certficate key in {:?}: {}",
+                                            entry.path().join("privkey.pem"),
+                                            err
+                                        );
+                                        continue;
+                                    }
+                                };
+                                let Ok(key) = any_supported_type(&key) else {
+                                    eprintln!(
+                                        "Invalid key in {:?}: no supported type",
+                                        entry.path().join("privkey.pem")
+                                    );
+                                    continue;
+                                };
+                                let ck = Arc::new(CertifiedKey::new(cert, key));
+                                for eec in ck
+                                    .end_entity_cert()
+                                    .iter()
+                                    .filter_map(|&cert| EndEntityCert::try_from(cert).ok())
+                                {
+                                    for name in eec.valid_dns_names() {
+                                        let path = name
+                                            .trim_start_matches("*.")
+                                            .split('.')
+                                            .rev()
+                                            .map(String::from)
+                                            .collect::<Vec<_>>();
+                                        builder.push(path, ck.clone());
+                                    }
                                 }
                             }
                         }
+                        let trie = builder.build();
+                        *certs_clone.write().unwrap() = trie;
                     }
-                    let trie = builder.build();
-                    *certs_clone.write().unwrap() = trie;
-                    tx.take().map(|tx| tx.send(()));
+                    Err(err) => {
+                        eprintln!(
+                            "Unable to read certificates directory {:?}: {}",
+                            &directory, err
+                        );
+                    }
                 }
+                init_tx.take().map(|tx| tx.send(()));
+                // TO-DO: Better debouncing
+                tokio::time::sleep(Duration::from_secs(2)).await
             }
         });
-        rx.await.unwrap();
+        init_rx.await.unwrap();
         Ok(CertificateResolver {
             certificates,
             _watcher: watcher,

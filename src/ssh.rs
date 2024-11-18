@@ -120,13 +120,12 @@ impl Handler for ServerHandler {
         user: &str,
         public_key: &PublicKey,
     ) -> Result<Auth, Self::Error> {
-        let fingerprint = public_key.fingerprint();
         if self
             .server
             .fingerprints_validator
-            .is_key_allowed(&fingerprint)
+            .is_key_allowed(&public_key)
         {
-            self.key_fingerprint = Some(fingerprint);
+            self.key_fingerprint = Some(public_key.fingerprint());
             self.user = Some(user.to_string());
             Ok(Auth::Accept)
         } else {
