@@ -100,6 +100,10 @@ struct Args {
     #[arg(long, default_value_t = 443)]
     https_port: u16,
 
+    /// Always redirect HTTP requests to HTTPS.
+    #[arg(long, default_value_t = false)]
+    force_https: bool,
+
     /// Policy on whether to allow binding specific hostnames.
     #[arg(long, value_enum, default_value_t = BindHostnames::Txt)]
     bind_hostnames: BindHostnames,
@@ -142,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
         ssh_port: args.ssh_port,
         http_port: args.http_port,
         https_port: args.https_port,
+        force_https: args.force_https,
         bind_hostnames: args.bind_hostnames.into(),
         txt_record_prefix: args.txt_record_prefix,
         force_random_subdomains: args.force_random_subdomains,

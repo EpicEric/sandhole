@@ -7,10 +7,11 @@ use async_trait::async_trait;
 use axum::body::Body as AxumBody;
 use axum::response::{IntoResponse, Redirect};
 use dashmap::DashMap;
-use hyper::body::Body;
-use hyper::header::{HOST, UPGRADE};
-use hyper::Response;
-use hyper::{Request, StatusCode};
+use hyper::{
+    body::Body,
+    header::{HOST, UPGRADE},
+    Request, Response, StatusCode,
+};
 use hyper_util::rt::TokioIo;
 #[cfg(test)]
 use mockall::automock;
@@ -106,10 +107,10 @@ mod connection_map_tests {
 
 fn http_log(
     status: u16,
-    method: String,
-    uri: String,
+    method: &str,
+    uri: &str,
     elapsed_time: Duration,
-    tx: mpsc::Sender<Vec<u8>>,
+    tx: Option<mpsc::Sender<Vec<u8>>>,
 ) {
     let status_escape_color = match status {
         100..=199 => "\x1b[37m",
@@ -130,7 +131,7 @@ fn http_log(
     );
     print!("{}", line);
     // TO-DO: Check from config if we should log back to client
-    let _ = tx.try_send(line.into_bytes());
+    let _ = tx.map(|tx| tx.try_send(line.into_bytes()));
 }
 
 pub(crate) async fn proxy_handler<B, H, T>(
@@ -138,6 +139,7 @@ pub(crate) async fn proxy_handler<B, H, T>(
     tcp_address: SocketAddr,
     conn_manager: Arc<ConnectionMap<Arc<H>>>,
     domain_redirect: Arc<(String, String)>,
+    redirect_to_https: Option<u16>,
     request_timeout: Duration,
 ) -> anyhow::Result<Response<AxumBody>>
 where
@@ -163,6 +165,35 @@ where
         }
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
+    if let Some(port) = redirect_to_https {
+        let elapsed = timer.elapsed();
+        let response = Redirect::permanent(
+            format!(
+                "https://{}{}{}",
+                host,
+                if port == 443 {
+                    "".into()
+                } else {
+                    format!(":{port}")
+                },
+                request
+                    .uri()
+                    .path_and_query()
+                    .map(|path| path.as_str())
+                    .unwrap_or("/"),
+            )
+            .as_str(),
+        )
+        .into_response();
+        http_log(
+            response.status().as_u16(),
+            request.method().as_str(),
+            &request.uri().to_string(),
+            elapsed,
+            None,
+        );
+        return Ok(response);
+    }
     request.headers_mut().insert(
         X_FORWARDED_FOR,
         tcp_address.ip().to_string().parse().unwrap(),
@@ -188,7 +219,7 @@ where
                 .await
                 .map_err(|_| ServerError::RequestTimeout)??;
             let elapsed = timer.elapsed();
-            http_log(response.status().as_u16(), method, uri, elapsed, tx);
+            http_log(response.status().as_u16(), &method, &uri, elapsed, Some(tx));
             Ok(response.into_response())
         }
 
@@ -204,7 +235,7 @@ where
                 .await
                 .map_err(|_| ServerError::RequestTimeout)??;
             let elapsed = timer.elapsed();
-            http_log(response.status().as_u16(), method, uri, elapsed, tx);
+            http_log(response.status().as_u16(), &method, &uri, elapsed, Some(tx));
             match response.status() {
                 StatusCode::SWITCHING_PROTOCOLS => {
                     if request_type
@@ -260,6 +291,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
+            None,
             Duration::from_secs(5),
         )
         .await;
@@ -272,7 +304,7 @@ mod proxy_handler_tests {
             Arc::new(ConnectionMap::new());
         let request = Request::builder()
             .method("GET")
-            .uri("http://no.handler/index.html")
+            .uri("/index.html")
             .header("host", "no.handler")
             .body(Empty::<Bytes>::new())
             .unwrap();
@@ -281,6 +313,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
+            None,
             Duration::from_secs(5),
         )
         .await;
@@ -295,7 +328,7 @@ mod proxy_handler_tests {
             Arc::new(ConnectionMap::new());
         let request = Request::builder()
             .method("GET")
-            .uri("http://main.domain/index.html")
+            .uri("/index.html")
             .header("host", "main.domain")
             .body(Empty::<Bytes>::new())
             .unwrap();
@@ -304,6 +337,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
+            None,
             Duration::from_secs(5),
         )
         .await;
@@ -313,6 +347,78 @@ mod proxy_handler_tests {
         assert_eq!(
             response.headers().get("location").unwrap(),
             "https://example.com"
+        );
+    }
+
+    #[tokio::test]
+    async fn returns_redirect_to_https() {
+        let conn_manager: Arc<ConnectionMap<Arc<MockHttpHandler<DuplexStream>>>> =
+            Arc::new(ConnectionMap::new());
+        let mut mock = MockHttpHandler::new();
+        mock.expect_log_channel().never();
+        mock.expect_tunneling_channel().never();
+        conn_manager.insert(
+            "with.handler".into(),
+            "127.0.0.1:12345".parse().unwrap(),
+            Arc::new(mock),
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/endpoint")
+            .header("host", "with.handler")
+            .body(String::from("Hello world"))
+            .unwrap();
+        let response = proxy_handler(
+            request,
+            "127.0.0.1:12345".parse().unwrap(),
+            Arc::clone(&conn_manager),
+            Arc::new(("main.domain".into(), "https://example.com".into())),
+            Some(443),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(response.is_ok());
+        let response = response.unwrap();
+        assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(
+            response.headers().get("location").unwrap(),
+            "https://with.handler/api/endpoint"
+        );
+    }
+
+    #[tokio::test]
+    async fn returns_redirect_to_non_standard_https_port() {
+        let conn_manager: Arc<ConnectionMap<Arc<MockHttpHandler<DuplexStream>>>> =
+            Arc::new(ConnectionMap::new());
+        let mut mock = MockHttpHandler::new();
+        mock.expect_log_channel().never();
+        mock.expect_tunneling_channel().never();
+        conn_manager.insert(
+            "non.standard".into(),
+            "127.0.0.1:12345".parse().unwrap(),
+            Arc::new(mock),
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/test")
+            .header("host", "non.standard")
+            .body(String::from("Hello world"))
+            .unwrap();
+        let response = proxy_handler(
+            request,
+            "127.0.0.1:12345".parse().unwrap(),
+            Arc::clone(&conn_manager),
+            Arc::new(("main.domain".into(), "https://example.com".into())),
+            Some(8443),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(response.is_ok());
+        let response = response.unwrap();
+        assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(
+            response.headers().get("location").unwrap(),
+            "https://non.standard:8443/test"
         );
     }
 
@@ -336,7 +442,7 @@ mod proxy_handler_tests {
         );
         let request = Request::builder()
             .method("POST")
-            .uri("http://with.handler/api/endpoint")
+            .uri("/api/endpoint")
             .header("host", "with.handler")
             .body(String::from("Hello world"))
             .unwrap();
@@ -368,6 +474,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
+            None,
             Duration::from_secs(5),
         )
         .await;
@@ -401,7 +508,7 @@ mod proxy_handler_tests {
         );
         let request = Request::builder()
             .method("POST")
-            .uri("http://root.domain/test")
+            .uri("/test")
             .header("host", "root.domain")
             .body(String::from("My body"))
             .unwrap();
@@ -433,6 +540,7 @@ mod proxy_handler_tests {
             "192.168.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("root.domain".into(), "https://this.is.ignored".into())),
+            None,
             Duration::from_secs(5),
         )
         .await;
@@ -492,6 +600,7 @@ mod proxy_handler_tests {
                 "127.0.0.1:12345".parse().unwrap(),
                 Arc::clone(&conn_manager),
                 Arc::new(("main.domain".into(), "https://example.com".into())),
+                None,
                 Duration::from_secs(5),
             )
         });

@@ -44,6 +44,7 @@ async fn force_random_subdomains() {
         ssh_port: 18022,
         http_port: 18080,
         https_port: 18443,
+        force_https: false,
         bind_hostnames: BindHostnames::None,
         force_random_subdomains: true,
         random_subdomain_seed: None,
@@ -87,7 +88,7 @@ async fn force_random_subdomains() {
         .await
         .expect("tcpip_forward failed");
     let regex = regex::Regex::new(r"https://(\S+)").unwrap();
-    let (address, hostname) = async move {
+    let (_, hostname) = async move {
         while let Some(message) = channel.wait().await {
             match message {
                 russh::ChannelMsg::Data { data } => {
@@ -146,7 +147,7 @@ async fn force_random_subdomains() {
     });
     let request = Request::builder()
         .method("GET")
-        .uri(address)
+        .uri("/")
         .header("host", hostname)
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();

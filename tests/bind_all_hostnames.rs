@@ -48,6 +48,7 @@ async fn bind_all_hostnames() {
         ssh_port: 18022,
         http_port: 18080,
         https_port: 18443,
+        force_https: false,
         bind_hostnames: BindHostnames::All,
         force_random_subdomains: true,
         random_subdomain_seed: None,
@@ -85,10 +86,6 @@ async fn bind_all_hostnames() {
         .authenticate_publickey("user", Arc::new(key))
         .await
         .expect("SSH authentication failed"));
-    // let channel = session
-    //     .channel_open_session()
-    //     .await
-    //     .expect("channel_open_session failed");
     session
         .tcpip_forward("test.foobar.tld", 80)
         .await
@@ -127,7 +124,7 @@ async fn bind_all_hostnames() {
     });
     let request = Request::builder()
         .method("GET")
-        .uri("https://test.foobar.tld:18443/world")
+        .uri("/world")
         .header("host", "test.foobar.tld")
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();

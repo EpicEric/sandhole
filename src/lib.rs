@@ -103,6 +103,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     address,
                     Arc::clone(&http_map),
                     Arc::clone(&domain_redirect),
+                    if config.force_https {
+                        Some(config.https_port)
+                    } else {
+                        None
+                    },
                     config.request_timeout,
                 )
             });
@@ -136,6 +141,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     address,
                     Arc::clone(&http_map),
                     Arc::clone(&domain_redirect),
+                    None,
                     config.request_timeout,
                 )
             });

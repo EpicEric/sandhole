@@ -27,6 +27,7 @@ pub struct ApplicationConfig {
     pub ssh_port: u16,
     pub http_port: u16,
     pub https_port: u16,
+    pub force_https: bool,
     pub bind_hostnames: BindHostnames,
     pub txt_record_prefix: String,
     pub force_random_subdomains: bool,
