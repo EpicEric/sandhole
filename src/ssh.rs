@@ -44,10 +44,19 @@ impl HttpHandler<ChannelStream<Msg>> for SshTunnelHandler {
     fn log_channel(&self) -> mpsc::Sender<Vec<u8>> {
         self.tx.clone()
     }
-    async fn tunneling_channel(&self) -> anyhow::Result<TokioIo<ChannelStream<Msg>>> {
+    async fn tunneling_channel(
+        &self,
+        tcp_address: SocketAddr,
+    ) -> anyhow::Result<TokioIo<ChannelStream<Msg>>> {
+        // TO-DO: Fix fields
         let channel = self
             .handle
-            .channel_open_forwarded_tcpip(self.address.clone(), self.port, "1.2.3.4", 1234)
+            .channel_open_forwarded_tcpip(
+                self.address.clone(),
+                self.port,
+                tcp_address.ip().to_string(),
+                tcp_address.port().into(),
+            )
             .await?
             .into_stream();
         Ok(TokioIo::new(channel))
@@ -169,7 +178,8 @@ impl Handler for ServerHandler {
             .await;
         self.hosts.push(assigned_host.clone());
         self.addressing
-            .insert((address, *port), assigned_host.clone());
+            .insert((address.clone(), *port), assigned_host.clone());
+        println!("Forwarding HTTP for {}", &assigned_host);
         let _ = self
             .tx
             .send(
@@ -204,11 +214,10 @@ impl Handler for ServerHandler {
             Arc::new(SshTunnelHandler::new(
                 handle,
                 self.tx.clone(),
-                assigned_host,
+                address,
                 *port,
             )),
         );
-        // Send connection info through data channel
         Ok(true)
     }
 

@@ -104,7 +104,7 @@ struct Args {
     #[arg(long, default_value_t = false)]
     force_https: bool,
 
-    /// Contact e-mail to use with Let's Encrypt, in order to enable ACME certificates.
+    /// Contact e-mail to use with Let's Encrypt. If set, enables ACME for HTTPS certificates.
     ///
     /// By providing your e-mail, you agree to Let's Encrypt's Terms of Service.
     #[arg(long)]
@@ -114,9 +114,11 @@ struct Args {
     #[arg(long, default_value_os = "./deploy/acme_cache")]
     acme_cache_directory: PathBuf,
 
-    /// Controls whether to use the production directory for Let's Encrypt certificates (false is staging).
-    #[arg(long, default_value_t = true)]
-    acme_use_production: bool,
+    /// Controls whether to use the staging directory for Let's Encrypt certificates (default is production).
+    ///
+    /// Only use this option for testing.
+    #[arg(long, default_value_t = false)]
+    acme_use_staging: bool,
 
     /// Policy on whether to allow binding specific hostnames.
     #[arg(long, value_enum, default_value_t = BindHostnames::Txt)]
@@ -128,9 +130,9 @@ struct Args {
     #[arg(long, default_value_t = String::from("_sandhole"), value_parser = validate_txt_record_prefix)]
     txt_record_prefix: String,
 
-    /// Always use random subdomains instead of user-provided ones.
-    #[arg(long, default_value_t = true)]
-    force_random_subdomains: bool,
+    /// Allow user-provided subdomains instead of always forcing random ones.
+    #[arg(long, default_value_t = false)]
+    allow_provided_subdomains: bool,
 
     /// Which value to seed with when generating random subdomains, for determinism. This allows binding to the same
     /// random address until Sandhole is restarted.
@@ -163,10 +165,10 @@ async fn main() -> anyhow::Result<()> {
         force_https: args.force_https,
         acme_contact_email: args.acme_contact_email,
         acme_cache_directory: args.acme_cache_directory,
-        acme_use_production: args.acme_use_production,
+        acme_use_staging: args.acme_use_staging,
         bind_hostnames: args.bind_hostnames.into(),
         txt_record_prefix: args.txt_record_prefix,
-        force_random_subdomains: args.force_random_subdomains,
+        allow_provided_subdomains: args.allow_provided_subdomains,
         random_subdomain_seed: args.random_subdomain_seed.map(Into::into),
         request_timeout: Duration::from_secs(args.request_timeout),
     };

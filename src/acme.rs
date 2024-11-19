@@ -1,14 +1,13 @@
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::{path::PathBuf, sync::Arc};
 
 use rustls::{
     server::{ClientHello, ResolvesServerCert},
     sign::CertifiedKey,
     ServerConfig,
 };
-use rustls_acme::{caches::DirCache, AcmeConfig, AcmeState, ResolvesServerCertAcme};
+use rustls_acme::{caches::DirCache, AcmeConfig, ResolvesServerCertAcme};
+use tokio::task::JoinHandle;
+use tokio_stream::StreamExt;
 
 use crate::certificates::AlpnChallengeResolver;
 
@@ -16,18 +15,20 @@ use crate::certificates::AlpnChallengeResolver;
 pub(crate) struct AcmeResolver {
     cache_dir: PathBuf,
     contact: String,
-    use_production: bool,
-    state: Arc<Mutex<Option<AcmeState<std::io::Error, std::io::Error>>>>,
+    use_staging: bool,
+    join_handle: Option<JoinHandle<()>>,
+    config: Option<Arc<ServerConfig>>,
     resolver: Option<Arc<ResolvesServerCertAcme>>,
 }
 
 impl AcmeResolver {
-    pub(crate) fn new(cache_dir: PathBuf, contact: String, use_production: bool) -> Self {
+    pub(crate) fn new(cache_dir: PathBuf, contact: String, use_staging: bool) -> Self {
         AcmeResolver {
             cache_dir,
             contact,
-            use_production,
-            state: Arc::new(Mutex::new(None)),
+            use_staging,
+            join_handle: None,
+            config: None,
             resolver: None,
         }
     }
@@ -35,13 +36,25 @@ impl AcmeResolver {
 
 impl AlpnChallengeResolver for AcmeResolver {
     fn update_domains(&mut self, domains: Vec<String>) {
-        let new_state = AcmeConfig::new(domains)
+        if domains.is_empty() {
+            return;
+        }
+        self.join_handle.take().map(|jh| jh.abort());
+        let mut new_state = AcmeConfig::new(domains)
             .contact_push(format!("mailto:{}", self.contact))
             .cache(DirCache::new(self.cache_dir.clone()))
-            .directory_lets_encrypt(self.use_production)
+            .directory_lets_encrypt(!self.use_staging)
             .state();
+        self.config = Some(new_state.challenge_rustls_config());
         self.resolver = Some(new_state.resolver());
-        *self.state.lock().unwrap() = Some(new_state);
+        self.join_handle = Some(tokio::spawn(async move {
+            loop {
+                match new_state.next().await.unwrap() {
+                    Ok(_) => (),
+                    Err(err) => eprintln!(": {:?}", err),
+                }
+            }
+        }));
     }
 
     fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
@@ -51,10 +64,6 @@ impl AlpnChallengeResolver for AcmeResolver {
     }
 
     fn challenge_rustls_config(&self) -> Option<Arc<ServerConfig>> {
-        self.state
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|state| state.challenge_rustls_config())
+        self.config.clone()
     }
 }

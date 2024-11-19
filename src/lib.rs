@@ -79,7 +79,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         Some(contact) => Box::new(AcmeResolver::new(
             config.acme_cache_directory,
             contact,
-            config.acme_use_production,
+            config.acme_use_staging,
         )),
         None => Box::new(DummyAlpnChallengeResolver),
     };
@@ -97,7 +97,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         config.txt_record_prefix.trim_matches('.').to_string(),
         config.domain.trim_matches('.').to_string(),
         config.bind_hostnames,
-        config.force_random_subdomains,
+        !config.allow_provided_subdomains,
         config.random_subdomain_seed,
     ));
     let domain_redirect = Arc::new((config.domain, config.domain_redirect));
@@ -165,6 +165,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             match LazyConfigAcceptor::new(Default::default(), stream).await {
                 Ok(handshake) => {
                     if is_tls_alpn_challenge(&handshake.client_hello()) {
+                        println!(
+                            "dbg receiving challenge for {:?}",
+                            &handshake.client_hello().server_name()
+                        );
                         if let Some(challenge_config) = certificates_clone.challenge_rustls_config()
                         {
                             tokio::spawn(async move {
@@ -175,12 +179,17 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                         }
                     } else {
                         tokio::spawn(async move {
-                            let io =
-                                TokioIo::new(handshake.into_stream(server_config).await.unwrap());
-                            let conn = http1::Builder::new()
-                                .serve_connection(io, service)
-                                .with_upgrades();
-                            let _ = conn.await;
+                            match handshake.into_stream(server_config).await {
+                                Ok(stream) => {
+                                    let conn = http1::Builder::new()
+                                        .serve_connection(TokioIo::new(stream), service)
+                                        .with_upgrades();
+                                    let _ = conn.await;
+                                }
+                                Err(err) => {
+                                    eprintln!("Error establishing TLS connection: {:?}", err);
+                                }
+                            }
                         });
                     }
                 }

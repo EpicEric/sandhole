@@ -31,12 +31,13 @@ const X_FORWARDED_HOST: &str = "X-Forwarded-Host";
 #[async_trait]
 pub(crate) trait HttpHandler<T: Sync> {
     fn log_channel(&self) -> mpsc::Sender<Vec<u8>>;
-    async fn tunneling_channel(&self) -> anyhow::Result<TokioIo<T>>;
+    async fn tunneling_channel(&self, tcp_address: SocketAddr) -> anyhow::Result<TokioIo<T>>;
 }
 
 fn http_log(
     status: u16,
     method: &str,
+    host: &str,
     uri: &str,
     elapsed_time: Duration,
     tx: Option<mpsc::Sender<Vec<u8>>>,
@@ -50,11 +51,12 @@ fn http_log(
         _ => unreachable!(),
     };
     let line = format!(
-        "\x1b[2m{:19}\x1b[22m {}[{:3}] \x1b[0;1;44m{:^7}\x1b[0m {} \x1b[2m{}\x1b[0m\r\n",
+        "\x1b[2m{:19}\x1b[22m {}[{:3}] \x1b[0;1;44m{:^7}\x1b[0m {} => {} \x1b[2m{}\x1b[0m\r\n",
         chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
         status_escape_color,
         status,
         method,
+        host,
         uri,
         pretty_duration::pretty_duration(&elapsed_time, None)
     );
@@ -118,7 +120,8 @@ where
         http_log(
             response.status().as_u16(),
             request.method().as_str(),
-            &request.uri().to_string(),
+            &host,
+            &request.uri().path().to_string(),
             elapsed,
             None,
         );
@@ -132,12 +135,12 @@ where
         .headers_mut()
         .insert(X_FORWARDED_HOST, host.parse().unwrap());
 
-    let io = handler.tunneling_channel().await?;
+    let io = handler.tunneling_channel(tcp_address).await?;
     let tx = handler.log_channel();
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
 
     let method = request.method().to_string();
-    let uri = request.uri().to_string();
+    let uri = request.uri().path().to_string();
     match request.headers().get(UPGRADE) {
         None => {
             tokio::spawn(async move {
@@ -149,7 +152,14 @@ where
                 .await
                 .map_err(|_| ServerError::RequestTimeout)??;
             let elapsed = timer.elapsed();
-            http_log(response.status().as_u16(), &method, &uri, elapsed, Some(tx));
+            http_log(
+                response.status().as_u16(),
+                &method,
+                &host,
+                &uri,
+                elapsed,
+                Some(tx),
+            );
             Ok(response.into_response())
         }
 
@@ -165,7 +175,14 @@ where
                 .await
                 .map_err(|_| ServerError::RequestTimeout)??;
             let elapsed = timer.elapsed();
-            http_log(response.status().as_u16(), &method, &uri, elapsed, Some(tx));
+            http_log(
+                response.status().as_u16(),
+                &method,
+                &host,
+                &uri,
+                elapsed,
+                Some(tx),
+            );
             match response.status() {
                 StatusCode::SWITCHING_PROTOCOLS => {
                     if request_type
@@ -372,7 +389,7 @@ mod proxy_handler_tests {
             .return_once(move || logging_tx);
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move || Ok(TokioIo::new(handler)));
+            .return_once(move |_| Ok(TokioIo::new(handler)));
         conn_manager.insert(
             "with.handler".into(),
             "127.0.0.1:12345".parse().unwrap(),
@@ -439,7 +456,7 @@ mod proxy_handler_tests {
             .return_once(move || logging_tx);
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move || Ok(TokioIo::new(handler)));
+            .return_once(move |_| Ok(TokioIo::new(handler)));
         conn_manager.insert(
             "root.domain".into(),
             "127.0.0.1:12345".parse().unwrap(),
@@ -506,7 +523,7 @@ mod proxy_handler_tests {
             .return_once(move || logging_tx);
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move || Ok(TokioIo::new(handler)));
+            .return_once(move |_| Ok(TokioIo::new(handler)));
         conn_manager.insert(
             "with.websocket".into(),
             "127.0.0.1:12345".parse().unwrap(),

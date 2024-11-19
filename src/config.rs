@@ -30,10 +30,10 @@ pub struct ApplicationConfig {
     pub force_https: bool,
     pub acme_contact_email: Option<String>,
     pub acme_cache_directory: PathBuf,
-    pub acme_use_production: bool,
+    pub acme_use_staging: bool,
     pub bind_hostnames: BindHostnames,
     pub txt_record_prefix: String,
-    pub force_random_subdomains: bool,
+    pub allow_provided_subdomains: bool,
     pub random_subdomain_seed: Option<RandomSubdomainSeed>,
     pub request_timeout: Duration,
 }
