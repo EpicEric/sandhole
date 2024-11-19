@@ -9,7 +9,7 @@ use rand_chacha::ChaCha20Rng;
 use rand_seeder::SipHasher;
 use webpki::types::DnsName;
 
-use crate::config::RandomSubdomainSeed;
+use crate::config::{BindHostnames, RandomSubdomainSeed};
 
 pub(crate) struct DnsResolver(TokioAsyncResolver);
 
@@ -22,6 +22,8 @@ pub(crate) trait Resolver {
         requested_address: &str,
         fingerprint: &str,
     ) -> bool;
+
+    async fn has_valid_dns_records(&self, requested_address: &str) -> bool;
 }
 
 impl DnsResolver {
@@ -55,6 +57,13 @@ impl Resolver for DnsResolver {
             false
         }
     }
+
+    async fn has_valid_dns_records(&self, requested_address: &str) -> bool {
+        self.0
+            .lookup_ip(format!("{}.", requested_address))
+            .await
+            .is_ok_and(|lookup| lookup.iter().next().is_some())
+    }
 }
 
 pub(crate) struct AddressDelegator<R> {
@@ -63,7 +72,7 @@ pub(crate) struct AddressDelegator<R> {
     root_domain: String,
     seed: u64,
     random_subdomain_seed: Option<RandomSubdomainSeed>,
-    bind_any_host: bool,
+    bind_hostnames: BindHostnames,
     force_random_subdomains: bool,
 }
 
@@ -72,7 +81,7 @@ impl<R: Resolver> AddressDelegator<R> {
         resolver: R,
         txt_record_prefix: String,
         root_domain: String,
-        bind_any_host: bool,
+        bind_hostnames: BindHostnames,
         force_random_subdomains: bool,
         random_subdomain_seed: Option<RandomSubdomainSeed>,
     ) -> Self {
@@ -82,7 +91,7 @@ impl<R: Resolver> AddressDelegator<R> {
             resolver,
             txt_record_prefix,
             root_domain,
-            bind_any_host,
+            bind_hostnames,
             force_random_subdomains,
             random_subdomain_seed,
             seed: thread_rng().next_u64(),
@@ -96,20 +105,22 @@ impl<R: Resolver> AddressDelegator<R> {
         fingerprint: &Option<String>,
         socket_address: &SocketAddr,
     ) -> String {
-        if self.bind_any_host {
-            if DnsName::try_from(requested_address).is_ok() {
+        if DnsName::try_from(requested_address).is_ok() {
+            if matches!(self.bind_hostnames, BindHostnames::All) {
                 return requested_address.to_string();
-            } else if self.force_random_subdomains {
-                eprintln!(
-                    "Invalid address requested, defaulting to random: {}",
-                    requested_address
-                );
             }
-        }
-        if !self.force_random_subdomains {
-            if DnsName::try_from(requested_address).is_ok() {
+            if matches!(self.bind_hostnames, BindHostnames::Valid) {
+                if requested_address != self.root_domain
+                    && self.resolver.has_valid_dns_records(requested_address).await
+                {
+                    return requested_address.to_string();
+                }
+            }
+            if matches!(
+                self.bind_hostnames,
+                BindHostnames::Valid | BindHostnames::Txt
+            ) {
                 if let Some(fingerprint) = fingerprint {
-                    // Verify requested address through DNS
                     if self
                         .resolver
                         .has_txt_record_for_fingerprint(
@@ -121,24 +132,24 @@ impl<R: Resolver> AddressDelegator<R> {
                     {
                         return requested_address.to_string();
                     }
-                    eprintln!("Invalid credentials for address: {}", requested_address);
                 }
+            }
+            if !self.force_random_subdomains {
                 // Assign specified subdomain under the root domain
                 let address = requested_address.trim_end_matches(&format!(".{}", self.root_domain));
-                if !address.is_empty() {
+                if !address.is_empty() && !address.contains('.') {
                     return format!("{}.{}", address, self.root_domain);
-                } else {
-                    eprintln!(
-                        "Invalid address requested, defaulting to random: {}",
-                        requested_address
-                    );
                 }
-            } else {
-                eprintln!(
-                    "Invalid address requested, defaulting to random: {}",
-                    requested_address
-                );
             }
+            eprintln!(
+                "Invalid address requested, defaulting to random: {}",
+                requested_address
+            );
+        } else {
+            eprintln!(
+                "Invalid address requested, defaulting to random: {}",
+                requested_address
+            );
         }
         // Assign random subdomain under the root domain
         format!(
@@ -211,8 +222,11 @@ impl<R: Resolver> AddressDelegator<R> {
 
 #[cfg(test)]
 mod address_delegator_tests {
+    use crate::config::BindHostnames;
+
     use super::{AddressDelegator, MockResolver};
     use mockall::predicate::*;
+    use regex::Regex;
     use std::net::SocketAddr;
     use webpki::types::DnsName;
 
@@ -224,7 +238,7 @@ mod address_delegator_tests {
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            true,
+            BindHostnames::All,
             false,
             None,
         );
@@ -233,6 +247,86 @@ mod address_delegator_tests {
                 "some.address",
                 &None,
                 &None,
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address, "some.address");
+        assert!(DnsName::try_from(address).is_ok());
+    }
+
+    #[tokio::test]
+    async fn returns_root_domain_when_binding_any_host() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            BindHostnames::All,
+            false,
+            None,
+        );
+        let address = delegator
+            .get_address(
+                "root.tld",
+                &None,
+                &None,
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address, "root.tld");
+        assert!(DnsName::try_from(address).is_ok());
+    }
+
+    #[tokio::test]
+    async fn returns_provided_address_when_enforced_dns_is_valid() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        mock.expect_has_valid_dns_records()
+            .once()
+            .return_const(true);
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            BindHostnames::Valid,
+            false,
+            None,
+        );
+        let address = delegator
+            .get_address(
+                "some.address",
+                &None,
+                &None,
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address, "some.address");
+        assert!(DnsName::try_from(address).is_ok());
+    }
+
+    #[tokio::test]
+    async fn returns_provided_address_if_enforced_dns_matches_fingerprint() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint()
+            .with(eq("_some_prefix"), eq("some.address"), eq("fingerprint1"))
+            .return_const(true);
+        mock.expect_has_valid_dns_records()
+            .once()
+            .return_const(false);
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            BindHostnames::Valid,
+            false,
+            None,
+        );
+        let address = delegator
+            .get_address(
+                "some.address",
+                &None,
+                &Some("fingerprint1".into()),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -250,7 +344,7 @@ mod address_delegator_tests {
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            false,
+            BindHostnames::Txt,
             false,
             None,
         );
@@ -276,7 +370,7 @@ mod address_delegator_tests {
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            false,
+            BindHostnames::Txt,
             false,
             None,
         );
@@ -296,25 +390,25 @@ mod address_delegator_tests {
     async fn returns_subdomain_if_no_txt_record_matches_fingerprint() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
-            .with(eq("_some_prefix"), eq("some.address"), eq("fingerprint1"))
+            .with(eq("_some_prefix"), eq("something"), eq("fingerprint1"))
             .return_const(false);
         let delegator = AddressDelegator::new(
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            false,
+            BindHostnames::Txt,
             false,
             None,
         );
         let address = delegator
             .get_address(
-                "some.address",
+                "something",
                 &None,
                 &Some("fingerprint1".into()),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
             .await;
-        assert_eq!(address, "some.address.root.tld");
+        assert_eq!(address, "something.root.tld");
         assert!(DnsName::try_from(address).is_ok());
     }
 
@@ -326,7 +420,7 @@ mod address_delegator_tests {
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            false,
+            BindHostnames::None,
             false,
             None,
         );
@@ -352,7 +446,7 @@ mod address_delegator_tests {
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            false,
+            BindHostnames::Txt,
             false,
             None,
         );
@@ -369,7 +463,7 @@ mod address_delegator_tests {
     }
 
     #[tokio::test]
-    async fn returns_subdomain_if_address_equals_host_domain_and_doesnt_have_fingerprint() {
+    async fn returns_random_subdomain_if_address_equals_host_domain_and_doesnt_have_fingerprint() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .once()
@@ -378,7 +472,7 @@ mod address_delegator_tests {
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            false,
+            BindHostnames::Txt,
             false,
             None,
         );
@@ -390,7 +484,45 @@ mod address_delegator_tests {
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
             .await;
-        assert_eq!(address, "root.tld.root.tld");
+        assert!(
+            Regex::new(r"^[0-9a-z]+\.root\.tld$")
+                .unwrap()
+                .is_match(&address),
+            "invalid address {}",
+            address
+        );
+        assert!(DnsName::try_from(address).is_ok());
+    }
+
+    #[tokio::test]
+    async fn returns_random_subdomain_if_requested_address_is_not_direct_subdomain() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint()
+            .once()
+            .return_const(false);
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            BindHostnames::Txt,
+            false,
+            None,
+        );
+        let address = delegator
+            .get_address(
+                "we.are.root.tld",
+                &None,
+                &Some("fingerprint1".into()),
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert!(
+            Regex::new(r"^[0-9a-z]+\.root\.tld$")
+                .unwrap()
+                .is_match(&address),
+            "invalid address {}",
+            address
+        );
         assert!(DnsName::try_from(address).is_ok());
     }
 
@@ -402,7 +534,7 @@ mod address_delegator_tests {
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            false,
+            BindHostnames::Valid,
             false,
             None,
         );
@@ -414,8 +546,13 @@ mod address_delegator_tests {
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
             .await;
-        assert!(address.ends_with(".root.tld"));
-        assert!(!address.trim_end_matches(".root.tld").is_empty());
+        assert!(
+            Regex::new(r"^[0-9a-z]+\.root\.tld$")
+                .unwrap()
+                .is_match(&address),
+            "invalid address {}",
+            address
+        );
         assert!(DnsName::try_from(address).is_ok());
     }
 
@@ -427,11 +564,12 @@ mod address_delegator_tests {
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            false,
+            BindHostnames::None,
             true,
             None,
         );
         let mut set = std::collections::HashSet::new();
+        let regex = Regex::new(r"^[0-9a-z]+\.root\.tld$").unwrap();
         for _ in 0..100 {
             let address = delegator
                 .get_address(
@@ -441,8 +579,7 @@ mod address_delegator_tests {
                     &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
                 )
                 .await;
-            assert!(address.ends_with(".root.tld"));
-            assert!(!address.trim_end_matches(".root.tld").is_empty());
+            assert!(regex.is_match(&address), "invalid address {}", address);
             assert!(DnsName::try_from(address.clone()).is_ok());
             assert!(!set.contains(&address));
             set.insert(address);
@@ -457,7 +594,7 @@ mod address_delegator_tests {
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            false,
+            BindHostnames::None,
             true,
             Some(crate::config::RandomSubdomainSeed::User),
         );
@@ -511,7 +648,7 @@ mod address_delegator_tests {
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            false,
+            BindHostnames::None,
             true,
             Some(crate::config::RandomSubdomainSeed::KeyFingerprint),
         );
@@ -565,7 +702,7 @@ mod address_delegator_tests {
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            false,
+            BindHostnames::None,
             true,
             Some(crate::config::RandomSubdomainSeed::SocketAddress),
         );

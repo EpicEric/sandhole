@@ -81,7 +81,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         DnsResolver::new(),
         config.txt_record_prefix.trim_matches('.').to_string(),
         config.domain.trim_matches('.').to_string(),
-        config.bind_any_host,
+        config.bind_hostnames,
         config.force_random_subdomains,
         config.random_subdomain_seed,
     ));
@@ -103,6 +103,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     address,
                     Arc::clone(&http_map),
                     Arc::clone(&domain_redirect),
+                    config.request_timeout,
                 )
             });
             let io = TokioIo::new(stream);
@@ -135,6 +136,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     address,
                     Arc::clone(&http_map),
                     Arc::clone(&domain_redirect),
+                    config.request_timeout,
                 )
             });
             let io = match acceptor.accept(stream).await {

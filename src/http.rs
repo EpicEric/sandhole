@@ -17,6 +17,7 @@ use mockall::automock;
 use rand::seq::SliceRandom;
 use tokio::io::{copy_bidirectional, AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 
 const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 const X_FORWARDED_HOST: &str = "X-Forwarded-Host";
@@ -137,6 +138,7 @@ pub(crate) async fn proxy_handler<B, H, T>(
     tcp_address: SocketAddr,
     conn_manager: Arc<ConnectionMap<Arc<H>>>,
     domain_redirect: Arc<(String, String)>,
+    request_timeout: Duration,
 ) -> anyhow::Result<Response<AxumBody>>
 where
     H: HttpHandler<T>,
@@ -182,7 +184,9 @@ where
                     println!("Connection failed: {:?}", err);
                 }
             });
-            let response = sender.send_request(request).await?;
+            let response = timeout(request_timeout, sender.send_request(request))
+                .await
+                .map_err(|_| ServerError::RequestTimeout)??;
             let elapsed = timer.elapsed();
             http_log(response.status().as_u16(), method, uri, elapsed, tx);
             Ok(response.into_response())
@@ -196,7 +200,9 @@ where
             });
             let request_type = request_upgrade.to_str()?.to_string();
             let upgraded_request = hyper::upgrade::on(&mut request);
-            let mut response = sender.send_request(request).await?;
+            let mut response = timeout(request_timeout, sender.send_request(request))
+                .await
+                .map_err(|_| ServerError::RequestTimeout)??;
             let elapsed = timer.elapsed();
             http_log(response.status().as_u16(), method, uri, elapsed, tx);
             match response.status() {
@@ -233,7 +239,7 @@ mod proxy_handler_tests {
     use http_body_util::Empty;
     use hyper::{body::Incoming, service::service_fn, HeaderMap, Request, StatusCode};
     use hyper_util::rt::TokioIo;
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
     use tokio::{io::DuplexStream, sync::mpsc};
     use tokio_tungstenite::client_async;
     use tower::Service;
@@ -254,6 +260,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
+            Duration::from_secs(5),
         )
         .await;
         assert!(response.is_err());
@@ -274,6 +281,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
+            Duration::from_secs(5),
         )
         .await;
         assert!(response.is_ok());
@@ -296,6 +304,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
+            Duration::from_secs(5),
         )
         .await;
         assert!(response.is_ok());
@@ -359,6 +368,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
+            Duration::from_secs(5),
         )
         .await;
         assert!(!logging_rx.is_empty());
@@ -423,6 +433,7 @@ mod proxy_handler_tests {
             "192.168.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("root.domain".into(), "https://this.is.ignored".into())),
+            Duration::from_secs(5),
         )
         .await;
         assert!(!logging_rx.is_empty());
@@ -481,6 +492,7 @@ mod proxy_handler_tests {
                 "127.0.0.1:12345".parse().unwrap(),
                 Arc::clone(&conn_manager),
                 Arc::new(("main.domain".into(), "https://example.com".into())),
+                Duration::from_secs(5),
             )
         });
         let jh2 = tokio::spawn(async move {

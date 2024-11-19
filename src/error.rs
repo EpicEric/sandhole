@@ -6,4 +6,6 @@ pub(crate) enum ServerError {
     InvalidHostHeader,
     #[error("Missing Upgrade header")]
     MissingUpgradeHeader,
+    #[error("Request timed out")]
+    RequestTimeout,
 }

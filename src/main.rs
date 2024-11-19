@@ -1,8 +1,8 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use clap::{command, Parser, ValueEnum};
 use sandhole::{
-    config::{ApplicationConfig, RandomSubdomainSeed as Seed},
+    config::{ApplicationConfig, BindHostnames as BHConfig, RandomSubdomainSeed as RSSConfig},
     entrypoint,
 };
 use webpki::types::DnsName;
@@ -17,12 +17,35 @@ pub enum RandomSubdomainSeed {
     Address,
 }
 
-impl From<RandomSubdomainSeed> for Seed {
+impl From<RandomSubdomainSeed> for RSSConfig {
     fn from(value: RandomSubdomainSeed) -> Self {
         match value {
-            RandomSubdomainSeed::User => Seed::User,
-            RandomSubdomainSeed::Fingerprint => Seed::KeyFingerprint,
-            RandomSubdomainSeed::Address => Seed::SocketAddress,
+            RandomSubdomainSeed::User => RSSConfig::User,
+            RandomSubdomainSeed::Fingerprint => RSSConfig::KeyFingerprint,
+            RandomSubdomainSeed::Address => RSSConfig::SocketAddress,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum BindHostnames {
+    /// Allow any hostnames unconditionally, including the domain.
+    All,
+    /// Allow any hostnames with valid DNS records, not including the domain.
+    Valid,
+    /// Allow any hostnames with a TXT record containing a fingerprint, including the domain.
+    Txt,
+    /// Don't allow user-provided hostnames, force subdomains.
+    None,
+}
+
+impl From<BindHostnames> for BHConfig {
+    fn from(value: BindHostnames) -> Self {
+        match value {
+            BindHostnames::All => BHConfig::All,
+            BindHostnames::Valid => BHConfig::Valid,
+            BindHostnames::Txt => BHConfig::Txt,
+            BindHostnames::None => BHConfig::None,
         }
     }
 }
@@ -77,11 +100,17 @@ struct Args {
     #[arg(long, default_value_t = 443)]
     https_port: u16,
 
-    /// Allow binding any HTTP host, without checking DNS records.
-    #[arg(long, default_value_t = false)]
-    bind_any_host: bool,
+    /// Policy on whether to allow binding specific hostnames.
+    #[arg(long, value_enum, default_value_t = BindHostnames::Txt)]
+    bind_hostnames: BindHostnames,
 
-    /// Use random subdomains instead of user-provided ones.
+    /// Prefix for TXT DNS records containing key fingerprints, for authorization to bind under a specific domain.
+    ///
+    /// In other words, valid records will be of the form: `TXT prefix.custom-domain SHA256:...`
+    #[arg(long, default_value_t = String::from("_sandhole"), value_parser = validate_txt_record_prefix)]
+    txt_record_prefix: String,
+
+    /// Always use random subdomains instead of user-provided ones.
     #[arg(long, default_value_t = true)]
     force_random_subdomains: bool,
 
@@ -94,11 +123,9 @@ struct Args {
     #[arg(long, value_enum)]
     random_subdomain_seed: Option<RandomSubdomainSeed>,
 
-    /// Prefix for TXT DNS records containing key fingerprints, for authorization to bind under a specific domain.
-    ///
-    /// In other words, valid records will be of the form: `TXT PREFIX.CUSTOM_DOMAIN SHA256:...`
-    #[arg(long, default_value_t = String::from("_sandhole"), value_parser = validate_txt_record_prefix)]
-    txt_record_prefix: String,
+    /// Time in seconds until an outgoing request is automatically canceled.
+    #[arg(long, default_value_t = 10)]
+    request_timeout: u64,
 }
 
 #[tokio::main]
@@ -115,10 +142,11 @@ async fn main() -> anyhow::Result<()> {
         ssh_port: args.ssh_port,
         http_port: args.http_port,
         https_port: args.https_port,
-        bind_any_host: args.bind_any_host,
+        bind_hostnames: args.bind_hostnames.into(),
+        txt_record_prefix: args.txt_record_prefix,
         force_random_subdomains: args.force_random_subdomains,
         random_subdomain_seed: args.random_subdomain_seed.map(Into::into),
-        txt_record_prefix: args.txt_record_prefix,
+        request_timeout: Duration::from_secs(args.request_timeout),
     };
     entrypoint(config).await
 }

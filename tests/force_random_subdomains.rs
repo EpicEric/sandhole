@@ -17,7 +17,10 @@ use rustls::{
     pki_types::{pem::PemObject, CertificateDer},
     RootCertStore,
 };
-use sandhole::{config::ApplicationConfig, entrypoint};
+use sandhole::{
+    config::{ApplicationConfig, BindHostnames},
+    entrypoint,
+};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
@@ -41,10 +44,11 @@ async fn force_random_subdomains() {
         ssh_port: 18022,
         http_port: 18080,
         https_port: 18443,
-        bind_any_host: false,
+        bind_hostnames: BindHostnames::None,
         force_random_subdomains: true,
         random_subdomain_seed: None,
         txt_record_prefix: "_sandhole".into(),
+        request_timeout: Duration::from_secs(5),
     };
     tokio::spawn(async move { entrypoint(config).await });
     if let Err(_) = timeout(Duration::from_secs(5), async {

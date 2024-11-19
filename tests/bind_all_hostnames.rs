@@ -21,7 +21,10 @@ use rustls::{
     pki_types::{pem::PemObject, CertificateDer},
     RootCertStore,
 };
-use sandhole::{config::ApplicationConfig, entrypoint};
+use sandhole::{
+    config::{ApplicationConfig, BindHostnames},
+    entrypoint,
+};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
@@ -30,7 +33,7 @@ use tokio_rustls::TlsConnector;
 use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn bind_any_host() {
+async fn bind_all_hostnames() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),
@@ -45,10 +48,11 @@ async fn bind_any_host() {
         ssh_port: 18022,
         http_port: 18080,
         https_port: 18443,
-        bind_any_host: true,
+        bind_hostnames: BindHostnames::All,
         force_random_subdomains: true,
         random_subdomain_seed: None,
         txt_record_prefix: "_sandhole".into(),
+        request_timeout: Duration::from_secs(5),
     };
     tokio::spawn(async move { entrypoint(config).await });
     if let Err(_) = timeout(Duration::from_secs(5), async {
