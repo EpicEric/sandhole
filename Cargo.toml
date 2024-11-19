@@ -28,6 +28,7 @@ rand_seeder = "0.3.0"
 russh = "0.46.0"
 russh-keys = "0.46.0"
 rustls = "0.23.16"
+rustls-acme = "0.12.1"
 rustls-webpki = "0.102.8"
 thiserror = "2.0.3"
 tokio = { version = "1", features = ["full"] }

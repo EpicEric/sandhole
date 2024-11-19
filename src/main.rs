@@ -29,13 +29,13 @@ impl From<RandomSubdomainSeed> for RSSConfig {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum BindHostnames {
-    /// Allow any hostnames unconditionally, including the domain.
+    /// Allow any hostnames unconditionally, including the main domain.
     All,
-    /// Allow any hostnames with valid DNS records, not including the domain.
+    /// Allow any hostnames with valid DNS records, not including the main domain.
     Valid,
-    /// Allow any hostnames with a TXT record containing a fingerprint, including the domain.
+    /// Allow any hostnames with a TXT record containing a fingerprint, including the main domain.
     Txt,
-    /// Don't allow user-provided hostnames, force subdomains.
+    /// Don't allow user-provided hostnames, enforce subdomains.
     None,
 }
 
@@ -103,6 +103,12 @@ struct Args {
     /// Always redirect HTTP requests to HTTPS.
     #[arg(long, default_value_t = false)]
     force_https: bool,
+
+    /// Contact e-mail to use with Let's Encrypt, in order to enable ACME certificates.
+    ///
+    /// By providing your e-mail, you agree to Let's Encrypt's Terms of Service: https://community.letsencrypt.org/tos
+    #[arg(long)]
+    https_contact_email: Option<String>,
 
     /// Policy on whether to allow binding specific hostnames.
     #[arg(long, value_enum, default_value_t = BindHostnames::Txt)]

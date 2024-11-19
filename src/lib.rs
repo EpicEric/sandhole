@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use certificates::CertificateResolver;
+use certificates::{CertificateResolver, DummyAlpnChallengeResolver};
 use config::ApplicationConfig;
 use http::proxy_handler;
 use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
@@ -19,6 +19,7 @@ use crate::{
     http::ConnectionMap,
 };
 
+mod acme;
 mod addressing;
 mod certificates;
 pub mod config;
@@ -73,9 +74,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             .with_context(|| "Error setting up public keys watcher")?,
     );
     let certificates = Arc::new(
-        CertificateResolver::watch(config.certificates_directory.clone())
-            .await
-            .with_context(|| "Error setting up certificates watcher")?,
+        CertificateResolver::<DummyAlpnChallengeResolver>::watch(
+            config.certificates_directory.clone(),
+            None,
+        )
+        .await
+        .with_context(|| "Error setting up certificates watcher")?,
     );
     let addressing = Arc::new(AddressDelegator::new(
         DnsResolver::new(),

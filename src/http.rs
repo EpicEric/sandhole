@@ -4,8 +4,10 @@ use std::{net::SocketAddr, sync::Arc};
 
 use super::error::ServerError;
 use async_trait::async_trait;
-use axum::body::Body as AxumBody;
-use axum::response::{IntoResponse, Redirect};
+use axum::{
+    body::Body as AxumBody,
+    response::{IntoResponse, Redirect},
+};
 use dashmap::DashMap;
 use hyper::{
     body::Body,
@@ -16,9 +18,11 @@ use hyper_util::rt::TokioIo;
 #[cfg(test)]
 use mockall::automock;
 use rand::seq::SliceRandom;
-use tokio::io::{copy_bidirectional, AsyncRead, AsyncWrite};
-use tokio::sync::mpsc;
-use tokio::time::timeout;
+use tokio::{
+    io::{copy_bidirectional, AsyncRead, AsyncWrite},
+    sync::mpsc,
+    time::timeout,
+};
 
 const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 const X_FORWARDED_HOST: &str = "X-Forwarded-Host";
