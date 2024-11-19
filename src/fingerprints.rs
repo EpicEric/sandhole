@@ -26,7 +26,7 @@ impl FingerprintsValidator {
         let (init_tx, init_rx) = oneshot::channel::<()>();
         let join_handle = tokio::spawn(async move {
             let mut init_tx = Some(init_tx);
-            while let Ok(_) = pubkeys_rx.changed().await {
+            while pubkeys_rx.changed().await.is_ok() {
                 let mut set = HashSet::new();
                 match read_dir(directory.as_path()).await {
                     Ok(mut read_dir) => {

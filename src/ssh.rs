@@ -123,7 +123,7 @@ impl Handler for ServerHandler {
         if self
             .server
             .fingerprints_validator
-            .is_key_allowed(&public_key)
+            .is_key_allowed(public_key)
         {
             self.key_fingerprint = Some(public_key.fingerprint());
             self.user = Some(user.to_string());

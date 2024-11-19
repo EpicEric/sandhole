@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
+use acme::AcmeResolver;
 use anyhow::Context;
-use certificates::{CertificateResolver, DummyAlpnChallengeResolver};
+use certificates::{AlpnChallengeResolver, CertificateResolver, DummyAlpnChallengeResolver};
 use config::ApplicationConfig;
 use http::proxy_handler;
 use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
@@ -9,20 +10,22 @@ use hyper_util::rt::TokioIo;
 use russh::server::{Config, Server as _};
 use russh_keys::decode_secret_key;
 use rustls::ServerConfig;
+use rustls_acme::is_tls_alpn_challenge;
 use ssh::SshTunnelHandler;
-use tokio::{fs, net::TcpListener};
-use tokio_rustls::TlsAcceptor;
+use tokio::{fs, io::AsyncWriteExt, net::TcpListener};
+use tokio_rustls::LazyConfigAcceptor;
 
 use crate::{
     addressing::{AddressDelegator, DnsResolver},
+    connections::ConnectionMap,
     fingerprints::FingerprintsValidator,
-    http::ConnectionMap,
 };
 
 mod acme;
 mod addressing;
 mod certificates;
 pub mod config;
+mod connections;
 mod directory;
 mod error;
 mod fingerprints;
@@ -31,7 +34,7 @@ mod ssh;
 
 #[derive(Clone)]
 pub(crate) struct SandholeServer {
-    pub(crate) http: Arc<ConnectionMap<Arc<SshTunnelHandler>>>,
+    pub(crate) http: Arc<ConnectionMap<Arc<SshTunnelHandler>, Arc<CertificateResolver>>>,
     pub(crate) fingerprints_validator: Arc<FingerprintsValidator>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
     pub(crate) http_port: u16,
@@ -67,20 +70,28 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         Err(err) => return Err(err).with_context(|| "Error reading secret key"),
     };
 
-    let http_connections = Arc::new(ConnectionMap::new());
     let fingerprints = Arc::new(
         FingerprintsValidator::watch(config.public_keys_directory.clone())
             .await
             .with_context(|| "Error setting up public keys watcher")?,
     );
+    let alpn_resolver: Box<dyn AlpnChallengeResolver> = match config.acme_contact_email {
+        Some(contact) => Box::new(AcmeResolver::new(
+            config.acme_cache_directory,
+            contact,
+            config.acme_use_production,
+        )),
+        None => Box::new(DummyAlpnChallengeResolver),
+    };
     let certificates = Arc::new(
-        CertificateResolver::<DummyAlpnChallengeResolver>::watch(
+        CertificateResolver::watch(
             config.certificates_directory.clone(),
-            None,
+            Arc::new(RwLock::new(alpn_resolver)),
         )
         .await
         .with_context(|| "Error setting up certificates watcher")?,
     );
+    let http_connections = Arc::new(ConnectionMap::new(Some(Arc::clone(&certificates))));
     let addressing = Arc::new(AddressDelegator::new(
         DnsResolver::new(),
         config.txt_record_prefix.trim_matches('.').to_string(),
@@ -128,16 +139,18 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let https_listener = TcpListener::bind((config.listen_address.clone(), config.https_port))
         .await
         .with_context(|| "Error listening to HTTP port and address")?;
-    let server_config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_cert_resolver(certificates);
-    let acceptor = TlsAcceptor::from(Arc::new(server_config));
+    let certificates_clone = Arc::clone(&certificates);
+    let server_config = Arc::new(
+        ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(certificates),
+    );
     let http_map = Arc::clone(&http_connections);
     tokio::spawn(async move {
         loop {
             let http_map = Arc::clone(&http_map);
             let domain_redirect = Arc::clone(&domain_redirect);
-            let acceptor = acceptor.clone();
+            let server_config = Arc::clone(&server_config);
             let (stream, address) = https_listener.accept().await.unwrap();
             let service = service_fn(move |req: Request<Incoming>| {
                 proxy_handler(
@@ -149,19 +162,33 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     config.request_timeout,
                 )
             });
-            let io = match acceptor.accept(stream).await {
-                Ok(stream) => TokioIo::new(stream),
+            match LazyConfigAcceptor::new(Default::default(), stream).await {
+                Ok(handshake) => {
+                    if is_tls_alpn_challenge(&handshake.client_hello()) {
+                        if let Some(challenge_config) = certificates_clone.challenge_rustls_config()
+                        {
+                            tokio::spawn(async move {
+                                let mut tls =
+                                    handshake.into_stream(challenge_config).await.unwrap();
+                                tls.shutdown().await.unwrap();
+                            });
+                        }
+                    } else {
+                        tokio::spawn(async move {
+                            let io =
+                                TokioIo::new(handshake.into_stream(server_config).await.unwrap());
+                            let conn = http1::Builder::new()
+                                .serve_connection(io, service)
+                                .with_upgrades();
+                            let _ = conn.await;
+                        });
+                    }
+                }
                 Err(err) => {
                     eprintln!("Failed to establish TLS handshake: {:?}", err);
                     continue;
                 }
-            };
-            tokio::spawn(async move {
-                let conn = http1::Builder::new()
-                    .serve_connection(io, service)
-                    .with_upgrades();
-                let _ = conn.await;
-            });
+            }
         }
     });
 

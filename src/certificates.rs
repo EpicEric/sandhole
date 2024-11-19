@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use crate::directory::watch_directory;
+use crate::{connections::ConnectionMapReactor, directory::watch_directory};
 #[cfg(test)]
 use mockall::automock;
 use notify::RecommendedWatcher;
@@ -15,41 +15,47 @@ use rustls::{
     pki_types::{pem::PemObject, DnsName, PrivateKeyDer, ServerName},
     server::{ClientHello, ParsedCertificate, ResolvesServerCert},
     sign::CertifiedKey,
+    ServerConfig,
 };
 use tokio::{fs::read_dir, sync::oneshot, task::JoinHandle};
 use trie_rs::map::{Trie, TrieBuilder};
 use webpki::{types::CertificateDer, EndEntityCert};
 
-#[cfg_attr(test, automock)]
-pub(crate) trait AlpnChallengeResolver {
-    fn is_alpn_challenge<'a>(&self, client: &ClientHello<'a>) -> bool;
-    fn resolve<'a>(&self, client: ClientHello<'a>) -> Option<Arc<CertifiedKey>>;
-}
-
 #[derive(Debug)]
 pub(crate) struct DummyAlpnChallengeResolver;
 
+#[cfg_attr(test, automock)]
+pub(crate) trait AlpnChallengeResolver: Debug + Send + Sync {
+    fn update_domains(&mut self, domains: Vec<String>);
+    #[allow(clippy::needless_lifetimes)]
+    fn resolve<'a>(&self, client: ClientHello<'a>) -> Option<Arc<CertifiedKey>>;
+    fn challenge_rustls_config(&self) -> Option<Arc<ServerConfig>>;
+}
+
 impl AlpnChallengeResolver for DummyAlpnChallengeResolver {
-    fn is_alpn_challenge<'a>(&self, _client: &ClientHello<'a>) -> bool {
-        false
+    fn update_domains(&mut self, _domains: Vec<String>) {}
+
+    fn resolve(&self, _client: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
+        None
     }
-    fn resolve<'a>(&self, _client: ClientHello<'a>) -> Option<Arc<CertifiedKey>> {
+
+    fn challenge_rustls_config(&self) -> Option<Arc<ServerConfig>> {
         None
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct CertificateResolver<A> {
+pub(crate) struct CertificateResolver {
     pub(crate) certificates: Arc<RwLock<Trie<String, Arc<CertifiedKey>>>>,
-    alpn_resolver: Option<A>,
+    alpn_resolver: Arc<RwLock<Box<dyn AlpnChallengeResolver>>>,
     join_handle: JoinHandle<()>,
     _watcher: RecommendedWatcher,
 }
 
-impl<A: AlpnChallengeResolver> CertificateResolver<A> {
+impl CertificateResolver {
     pub(crate) async fn watch(
         directory: PathBuf,
-        alpn_resolver: Option<A>,
+        alpn_resolver: Arc<RwLock<Box<dyn AlpnChallengeResolver>>>,
     ) -> anyhow::Result<Self> {
         let certificates: Arc<RwLock<Trie<String, Arc<CertifiedKey>>>> =
             Arc::new(RwLock::new(TrieBuilder::new().build()));
@@ -60,7 +66,7 @@ impl<A: AlpnChallengeResolver> CertificateResolver<A> {
         let (init_tx, init_rx) = oneshot::channel::<()>();
         let join_handle = tokio::spawn(async move {
             let mut init_tx = Some(init_tx);
-            while let Ok(_) = certificates_rx.changed().await {
+            while certificates_rx.changed().await.is_ok() {
                 let mut builder = TrieBuilder::new();
                 match read_dir(directory.as_path()).await {
                     Ok(mut read_dir) => {
@@ -155,7 +161,7 @@ impl<A: AlpnChallengeResolver> CertificateResolver<A> {
             .read()
             .unwrap()
             .common_prefix_search(
-                &server_name
+                server_name
                     .split('.')
                     .rev()
                     .map(String::from)
@@ -169,24 +175,35 @@ impl<A: AlpnChallengeResolver> CertificateResolver<A> {
             })
             .map(|(_, ck)| Arc::clone(ck))
     }
-}
 
-impl<A: AlpnChallengeResolver + Debug + Send + Sync> ResolvesServerCert for CertificateResolver<A> {
-    fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
-        if self
-            .alpn_resolver
-            .as_ref()
-            .is_some_and(|alpn_resolver| alpn_resolver.is_alpn_challenge(&client_hello))
-        {
-            return self.alpn_resolver.as_ref().unwrap().resolve(client_hello);
-        }
-        client_hello
-            .server_name()
-            .and_then(|server_name| self.resolve_server_name(server_name))
+    pub(crate) fn challenge_rustls_config(&self) -> Option<Arc<ServerConfig>> {
+        self.alpn_resolver.read().unwrap().challenge_rustls_config()
     }
 }
 
-impl<A> Drop for CertificateResolver<A> {
+impl ResolvesServerCert for CertificateResolver {
+    fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
+        match client_hello
+            .server_name()
+            .and_then(|server_name| self.resolve_server_name(server_name))
+        {
+            Some(cert) => Some(cert),
+            None => self.alpn_resolver.read().unwrap().resolve(client_hello),
+        }
+    }
+}
+
+impl ConnectionMapReactor for Arc<CertificateResolver> {
+    fn call(&self, hostnames: Vec<String>) {
+        let domains = hostnames
+            .into_iter()
+            .filter(|domain| self.resolve_server_name(domain.as_ref()).is_none())
+            .collect();
+        self.alpn_resolver.write().unwrap().update_domains(domains);
+    }
+}
+
+impl Drop for CertificateResolver {
     fn drop(&mut self) {
         self.join_handle.abort();
     }
@@ -194,7 +211,14 @@ impl<A> Drop for CertificateResolver<A> {
 
 #[cfg(test)]
 mod certificate_resolver_tests {
-    use super::{CertificateResolver, MockAlpnChallengeResolver};
+    use std::sync::{Arc, RwLock};
+
+    use mockall::predicate::eq;
+
+    use super::{
+        CertificateResolver, ConnectionMapReactor, DummyAlpnChallengeResolver,
+        MockAlpnChallengeResolver,
+    };
 
     static CERTIFICATES_DIRECTORY: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates");
@@ -206,9 +230,9 @@ mod certificate_resolver_tests {
 
     #[tokio::test]
     async fn allows_valid_domains() {
-        let resolver = CertificateResolver::<MockAlpnChallengeResolver>::watch(
+        let resolver = CertificateResolver::watch(
             CERTIFICATES_DIRECTORY.parse().unwrap(),
-            None,
+            Arc::new(RwLock::new(Box::new(DummyAlpnChallengeResolver))),
         )
         .await
         .unwrap();
@@ -222,14 +246,32 @@ mod certificate_resolver_tests {
 
     #[tokio::test]
     async fn forbids_invalid_domains() {
-        let resolver = CertificateResolver::<MockAlpnChallengeResolver>::watch(
+        let resolver = CertificateResolver::watch(
             CERTIFICATES_DIRECTORY.parse().unwrap(),
-            None,
+            Arc::new(RwLock::new(Box::new(DummyAlpnChallengeResolver))),
         )
         .await
         .unwrap();
         for domain in UNKNOWN_DOMAINS {
             assert!(resolver.resolve_server_name(domain).is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn updates_alpn_resolver_on_reaction() {
+        let mut mock = MockAlpnChallengeResolver::new();
+        mock.expect_update_domains()
+            .once()
+            .with(eq(vec!["example.com".to_string()]))
+            .returning(|_| {});
+        let resolver = Arc::new(
+            CertificateResolver::watch(
+                CERTIFICATES_DIRECTORY.parse().unwrap(),
+                Arc::new(RwLock::new(Box::new(mock))),
+            )
+            .await
+            .unwrap(),
+        );
+        resolver.call(vec!["foobar.tld".into(), "example.com".into()]);
     }
 }

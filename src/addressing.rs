@@ -109,12 +109,11 @@ impl<R: Resolver> AddressDelegator<R> {
             if matches!(self.bind_hostnames, BindHostnames::All) {
                 return requested_address.to_string();
             }
-            if matches!(self.bind_hostnames, BindHostnames::Valid) {
-                if requested_address != self.root_domain
-                    && self.resolver.has_valid_dns_records(requested_address).await
-                {
-                    return requested_address.to_string();
-                }
+            if matches!(self.bind_hostnames, BindHostnames::Valid)
+                && requested_address != self.root_domain
+                && self.resolver.has_valid_dns_records(requested_address).await
+            {
+                return requested_address.to_string();
             }
             if matches!(
                 self.bind_hostnames,

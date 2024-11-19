@@ -12,7 +12,6 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 
 Roughly in the order I intend to work on:
 
-- ACME for certificates
 - API-based password authentication
 - Admin interface through SSH
 - Generic TCP forwarding
