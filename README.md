@@ -12,7 +12,6 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 
 Roughly in the order I intend to work on:
 
-- Generic TCP forwarding
 - Temporarily allow unknown keys for SSH local port forwarding
 - Allow user-provided key fingerprints for a tunnel
 - Option to garbage-collect TCP/WebSocket connections
@@ -25,8 +24,8 @@ Roughly in the order I intend to work on:
 
 ## Features
 
-- HTTP port forwarding through SSH.
+- HTTP/SSH/TCP port forwarding through SSH.
 - Automatic HTTPS support (with a tool like [dnsrobocert](https://github.com/adferrand/dnsrobocert) and/or ACME).
-- Automatic subdomain assignment (by default), with options for deterministic assignment.
+- Automatic subdomain assignment by default, with options for deterministic assignment.
 - Authenticate proxy tunnels through DNS, via a TXT record containing the authorized key's fingerprint.
 - Written in Rust, with comprehensive testing of most features.

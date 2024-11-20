@@ -59,7 +59,6 @@ impl HttpHandler<ChannelStream<Msg>> for SshTunnelHandler {
         ip: &str,
         port: u16,
     ) -> anyhow::Result<TokioIo<ChannelStream<Msg>>> {
-        // TO-DO: Fix fields
         let channel = self
             .handle
             .channel_open_forwarded_tcpip(self.address.clone(), self.port, ip, port.into())
@@ -278,8 +277,48 @@ impl Handler for ServerHandler {
                 );
                 Ok(true)
             }
-            // TO-DO: Handle TCP (special cases: 0, 443)
-            _ => Err(russh::Error::RequestDenied),
+            // Handle TCP
+            1..=1024 => Ok(false),
+            _ => {
+                let assigned_port = if *port == 0 {
+                    let assigned_port = self.server.tcp_handler.get_free_port();
+                    *port = assigned_port.into();
+                    assigned_port
+                } else if self.server.tcp_handler.force_random_ports() {
+                    self.server.tcp_handler.get_free_port()
+                } else {
+                    *port as u16
+                };
+                self.tcp_ports.insert(assigned_port);
+                self.port_addressing
+                    .insert((address.clone(), *port), assigned_port);
+                println!(
+                    "Serving TCP port {} for {} ({})",
+                    &assigned_port, &address, self.peer
+                );
+                let _ = self
+                    .tx
+                    .send(
+                        format!(
+                            "Serving TCP port on {}:{}\r\n",
+                            self.server.domain, &assigned_port,
+                        )
+                        .into_bytes(),
+                    )
+                    .await;
+                self.server.tcp.insert(
+                    assigned_port,
+                    self.peer,
+                    Arc::new(SshTunnelHandler::new(
+                        handle,
+                        self.tx.clone(),
+                        self.peer,
+                        address,
+                        *port,
+                    )),
+                );
+                Ok(true)
+            }
         }
     }
 
@@ -313,8 +352,17 @@ impl Handler for ServerHandler {
                     Ok(false)
                 }
             }
-            // TO-DO: Handle TCP
-            _ => Err(russh::Error::RequestDenied),
+            _ => {
+                if let Some(assigned_port) =
+                    self.port_addressing.remove(&(address.to_string(), port))
+                {
+                    self.server.tcp.remove(&assigned_port, self.peer);
+                    self.tcp_ports.remove(&assigned_port);
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
         }
     }
 
@@ -402,6 +450,9 @@ impl Drop for ServerHandler {
         }
         for host in self.http_hosts.iter() {
             self.server.http.remove(host, self.peer);
+        }
+        for port in self.tcp_ports.iter() {
+            self.server.tcp.remove(port, self.peer);
         }
     }
 }

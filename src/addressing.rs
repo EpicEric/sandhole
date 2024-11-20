@@ -74,7 +74,6 @@ pub(crate) struct AddressDelegator<R> {
     random_subdomain_seed: Option<RandomSubdomainSeed>,
     bind_hostnames: BindHostnames,
     force_random_subdomains: bool,
-    force_random_ports: bool,
 }
 
 impl<R: Resolver> AddressDelegator<R> {
@@ -84,7 +83,6 @@ impl<R: Resolver> AddressDelegator<R> {
         root_domain: String,
         bind_hostnames: BindHostnames,
         force_random_subdomains: bool,
-        force_random_ports: bool,
         random_subdomain_seed: Option<RandomSubdomainSeed>,
     ) -> Self {
         debug_assert!(!txt_record_prefix.is_empty());
@@ -95,7 +93,6 @@ impl<R: Resolver> AddressDelegator<R> {
             root_domain,
             bind_hostnames,
             force_random_subdomains,
-            force_random_ports,
             random_subdomain_seed,
             seed: thread_rng().next_u64(),
         }
@@ -242,7 +239,6 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::All,
             false,
-            false,
             None,
         );
         let address = delegator
@@ -266,7 +262,6 @@ mod address_delegator_tests {
             "_some_prefix".into(),
             "root.tld".into(),
             BindHostnames::All,
-            false,
             false,
             None,
         );
@@ -294,7 +289,6 @@ mod address_delegator_tests {
             "_some_prefix".into(),
             "root.tld".into(),
             BindHostnames::Valid,
-            false,
             false,
             None,
         );
@@ -325,7 +319,6 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::Valid,
             false,
-            false,
             None,
         );
         let address = delegator
@@ -351,7 +344,6 @@ mod address_delegator_tests {
             "_some_prefix".into(),
             "root.tld".into(),
             BindHostnames::Txt,
-            false,
             false,
             None,
         );
@@ -379,7 +371,6 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::Txt,
             false,
-            false,
             None,
         );
         let address = delegator
@@ -406,7 +397,6 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::Txt,
             false,
-            false,
             None,
         );
         let address = delegator
@@ -430,7 +420,6 @@ mod address_delegator_tests {
             "_some_prefix".into(),
             "root.tld".into(),
             BindHostnames::None,
-            false,
             false,
             None,
         );
@@ -458,7 +447,6 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::Txt,
             false,
-            false,
             None,
         );
         let address = delegator
@@ -484,7 +472,6 @@ mod address_delegator_tests {
             "_some_prefix".into(),
             "root.tld".into(),
             BindHostnames::Txt,
-            false,
             false,
             None,
         );
@@ -518,7 +505,6 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::Txt,
             false,
-            false,
             None,
         );
         let address = delegator
@@ -548,7 +534,6 @@ mod address_delegator_tests {
             "_some_prefix".into(),
             "root.tld".into(),
             BindHostnames::Valid,
-            false,
             false,
             None,
         );
@@ -580,7 +565,6 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::None,
             true,
-            false,
             None,
         );
         let mut set = std::collections::HashSet::new();
@@ -611,7 +595,6 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::None,
             true,
-            false,
             Some(crate::config::RandomSubdomainSeed::User),
         );
         let address1_u1_a1 = delegator
@@ -666,7 +649,6 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::None,
             true,
-            false,
             Some(crate::config::RandomSubdomainSeed::KeyFingerprint),
         );
         let address1_f1_a1 = delegator
@@ -721,7 +703,6 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::None,
             true,
-            false,
             Some(crate::config::RandomSubdomainSeed::SocketAddress),
         );
         let address1_s1_a1 = delegator

@@ -71,9 +71,7 @@ async fn https_force_random_subdomains() {
         None,
     )
     .expect("Missing file key1");
-    let ssh_client = SshClient {
-        router: Router::new().route("/", get(|| async move { format!("This was a triumph.") })),
-    };
+    let ssh_client = SshClient;
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
@@ -177,9 +175,7 @@ async fn https_force_random_subdomains() {
     assert_eq!(response_body, "This was a triumph.");
 }
 
-struct SshClient {
-    router: Router,
-}
+struct SshClient;
 
 #[async_trait]
 impl russh::client::Handler for SshClient {
@@ -198,7 +194,9 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let router = self.router.clone().into_service();
+        let router = Router::new()
+            .route("/", get(|| async move { format!("This was a triumph.") }))
+            .into_service();
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {
             Builder::new(TokioExecutor::new())

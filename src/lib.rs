@@ -9,6 +9,7 @@ use russh::server::Config;
 use russh_keys::decode_secret_key;
 use rustls::ServerConfig;
 use rustls_acme::is_tls_alpn_challenge;
+use tcp::TcpHandler;
 use tokio::{fs, io::AsyncWriteExt, net::TcpListener};
 use tokio_rustls::LazyConfigAcceptor;
 
@@ -17,7 +18,7 @@ use crate::{
     addressing::{AddressDelegator, DnsResolver},
     certificates::{AlpnChallengeResolver, CertificateResolver, DummyAlpnChallengeResolver},
     config::ApplicationConfig,
-    connections::{ConnectionMap, DummyConnectionMapReactor},
+    connections::ConnectionMap,
     error::ServerError,
     fingerprints::FingerprintsValidator,
     http::{proxy_handler, Protocol},
@@ -39,10 +40,11 @@ mod tcp;
 #[derive(Clone)]
 pub(crate) struct SandholeServer {
     pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, Arc<CertificateResolver>>>,
-    pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, DummyConnectionMapReactor>>,
-    pub(crate) tcp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, DummyConnectionMapReactor>>,
+    pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>>>,
+    pub(crate) tcp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
     pub(crate) fingerprints_validator: Arc<FingerprintsValidator>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
+    pub(crate) tcp_handler: Arc<TcpHandler>,
     pub(crate) domain: String,
     pub(crate) http_port: u16,
     pub(crate) https_port: u16,
@@ -109,13 +111,18 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let http_connections = Arc::new(ConnectionMap::new(Some(Arc::clone(&certificates))));
     let ssh_connections = Arc::new(ConnectionMap::new(None));
     let tcp_connections = Arc::new(ConnectionMap::new(None));
+    let tcp_handler: Arc<TcpHandler> = Arc::new(TcpHandler::new(
+        config.listen_address.clone(),
+        Arc::clone(&tcp_connections),
+        !config.allow_requested_ports,
+    ));
+    tcp_connections.update_reactor(Some(Arc::clone(&tcp_handler)));
     let addressing = Arc::new(AddressDelegator::new(
         DnsResolver::new(),
         config.txt_record_prefix.trim_matches('.').to_string(),
         config.domain.trim_matches('.').to_string(),
         config.bind_hostnames,
         !config.allow_provided_subdomains,
-        !config.allow_requested_ports,
         config.random_subdomain_seed,
     ));
     let domain_redirect = Arc::new(DomainRedirect {
@@ -238,6 +245,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         tcp: tcp_connections,
         fingerprints_validator: fingerprints,
         address_delegator: addressing,
+        tcp_handler: tcp_handler,
         domain: config.domain,
         http_port: config.http_port,
         https_port: config.https_port,

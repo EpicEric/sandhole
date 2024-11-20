@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, hash::Hash, net::SocketAddr};
+use std::{borrow::Borrow, hash::Hash, net::SocketAddr, sync::RwLock};
 
 use dashmap::DashMap;
 #[cfg(test)]
@@ -16,9 +16,9 @@ impl<K> ConnectionMapReactor<K> for DummyConnectionMapReactor {
     fn call(&self, _: Vec<K>) {}
 }
 
-pub(crate) struct ConnectionMap<K, H, R> {
+pub(crate) struct ConnectionMap<K, H, R = DummyConnectionMapReactor> {
     map: DashMap<K, Vec<(SocketAddr, H)>>,
-    reactor: Option<R>,
+    reactor: RwLock<Option<R>>,
 }
 
 impl<K, H, R> ConnectionMap<K, H, R>
@@ -30,27 +30,27 @@ where
     pub(crate) fn new(reactor: Option<R>) -> Self {
         ConnectionMap {
             map: DashMap::new(),
-            reactor,
+            reactor: RwLock::new(reactor),
         }
     }
 
-    pub(crate) fn insert(&self, host: K, addr: SocketAddr, handler: H) {
+    pub(crate) fn insert(&self, key: K, addr: SocketAddr, handler: H) {
         let len = self.map.len();
-        self.map.entry(host).or_default().push((addr, handler));
+        self.map.entry(key).or_default().push((addr, handler));
         if self.map.len() > len {
-            if let Some(reactor) = self.reactor.as_ref() {
+            if let Some(reactor) = self.reactor.read().unwrap().as_ref() {
                 reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
             }
         }
     }
 
-    pub(crate) fn get<Q>(&self, host: &Q) -> Option<H>
+    pub(crate) fn get<Q>(&self, key: &Q) -> Option<H>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         let mut rng = rand::thread_rng();
-        self.map.get(host).and_then(|handler| {
+        self.map.get(key).and_then(|handler| {
             handler
                 .value()
                 .as_slice()
@@ -59,21 +59,25 @@ where
         })
     }
 
-    pub(crate) fn remove<Q>(&self, host: &Q, addr: SocketAddr)
+    pub(crate) fn remove<Q>(&self, key: &Q, addr: SocketAddr)
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         let len = self.map.len();
-        self.map.remove_if_mut(host, |_, value| {
+        self.map.remove_if_mut(key, |_, value| {
             value.retain(|(address, _)| *address != addr);
             value.is_empty()
         });
         if self.map.len() < len {
-            if let Some(reactor) = self.reactor.as_ref() {
+            if let Some(reactor) = self.reactor.read().unwrap().as_ref() {
                 reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
             }
         }
+    }
+
+    pub(crate) fn update_reactor(&self, reactor: Option<R>) {
+        *self.reactor.write().unwrap() = reactor;
     }
 }
 
