@@ -8,4 +8,6 @@ pub(crate) enum ServerError {
     MissingUpgradeHeader,
     #[error("Request timed out")]
     RequestTimeout,
+    #[error("Invalid file path")]
+    InvalidFilePath,
 }

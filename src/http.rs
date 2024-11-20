@@ -26,12 +26,14 @@ use tokio::{
 
 const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 const X_FORWARDED_HOST: &str = "X-Forwarded-Host";
+const X_FORWARDED_PROTO: &str = "X-Forwarded-Proto";
+const X_FORWARDED_PORT: &str = "X-Forwarded-Port";
 
 #[cfg_attr(test, automock)]
 #[async_trait]
 pub(crate) trait HttpHandler<T: Sync> {
     fn log_channel(&self) -> mpsc::Sender<Vec<u8>>;
-    async fn tunneling_channel(&self, tcp_address: SocketAddr) -> anyhow::Result<TokioIo<T>>;
+    async fn tunneling_channel(&self, ip: &str, port: u16) -> anyhow::Result<TokioIo<T>>;
 }
 
 fn http_log(
@@ -65,12 +67,26 @@ fn http_log(
     let _ = tx.map(|tx| tx.try_send(line.into_bytes()));
 }
 
+pub(crate) enum Protocol {
+    Http {
+        port: u16,
+    },
+    #[allow(dead_code)]
+    TlsRedirect {
+        from: u16,
+        to: u16,
+    },
+    Https {
+        port: u16,
+    },
+}
+
 pub(crate) async fn proxy_handler<B, H, T, R>(
     mut request: Request<B>,
     tcp_address: SocketAddr,
-    conn_manager: Arc<ConnectionMap<Arc<H>, R>>,
+    conn_manager: Arc<ConnectionMap<String, Arc<H>, R>>,
     domain_redirect: Arc<(String, String)>,
-    redirect_to_https: Option<u16>,
+    protocol: Protocol,
     request_timeout: Duration,
 ) -> anyhow::Result<Response<AxumBody>>
 where
@@ -79,7 +95,7 @@ where
     B: Body + Send + 'static,
     <B as Body>::Data: Send + Sync + 'static,
     <B as Body>::Error: Error + Send + Sync + 'static,
-    R: ConnectionMapReactor + Send + 'static,
+    R: ConnectionMapReactor<String> + Send + 'static,
 {
     let timer = Instant::now();
     let host = request
@@ -93,20 +109,29 @@ where
         .to_owned();
     let Some(handler) = conn_manager.get(&host) else {
         if domain_redirect.0 == host {
+            let elapsed = timer.elapsed();
+            http_log(
+                StatusCode::SEE_OTHER.as_u16(),
+                request.method().as_str(),
+                &host,
+                request.uri().path(),
+                elapsed,
+                None,
+            );
             return Ok(Redirect::to(&domain_redirect.1).into_response());
         }
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
-    if let Some(port) = redirect_to_https {
+    if let Protocol::TlsRedirect { to: to_port, .. } = protocol {
         let elapsed = timer.elapsed();
         let response = Redirect::permanent(
             format!(
                 "https://{}{}{}",
                 host,
-                if port == 443 {
+                if to_port == 443 {
                     "".into()
                 } else {
-                    format!(":{port}")
+                    format!(":{to_port}")
                 },
                 request
                     .uri()
@@ -121,21 +146,32 @@ where
             response.status().as_u16(),
             request.method().as_str(),
             &host,
-            &request.uri().path().to_string(),
+            request.uri().path(),
             elapsed,
             None,
         );
         return Ok(response);
     }
-    request.headers_mut().insert(
-        X_FORWARDED_FOR,
-        tcp_address.ip().to_string().parse().unwrap(),
-    );
+    let (proto, port) = match protocol {
+        Protocol::Http { port } => ("http", port.to_string()),
+        Protocol::Https { port } => ("https", port.to_string()),
+        Protocol::TlsRedirect { .. } => unreachable!(),
+    };
+    let ip = tcp_address.ip().to_string();
+    request
+        .headers_mut()
+        .insert(X_FORWARDED_FOR, ip.parse().unwrap());
     request
         .headers_mut()
         .insert(X_FORWARDED_HOST, host.parse().unwrap());
+    request
+        .headers_mut()
+        .insert(X_FORWARDED_PROTO, proto.parse().unwrap());
+    request
+        .headers_mut()
+        .insert(X_FORWARDED_PORT, port.parse().unwrap());
 
-    let io = handler.tunneling_channel(tcp_address).await?;
+    let io = handler.tunneling_channel(&ip, tcp_address.port()).await?;
     let tx = handler.log_channel();
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
 
@@ -224,12 +260,16 @@ mod proxy_handler_tests {
 
     use crate::connections::MockConnectionMapReactor;
 
-    use super::{proxy_handler, ConnectionMap, MockHttpHandler};
+    use super::{proxy_handler, ConnectionMap, MockHttpHandler, Protocol};
 
     #[tokio::test]
     async fn errors_on_missing_host_header() {
         let conn_manager: Arc<
-            ConnectionMap<Arc<MockHttpHandler<DuplexStream>>, MockConnectionMapReactor>,
+            ConnectionMap<
+                String,
+                Arc<MockHttpHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
         > = Arc::new(ConnectionMap::new(None));
         let request = Request::builder()
             .method("GET")
@@ -241,7 +281,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
-            None,
+            Protocol::Http { port: 80 },
             Duration::from_secs(5),
         )
         .await;
@@ -251,7 +291,11 @@ mod proxy_handler_tests {
     #[tokio::test]
     async fn returns_not_found_on_missing_handler() {
         let conn_manager: Arc<
-            ConnectionMap<Arc<MockHttpHandler<DuplexStream>>, MockConnectionMapReactor>,
+            ConnectionMap<
+                String,
+                Arc<MockHttpHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
         > = Arc::new(ConnectionMap::new(None));
         let request = Request::builder()
             .method("GET")
@@ -264,7 +308,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
-            None,
+            Protocol::Http { port: 80 },
             Duration::from_secs(5),
         )
         .await;
@@ -276,7 +320,11 @@ mod proxy_handler_tests {
     #[tokio::test]
     async fn returns_redirect_for_root_domain_and_missing_handler() {
         let conn_manager: Arc<
-            ConnectionMap<Arc<MockHttpHandler<DuplexStream>>, MockConnectionMapReactor>,
+            ConnectionMap<
+                String,
+                Arc<MockHttpHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
         > = Arc::new(ConnectionMap::new(None));
         let request = Request::builder()
             .method("GET")
@@ -289,7 +337,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
-            None,
+            Protocol::Http { port: 80 },
             Duration::from_secs(5),
         )
         .await;
@@ -305,7 +353,11 @@ mod proxy_handler_tests {
     #[tokio::test]
     async fn returns_redirect_to_https() {
         let conn_manager: Arc<
-            ConnectionMap<Arc<MockHttpHandler<DuplexStream>>, MockConnectionMapReactor>,
+            ConnectionMap<
+                String,
+                Arc<MockHttpHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
         > = Arc::new(ConnectionMap::new(None));
         let mut mock = MockHttpHandler::new();
         mock.expect_log_channel().never();
@@ -326,7 +378,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
-            Some(443),
+            Protocol::TlsRedirect { from: 80, to: 443 },
             Duration::from_secs(5),
         )
         .await;
@@ -342,7 +394,11 @@ mod proxy_handler_tests {
     #[tokio::test]
     async fn returns_redirect_to_non_standard_https_port() {
         let conn_manager: Arc<
-            ConnectionMap<Arc<MockHttpHandler<DuplexStream>>, MockConnectionMapReactor>,
+            ConnectionMap<
+                String,
+                Arc<MockHttpHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
         > = Arc::new(ConnectionMap::new(None));
         let mut mock = MockHttpHandler::new();
         mock.expect_log_channel().never();
@@ -363,7 +419,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
-            Some(8443),
+            Protocol::TlsRedirect { from: 80, to: 8443 },
             Duration::from_secs(5),
         )
         .await;
@@ -379,7 +435,11 @@ mod proxy_handler_tests {
     #[tokio::test]
     async fn returns_response_for_existing_handler() {
         let conn_manager: Arc<
-            ConnectionMap<Arc<MockHttpHandler<DuplexStream>>, MockConnectionMapReactor>,
+            ConnectionMap<
+                String,
+                Arc<MockHttpHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
         > = Arc::new(ConnectionMap::new(None));
         let (server, handler) = tokio::io::duplex(1024);
         let (logging_tx, logging_rx) = mpsc::channel::<Vec<u8>>(1);
@@ -389,7 +449,7 @@ mod proxy_handler_tests {
             .return_once(move || logging_tx);
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_| Ok(TokioIo::new(handler)));
+            .return_once(move |_, _| Ok(TokioIo::new(handler)));
         conn_manager.insert(
             "with.handler".into(),
             "127.0.0.1:12345".parse().unwrap(),
@@ -429,7 +489,7 @@ mod proxy_handler_tests {
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("main.domain".into(), "https://example.com".into())),
-            None,
+            Protocol::Https { port: 443 },
             Duration::from_secs(5),
         )
         .await;
@@ -446,7 +506,11 @@ mod proxy_handler_tests {
     #[tokio::test]
     async fn returns_response_for_handler_of_root_domain() {
         let conn_manager: Arc<
-            ConnectionMap<Arc<MockHttpHandler<DuplexStream>>, MockConnectionMapReactor>,
+            ConnectionMap<
+                String,
+                Arc<MockHttpHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
         > = Arc::new(ConnectionMap::new(None));
         let (server, handler) = tokio::io::duplex(1024);
         let (logging_tx, logging_rx) = mpsc::channel::<Vec<u8>>(1);
@@ -456,7 +520,7 @@ mod proxy_handler_tests {
             .return_once(move || logging_tx);
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_| Ok(TokioIo::new(handler)));
+            .return_once(move |_, _| Ok(TokioIo::new(handler)));
         conn_manager.insert(
             "root.domain".into(),
             "127.0.0.1:12345".parse().unwrap(),
@@ -496,7 +560,7 @@ mod proxy_handler_tests {
             "192.168.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
             Arc::new(("root.domain".into(), "https://this.is.ignored".into())),
-            None,
+            Protocol::Https { port: 443 },
             Duration::from_secs(5),
         )
         .await;
@@ -513,7 +577,11 @@ mod proxy_handler_tests {
     #[tokio::test]
     async fn returns_websocket_upgrade_for_existing_handler() {
         let conn_manager: Arc<
-            ConnectionMap<Arc<MockHttpHandler<DuplexStream>>, MockConnectionMapReactor>,
+            ConnectionMap<
+                String,
+                Arc<MockHttpHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
         > = Arc::new(ConnectionMap::new(None));
         let (server, handler) = tokio::io::duplex(1024);
         let (logging_tx, logging_rx) = mpsc::channel::<Vec<u8>>(1);
@@ -523,7 +591,7 @@ mod proxy_handler_tests {
             .return_once(move || logging_tx);
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_| Ok(TokioIo::new(handler)));
+            .return_once(move |_, _| Ok(TokioIo::new(handler)));
         conn_manager.insert(
             "with.websocket".into(),
             "127.0.0.1:12345".parse().unwrap(),
@@ -557,7 +625,7 @@ mod proxy_handler_tests {
                 "127.0.0.1:12345".parse().unwrap(),
                 Arc::clone(&conn_manager),
                 Arc::new(("main.domain".into(), "https://example.com".into())),
-                None,
+                Protocol::Https { port: 443 },
                 Duration::from_secs(5),
             )
         });

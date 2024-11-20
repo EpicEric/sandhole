@@ -72,20 +72,12 @@ struct Args {
     #[arg(long, default_value_os = "./deploy/certificates/")]
     certificates_directory: PathBuf,
 
-    /// File path to the server's secret key.
+    /// File path to the server's secret key. If missing, it will be created for you.
     #[arg(long, default_value_os = "./deploy/server_keys/ssh")]
     private_key_file: PathBuf,
 
-    /// Password to use for the server's secret key, if any.
-    #[arg(long)]
-    private_key_password: Option<String>,
-
-    /// Whether to create a private key file if missing.
-    // #[arg(long, default_value_t = true)]
-    // create_private_key_file: bool,
-
     /// Address to listen for all client connections.
-    #[arg(long, default_value_t = String::from("0.0.0.0"))]
+    #[arg(long, default_value_t = String::from("::"))]
     listen_address: String,
 
     /// Port to listen for SSH connections.
@@ -121,6 +113,8 @@ struct Args {
     acme_use_staging: bool,
 
     /// Policy on whether to allow binding specific hostnames.
+    ///
+    /// Beware that this can lead to domain takeovers if misused!
     #[arg(long, value_enum, default_value_t = BindHostnames::Txt)]
     bind_hostnames: BindHostnames,
 
@@ -130,9 +124,13 @@ struct Args {
     #[arg(long, default_value_t = String::from("_sandhole"), value_parser = validate_txt_record_prefix)]
     txt_record_prefix: String,
 
-    /// Allow user-provided subdomains instead of always forcing random ones.
+    /// Allow user-provided subdomains. By default, subdomains are always random.
     #[arg(long, default_value_t = false)]
     allow_provided_subdomains: bool,
+
+    /// Allow user-requested ports. By default, ports are always random.
+    #[arg(long, default_value_t = false)]
+    allow_requested_ports: bool,
 
     /// Which value to seed with when generating random subdomains, for determinism. This allows binding to the same
     /// random address until Sandhole is restarted.
@@ -143,7 +141,7 @@ struct Args {
     #[arg(long, value_enum)]
     random_subdomain_seed: Option<RandomSubdomainSeed>,
 
-    /// Time in seconds until an outgoing request is automatically canceled.
+    /// Time in seconds until an outgoing HTTP request is automatically canceled.
     #[arg(long, default_value_t = 10)]
     request_timeout: u64,
 }
@@ -157,7 +155,6 @@ async fn main() -> anyhow::Result<()> {
         public_keys_directory: args.public_keys_directory,
         certificates_directory: args.certificates_directory,
         private_key_file: args.private_key_file,
-        private_key_password: args.private_key_password,
         listen_address: args.listen_address,
         ssh_port: args.ssh_port,
         http_port: args.http_port,
@@ -169,6 +166,7 @@ async fn main() -> anyhow::Result<()> {
         bind_hostnames: args.bind_hostnames.into(),
         txt_record_prefix: args.txt_record_prefix,
         allow_provided_subdomains: args.allow_provided_subdomains,
+        allow_requested_ports: args.allow_requested_ports,
         random_subdomain_seed: args.random_subdomain_seed.map(Into::into),
         request_timeout: Duration::from_secs(args.request_timeout),
     };

@@ -39,7 +39,9 @@ impl AlpnChallengeResolver for AcmeResolver {
         if domains.is_empty() {
             return;
         }
-        self.join_handle.take().map(|jh| jh.abort());
+        if let Some(jh) = self.join_handle.take() {
+            jh.abort();
+        }
         let mut new_state = AcmeConfig::new(domains)
             .contact_push(format!("mailto:{}", self.contact))
             .cache(DirCache::new(self.cache_dir.clone()))

@@ -22,7 +22,6 @@ pub struct ApplicationConfig {
     pub public_keys_directory: PathBuf,
     pub certificates_directory: PathBuf,
     pub private_key_file: PathBuf,
-    pub private_key_password: Option<String>,
     pub listen_address: String,
     pub ssh_port: u16,
     pub http_port: u16,
@@ -34,6 +33,7 @@ pub struct ApplicationConfig {
     pub bind_hostnames: BindHostnames,
     pub txt_record_prefix: String,
     pub allow_provided_subdomains: bool,
+    pub allow_requested_ports: bool,
     pub random_subdomain_seed: Option<RandomSubdomainSeed>,
     pub request_timeout: Duration,
 }

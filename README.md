@@ -12,11 +12,12 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 
 Roughly in the order I intend to work on:
 
+- Local port forwarding
+- Generic TCP forwarding
+- Use env_logger
+- Option to garbage-collect TCP/WebSocket connections
 - API-based password authentication
 - Admin interface through SSH
-- Generic TCP forwarding
-- Local port forwarding
-- Use env_logger
 - Documentation
 - Improve technical debts
 - And more
@@ -27,4 +28,4 @@ Roughly in the order I intend to work on:
 - Automatic HTTPS support (with a tool like [dnsrobocert](https://github.com/adferrand/dnsrobocert) and/or ACME).
 - Automatic subdomain assignment (by default), with options for deterministic assignment.
 - Authenticate proxy tunnels through DNS, via a TXT record containing the authorized key's fingerprint.
-- Written in Rust, with comprehensive testing of features.
+- Written in Rust, with comprehensive testing of most features.

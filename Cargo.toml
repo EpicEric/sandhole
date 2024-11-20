@@ -30,6 +30,7 @@ russh-keys = "0.46.0"
 rustls = "0.23.16"
 rustls-acme = "0.12.1"
 rustls-webpki = "0.102.8"
+ssh-key = "0.6.7"
 thiserror = "2.0.3"
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = "0.26.0"

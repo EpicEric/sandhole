@@ -39,7 +39,6 @@ async fn force_random_subdomains() {
         certificates_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates")
             .into(),
         private_key_file: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh").into(),
-        private_key_password: None,
         listen_address: "127.0.0.1".into(),
         ssh_port: 18022,
         http_port: 18080,
@@ -50,6 +49,7 @@ async fn force_random_subdomains() {
         acme_use_staging: true,
         bind_hostnames: BindHostnames::None,
         allow_provided_subdomains: false,
+        allow_requested_ports: false,
         random_subdomain_seed: None,
         txt_record_prefix: "_sandhole".into(),
         request_timeout: Duration::from_secs(5),

@@ -193,7 +193,7 @@ impl ResolvesServerCert for CertificateResolver {
     }
 }
 
-impl ConnectionMapReactor for Arc<CertificateResolver> {
+impl ConnectionMapReactor<String> for Arc<CertificateResolver> {
     fn call(&self, hostnames: Vec<String>) {
         let domains = hostnames
             .into_iter()

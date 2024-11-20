@@ -2934,6 +2934,7 @@ dependencies = [
  "rustls",
  "rustls-acme",
  "rustls-webpki",
+ "ssh-key",
  "thiserror 2.0.3",
  "tokio",
  "tokio-rustls",
