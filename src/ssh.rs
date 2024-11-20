@@ -105,7 +105,7 @@ impl Server for Arc<SandholeServer> {
             host_addressing: HashMap::new(),
             port_addressing: HashMap::new(),
             address_delegator: Arc::clone(&self.address_delegator),
-            server: Arc::clone(&self),
+            server: Arc::clone(self),
         }
     }
 }
@@ -195,12 +195,21 @@ impl Handler for ServerHandler {
                     .tx
                     .send(
                         format!(
-                            "Serving SSH on http://{}{}\r\n",
+                            "Serving SSH on {}:{}\r\n\x1b[2mhint: connect with ssh -J {}{} {}{}\x1b[0m\r\n",
                             &assigned_host,
-                            match self.server.http_port {
-                                80 => "".into(),
-                                port => format!(":{}", port),
-                            }
+                            self.server.ssh_port,
+                            self.server.domain,
+                            if self.server.ssh_port == 22 {
+                                "".into()
+                            } else {
+                                format!(":{}", self.server.ssh_port)
+                            },
+                            &assigned_host,
+                            if self.server.ssh_port == 22 {
+                                "".into()
+                            } else {
+                                format!(" -p {}", self.server.ssh_port)
+                            },
                         )
                         .into_bytes(),
                     )
@@ -218,7 +227,7 @@ impl Handler for ServerHandler {
                 );
                 Ok(true)
             }
-            80 => {
+            80 | 443 => {
                 // Assign HTTP host through config
                 let assigned_host = self
                     .address_delegator
@@ -293,7 +302,7 @@ impl Handler for ServerHandler {
                     Ok(false)
                 }
             }
-            80 => {
+            80 | 443 => {
                 if let Some(assigned_host) =
                     self.host_addressing.remove(&(address.to_string(), port))
                 {
@@ -304,7 +313,7 @@ impl Handler for ServerHandler {
                     Ok(false)
                 }
             }
-            // TO-DO: Handle TCP (special cases: 0, 443)
+            // TO-DO: Handle TCP
             _ => Err(russh::Error::RequestDenied),
         }
     }
@@ -323,7 +332,7 @@ impl Handler for ServerHandler {
         if port_to_connect == self.server.http_port || port_to_connect == self.server.https_port {
             if let Some(handler) = self.server.http.get(host_to_connect) {
                 if let Ok(mut io) = handler
-                    .tunneling_channel(&originator_address, originator_port as u16)
+                    .tunneling_channel(originator_address, originator_port as u16)
                     .await
                 {
                     tokio::spawn(async move {
@@ -344,7 +353,7 @@ impl Handler for ServerHandler {
         } else if port_to_connect == self.server.ssh_port {
             if let Some(handler) = self.server.ssh.get(host_to_connect) {
                 if let Ok(mut io) = handler
-                    .tunneling_channel(&originator_address, originator_port as u16)
+                    .tunneling_channel(originator_address, originator_port as u16)
                     .await
                 {
                     tokio::spawn(async move {
@@ -364,7 +373,7 @@ impl Handler for ServerHandler {
             }
         } else if let Some(handler) = self.server.tcp.get(&port_to_connect) {
             if let Ok(mut io) = handler
-                .tunneling_channel(&originator_address, originator_port as u16)
+                .tunneling_channel(originator_address, originator_port as u16)
                 .await
             {
                 tokio::spawn(async move {

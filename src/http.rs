@@ -81,11 +81,16 @@ pub(crate) enum Protocol {
     },
 }
 
+pub(crate) struct DomainRedirect {
+    pub(crate) from: String,
+    pub(crate) to: String,
+}
+
 pub(crate) async fn proxy_handler<B, H, T, R>(
     mut request: Request<B>,
     tcp_address: SocketAddr,
     conn_manager: Arc<ConnectionMap<String, Arc<H>, R>>,
-    domain_redirect: Arc<(String, String)>,
+    domain_redirect: Arc<DomainRedirect>,
     protocol: Protocol,
     request_timeout: Duration,
 ) -> anyhow::Result<Response<AxumBody>>
@@ -108,7 +113,7 @@ where
         .ok_or(ServerError::InvalidHostHeader)?
         .to_owned();
     let Some(handler) = conn_manager.get(&host) else {
-        if domain_redirect.0 == host {
+        if domain_redirect.from == host {
             let elapsed = timer.elapsed();
             http_log(
                 StatusCode::SEE_OTHER.as_u16(),
@@ -118,7 +123,7 @@ where
                 elapsed,
                 None,
             );
-            return Ok(Redirect::to(&domain_redirect.1).into_response());
+            return Ok(Redirect::to(&domain_redirect.to).into_response());
         }
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
@@ -260,7 +265,7 @@ mod proxy_handler_tests {
 
     use crate::connections::MockConnectionMapReactor;
 
-    use super::{proxy_handler, ConnectionMap, MockHttpHandler, Protocol};
+    use super::{proxy_handler, ConnectionMap, DomainRedirect, MockHttpHandler, Protocol};
 
     #[tokio::test]
     async fn errors_on_missing_host_header() {
@@ -280,7 +285,10 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
-            Arc::new(("main.domain".into(), "https://example.com".into())),
+            Arc::new(DomainRedirect {
+                from: "main.domain".into(),
+                to: "https://example.com".into(),
+            }),
             Protocol::Http { port: 80 },
             Duration::from_secs(5),
         )
@@ -307,7 +315,10 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
-            Arc::new(("main.domain".into(), "https://example.com".into())),
+            Arc::new(DomainRedirect {
+                from: "main.domain".into(),
+                to: "https://example.com".into(),
+            }),
             Protocol::Http { port: 80 },
             Duration::from_secs(5),
         )
@@ -336,7 +347,10 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
-            Arc::new(("main.domain".into(), "https://example.com".into())),
+            Arc::new(DomainRedirect {
+                from: "main.domain".into(),
+                to: "https://example.com".into(),
+            }),
             Protocol::Http { port: 80 },
             Duration::from_secs(5),
         )
@@ -377,7 +391,10 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
-            Arc::new(("main.domain".into(), "https://example.com".into())),
+            Arc::new(DomainRedirect {
+                from: "main.domain".into(),
+                to: "https://example.com".into(),
+            }),
             Protocol::TlsRedirect { from: 80, to: 443 },
             Duration::from_secs(5),
         )
@@ -418,7 +435,10 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
-            Arc::new(("main.domain".into(), "https://example.com".into())),
+            Arc::new(DomainRedirect {
+                from: "main.domain".into(),
+                to: "https://example.com".into(),
+            }),
             Protocol::TlsRedirect { from: 80, to: 8443 },
             Duration::from_secs(5),
         )
@@ -488,7 +508,10 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
-            Arc::new(("main.domain".into(), "https://example.com".into())),
+            Arc::new(DomainRedirect {
+                from: "main.domain".into(),
+                to: "https://example.com".into(),
+            }),
             Protocol::Https { port: 443 },
             Duration::from_secs(5),
         )
@@ -559,7 +582,10 @@ mod proxy_handler_tests {
             request,
             "192.168.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
-            Arc::new(("root.domain".into(), "https://this.is.ignored".into())),
+            Arc::new(DomainRedirect {
+                from: "root.domain".into(),
+                to: "https://this.is.ignored".into(),
+            }),
             Protocol::Https { port: 443 },
             Duration::from_secs(5),
         )
@@ -624,7 +650,10 @@ mod proxy_handler_tests {
                 request,
                 "127.0.0.1:12345".parse().unwrap(),
                 Arc::clone(&conn_manager),
-                Arc::new(("main.domain".into(), "https://example.com".into())),
+                Arc::new(DomainRedirect {
+                    from: "main.domain".into(),
+                    to: "https://example.com".into(),
+                }),
                 Protocol::Https { port: 443 },
                 Duration::from_secs(5),
             )

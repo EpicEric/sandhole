@@ -12,10 +12,11 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 
 Roughly in the order I intend to work on:
 
-- Local port forwarding
 - Generic TCP forwarding
-- Use env_logger
+- Temporarily allow unknown keys for SSH local port forwarding
+- Allow user-provided key fingerprints for a tunnel
 - Option to garbage-collect TCP/WebSocket connections
+- Use env_logger
 - API-based password authentication
 - Admin interface through SSH
 - Documentation

@@ -9,7 +9,7 @@ use hyper_util::{
     server::conn::auto::Builder,
 };
 use russh::{
-    client::{self, Msg, Session},
+    client::{Msg, Session},
     Channel,
 };
 use russh_keys::{key, load_secret_key};
@@ -29,7 +29,7 @@ use tokio_rustls::TlsConnector;
 use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn force_random_subdomains() {
+async fn https_force_random_subdomains() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),
@@ -65,17 +65,16 @@ async fn force_random_subdomains() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied
+    // 2. Start SSH client that will be proxied via HTTPS
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
-    let ssh_config = Arc::new(russh::client::Config::default());
     let ssh_client = SshClient {
         router: Router::new().route("/", get(|| async move { format!("This was a triumph.") })),
     };
-    let mut session = russh::client::connect(ssh_config, "127.0.0.1:18022", ssh_client)
+    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
@@ -183,7 +182,7 @@ struct SshClient {
 }
 
 #[async_trait]
-impl client::Handler for SshClient {
+impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
     async fn check_server_key(&mut self, _key: &key::PublicKey) -> Result<bool, Self::Error> {

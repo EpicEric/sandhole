@@ -1,6 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use anyhow::Context;
+use http::DomainRedirect;
 use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
 use hyper_util::rt::TokioIo;
 use rand::rngs::OsRng;
@@ -42,6 +43,7 @@ pub(crate) struct SandholeServer {
     pub(crate) tcp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, DummyConnectionMapReactor>>,
     pub(crate) fingerprints_validator: Arc<FingerprintsValidator>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
+    pub(crate) domain: String,
     pub(crate) http_port: u16,
     pub(crate) https_port: u16,
     pub(crate) ssh_port: u16,
@@ -116,7 +118,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         !config.allow_requested_ports,
         config.random_subdomain_seed,
     ));
-    let domain_redirect = Arc::new((config.domain, config.domain_redirect));
+    let domain_redirect = Arc::new(DomainRedirect {
+        from: config.domain.clone(),
+        to: config.domain_redirect,
+    });
 
     let http_listener = TcpListener::bind((config.listen_address.clone(), config.http_port))
         .await
@@ -220,20 +225,20 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         }
     });
 
-    let ssh_config = Config {
+    let ssh_config = Arc::new(Config {
         inactivity_timeout: Some(std::time::Duration::from_secs(3_600)),
         auth_rejection_time: std::time::Duration::from_secs(1),
         auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
         keys: vec![key],
         ..Default::default()
-    };
-    let ssh_config = Arc::new(ssh_config);
+    });
     let mut sandhole = Arc::new(SandholeServer {
         http: http_connections,
         ssh: ssh_connections,
         tcp: tcp_connections,
         fingerprints_validator: fingerprints,
         address_delegator: addressing,
+        domain: config.domain,
         http_port: config.http_port,
         https_port: config.https_port,
         ssh_port: config.ssh_port,
