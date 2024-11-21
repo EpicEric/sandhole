@@ -241,7 +241,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
 
     let ssh_config = Arc::new(Config {
         inactivity_timeout: Some(Duration::from_secs(3_600)),
-        auth_rejection_time: Duration::min(config.idle_connection_timeout, Duration::from_secs(2)),
+        auth_rejection_time: Duration::from_secs(2),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
         keys: vec![key],
         ..Default::default()
@@ -273,7 +273,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel::<()>();
         let handler = sandhole.new_client(Some(address), tx);
         tokio::spawn(async move {
-            let session = match russh::server::run_stream(config, stream, handler).await {
+            let mut session = match russh::server::run_stream(config, stream, handler).await {
                 Ok(session) => session,
                 Err(_) => {
                     // Connection setup failed
@@ -281,13 +281,16 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 }
             };
             tokio::select! {
-                result = session => {
+                result = &mut session => {
                     if let Err(_) = result {
                         // Connection closed with error
                         return;
                     }
                 }
-                _ = rx => return,
+                _ = rx => {
+                    let _ = session.handle().disconnect(russh::Disconnect::ByApplication, "".into(), "English".into()).await;
+                    return;
+                },
             }
         });
     }

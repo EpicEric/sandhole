@@ -141,7 +141,7 @@ struct Args {
     /// Grace period for dangling/unauthenticated SSH connections before they are forcefully disconnected.
     ///
     /// A low value may cause valid proxy/tunnel connections to be erroneously removed.
-    #[arg(long, default_value = "5s")]
+    #[arg(long, default_value = "2s")]
     idle_connection_timeout: Duration,
 
     /// Which value to seed with when generating random subdomains, for determinism. This allows binding to the same

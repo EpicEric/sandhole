@@ -12,7 +12,6 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 
 Roughly in the order I intend to work on:
 
-- Figure out way to allow proxy jump without valid fingerprint, while avoiding security concerns
 - Use env_logger
 - Option to garbage-collect TCP/WebSocket connections
 - Admin interface through SSH

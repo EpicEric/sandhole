@@ -525,6 +525,9 @@ impl Handler for ServerHandler {
                 return Ok(true);
             }
         }
+        if *self.authentication.lock().await == Authentication::None {
+            return Err(russh::Error::Disconnect);
+        }
         Ok(false)
     }
 }
