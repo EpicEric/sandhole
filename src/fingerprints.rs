@@ -5,52 +5,98 @@ use std::{
     time::Duration,
 };
 
-use crate::directory::watch_directory;
+use crate::{directory::watch_directory, ssh::Authentication};
 use notify::RecommendedWatcher;
-use russh_keys::{key::PublicKey, load_public_key};
+use russh_keys::load_public_key;
 use tokio::{fs::read_dir, sync::oneshot, task::JoinHandle};
 
 #[derive(Debug)]
 pub(crate) struct FingerprintsValidator {
-    pub(crate) fingerprints: Arc<RwLock<HashSet<String>>>,
+    user_fingerprints: Arc<RwLock<HashSet<String>>>,
+    admin_fingerprints: Arc<RwLock<HashSet<String>>>,
     join_handle: JoinHandle<()>,
-    _watcher: RecommendedWatcher,
+    _watchers: [RecommendedWatcher; 2],
 }
 
 impl FingerprintsValidator {
-    pub(crate) async fn watch(directory: PathBuf) -> anyhow::Result<Self> {
-        let fingerprints = Arc::new(RwLock::new(HashSet::new()));
-        let (watcher, mut pubkeys_rx) = watch_directory::<RecommendedWatcher>(directory.as_path())?;
-        pubkeys_rx.mark_changed();
-        let fingerprints_clone = Arc::clone(&fingerprints);
+    pub(crate) async fn watch(
+        user_keys_directory: PathBuf,
+        admin_keys_directory: PathBuf,
+    ) -> anyhow::Result<Self> {
+        let user_fingerprints = Arc::new(RwLock::new(HashSet::new()));
+        let admin_fingerprints = Arc::new(RwLock::new(HashSet::new()));
+        let (user_watcher, mut user_rx) =
+            watch_directory::<RecommendedWatcher>(user_keys_directory.as_path())?;
+        let (admin_watcher, mut admin_rx) =
+            watch_directory::<RecommendedWatcher>(admin_keys_directory.as_path())?;
+        user_rx.mark_changed();
+        let user_fingerprints_clone = Arc::clone(&user_fingerprints);
+        let admin_fingerprints_clone = Arc::clone(&admin_fingerprints);
         let (init_tx, init_rx) = oneshot::channel::<()>();
         let join_handle = tokio::spawn(async move {
             let mut init_tx = Some(init_tx);
-            while pubkeys_rx.changed().await.is_ok() {
-                let mut set = HashSet::new();
-                match read_dir(directory.as_path()).await {
+            loop {
+                if async {
+                    tokio::select! {
+                        change = user_rx.changed() => change.is_err(),
+                        change = admin_rx.changed() => change.is_err(),
+                    }
+                }
+                .await
+                {
+                    break;
+                }
+                let mut user_set = HashSet::new();
+                match read_dir(user_keys_directory.as_path()).await {
                     Ok(mut read_dir) => {
                         while let Ok(Some(entry)) = read_dir.next_entry().await {
                             // TO-DO: Load multiple keys from single file
                             match load_public_key(entry.path()) {
                                 Ok(data) => {
-                                    set.insert(data.fingerprint());
+                                    user_set.insert(data.fingerprint());
                                 }
-                                Err(e) => {
+                                Err(err) => {
                                     eprintln!(
                                         "Unable to load public key in {:?}: {}",
                                         entry.file_name(),
-                                        e
+                                        err
                                     );
                                 }
                             }
                         }
-                        *fingerprints_clone.write().unwrap() = set;
+                        *user_fingerprints_clone.write().unwrap() = user_set;
                     }
                     Err(err) => {
                         eprintln!(
-                            "Unable to read public keys directory {:?}: {}",
-                            &directory, err
+                            "Unable to read user keys directory {:?}: {}",
+                            &user_keys_directory, err
+                        );
+                    }
+                }
+                let mut admin_set = HashSet::new();
+                match read_dir(admin_keys_directory.as_path()).await {
+                    Ok(mut read_dir) => {
+                        while let Ok(Some(entry)) = read_dir.next_entry().await {
+                            // TO-DO: Load multiple keys from single file
+                            match load_public_key(entry.path()) {
+                                Ok(data) => {
+                                    admin_set.insert(data.fingerprint());
+                                }
+                                Err(err) => {
+                                    eprintln!(
+                                        "Unable to load public key in {:?}: {}",
+                                        entry.file_name(),
+                                        err
+                                    );
+                                }
+                            }
+                        }
+                        *admin_fingerprints_clone.write().unwrap() = admin_set;
+                    }
+                    Err(err) => {
+                        eprintln!(
+                            "Unable to read admin keys directory {:?}: {}",
+                            &admin_keys_directory, err
                         );
                     }
                 }
@@ -61,17 +107,26 @@ impl FingerprintsValidator {
         });
         init_rx.await.unwrap();
         Ok(FingerprintsValidator {
-            fingerprints,
+            user_fingerprints,
+            admin_fingerprints,
             join_handle,
-            _watcher: watcher,
+            _watchers: [user_watcher, admin_watcher],
         })
     }
 
-    pub(crate) fn is_key_allowed(&self, key: &PublicKey) -> bool {
-        self.fingerprints
+    pub(crate) fn authenticate_fingerprint(&self, fingerprint: &str) -> Authentication {
+        if self
+            .admin_fingerprints
             .read()
             .unwrap()
-            .contains(&key.fingerprint())
+            .contains(fingerprint)
+        {
+            Authentication::Admin
+        } else if self.user_fingerprints.read().unwrap().contains(fingerprint) {
+            Authentication::User
+        } else {
+            Authentication::None
+        }
     }
 }
 
@@ -85,11 +140,20 @@ impl Drop for FingerprintsValidator {
 mod fingerprints_validator_tests {
     use std::sync::LazyLock;
 
+    use crate::ssh::Authentication;
+
     use super::FingerprintsValidator;
     use russh_keys::{key::PublicKey, parse_public_key_base64};
 
-    static PUBLIC_KEYS_DIRECTORY: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/public_keys");
+    static USER_KEYS_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys");
+    static ADMIN_KEYS_DIRECTORY: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys");
+    static ADMIN_KEY: LazyLock<PublicKey> = LazyLock::new(|| {
+        parse_public_key_base64(
+            "AAAAC3NzaC1lZDI1NTE5AAAAIDpmDGLbC68yM87r+fD/aoEimDdnzZtmnZXCnxkIGHMq",
+        )
+        .unwrap()
+    });
     static KEY_ONE: LazyLock<PublicKey> = LazyLock::new(|| {
         parse_public_key_base64(
             "AAAAC3NzaC1lZDI1NTE5AAAAIMYVfXHTqf3/0W8ZQ/I8zmMirvmosV78n1qtYgVQX58W",
@@ -109,19 +173,28 @@ mod fingerprints_validator_tests {
     });
 
     #[tokio::test]
-    async fn allows_known_keys() {
-        let validator = FingerprintsValidator::watch(PUBLIC_KEYS_DIRECTORY.parse().unwrap())
-            .await
-            .unwrap();
-        assert!(validator.is_key_allowed(&KEY_ONE));
-        assert!(validator.is_key_allowed(&KEY_TWO));
-    }
-
-    #[tokio::test]
-    async fn forbids_unknown_keys() {
-        let validator = FingerprintsValidator::watch(PUBLIC_KEYS_DIRECTORY.parse().unwrap())
-            .await
-            .unwrap();
-        assert!(!validator.is_key_allowed(&UNKNOWN_KEY));
+    async fn authenticates_user_keys() {
+        let validator = FingerprintsValidator::watch(
+            USER_KEYS_DIRECTORY.parse().unwrap(),
+            ADMIN_KEYS_DIRECTORY.parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            validator.authenticate_fingerprint(&ADMIN_KEY.fingerprint()),
+            Authentication::Admin
+        );
+        assert_eq!(
+            validator.authenticate_fingerprint(&KEY_ONE.fingerprint()),
+            Authentication::User
+        );
+        assert_eq!(
+            validator.authenticate_fingerprint(&KEY_TWO.fingerprint()),
+            Authentication::User
+        );
+        assert_eq!(
+            validator.authenticate_fingerprint(&UNKNOWN_KEY.fingerprint()),
+            Authentication::None
+        );
     }
 }

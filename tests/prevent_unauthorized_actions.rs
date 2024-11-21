@@ -16,8 +16,15 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+// TO-DO: Write this test
+/// In order for tunneling to work, Sandhole must allow any public key to connect.
+/// However, unauthorized users should have much more restricted access, only being allowed
+/// to request local port forwarding (as of this version).
+///
+/// This test ensures that any other actions result in an error with a disconnect.
 #[tokio::test(flavor = "multi_thread")]
-async fn tcp_allow_requested_ports() {
+#[ignore]
+async fn prevent_unauthorized_actions() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),

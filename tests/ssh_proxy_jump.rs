@@ -27,8 +27,8 @@ async fn ssh_proxy_jump() {
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),
         domain_redirect: "https://tokio.rs/".into(),
-        public_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/public_keys")
-            .into(),
+        user_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys").into(),
+        admin_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys").into(),
         certificates_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates")
             .into(),
         private_key_file: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh").into(),
@@ -44,6 +44,7 @@ async fn ssh_proxy_jump() {
         allow_provided_subdomains: false,
         allow_requested_ports: false,
         random_subdomain_seed: None,
+        idle_connection_timeout: Duration::from_secs(2),
         txt_record_prefix: "_sandhole".into(),
         request_timeout: Duration::from_secs(5),
     };
@@ -78,11 +79,7 @@ async fn ssh_proxy_jump() {
         .expect("tcpip_forward failed");
 
     // 3. Connect to the SSH port of our proxy
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
-        None,
-    )
-    .expect("Missing file key2");
+    let key = russh_keys::key::KeyPair::generate_ed25519();
     let ssh_client = ProxyClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await

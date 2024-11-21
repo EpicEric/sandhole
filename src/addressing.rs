@@ -43,7 +43,7 @@ impl Resolver for DnsResolver {
         requested_address: &str,
         fingerprint: &str,
     ) -> bool {
-        // TO-DO: Allow verifying whole subdomain chain for a matching fingerprint
+        // TO-DO: Allow verifying whole subdomain chain for a matching fingerprint (via config)
         if let Ok(lookup) = self
             .0
             .txt_lookup(format!("{}.{}.", txt_record_prefix, requested_address))

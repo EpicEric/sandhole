@@ -19,7 +19,8 @@ use russh::{
 use russh_keys::key::PublicKey;
 use tokio::{
     io::{copy_bidirectional, AsyncWriteExt},
-    sync::mpsc,
+    sync::{mpsc, oneshot, Mutex},
+    time::sleep,
 };
 
 #[derive(Clone)]
@@ -68,34 +69,58 @@ impl HttpHandler<ChannelStream<Msg>> for SshTunnelHandler {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Authentication {
+    /// Not authenticated.
+    None,
+    /// Authenticated as a proxy/tunneling user.
+    Proxy,
+    /// Authenticated as a valid user.
+    User,
+    /// Authenticated as an admin.
+    Admin,
+}
+
 // TO-DO: Optimize memory usage
 pub(crate) struct ServerHandler {
-    pub(crate) peer: SocketAddr,
-    pub(crate) user: Option<String>,
-    pub(crate) key_fingerprint: Option<String>,
-    pub(crate) tx: mpsc::Sender<Vec<u8>>,
-    pub(crate) rx: Option<mpsc::Receiver<Vec<u8>>>,
-    pub(crate) ssh_hosts: HashSet<String>,
-    pub(crate) http_hosts: HashSet<String>,
-    pub(crate) tcp_ports: HashSet<u16>,
-    pub(crate) host_addressing: HashMap<(String, u32), String>,
-    pub(crate) port_addressing: HashMap<(String, u32), u16>,
-    pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
-    pub(crate) server: Arc<SandholeServer>,
+    cancellation_tx: Option<oneshot::Sender<()>>,
+    peer: SocketAddr,
+    user: Option<String>,
+    key_fingerprint: Option<String>,
+    authentication: Arc<Mutex<Authentication>>,
+    tx: mpsc::Sender<Vec<u8>>,
+    rx: Option<mpsc::Receiver<Vec<u8>>>,
+    ssh_hosts: HashSet<String>,
+    http_hosts: HashSet<String>,
+    tcp_ports: HashSet<u16>,
+    host_addressing: HashMap<(String, u32), String>,
+    port_addressing: HashMap<(String, u32), u16>,
+    address_delegator: Arc<AddressDelegator<DnsResolver>>,
+    server: Arc<SandholeServer>,
 }
 
 pub(crate) trait Server {
-    fn new_client(&mut self, peer_address: Option<SocketAddr>) -> ServerHandler;
+    fn new_client(
+        &mut self,
+        peer_address: Option<SocketAddr>,
+        cancellation_tx: oneshot::Sender<()>,
+    ) -> ServerHandler;
 }
 
 impl Server for Arc<SandholeServer> {
-    fn new_client(&mut self, peer_address: Option<SocketAddr>) -> ServerHandler {
-        let (tx, rx) = mpsc::channel(32);
+    fn new_client(
+        &mut self,
+        peer_address: Option<SocketAddr>,
+        cancellation_tx: oneshot::Sender<()>,
+    ) -> ServerHandler {
+        let (tx, rx) = mpsc::channel(64);
         let peer_address = peer_address.unwrap();
         ServerHandler {
+            cancellation_tx: Some(cancellation_tx),
             peer: peer_address,
             user: None,
             key_fingerprint: None,
+            authentication: Arc::new(Mutex::new(Authentication::None)),
             tx,
             rx: Some(rx),
             ssh_hosts: HashSet::new(),
@@ -121,6 +146,9 @@ impl Handler for ServerHandler {
         let Some(mut rx) = self.rx.take() else {
             return Err(russh::Error::Disconnect);
         };
+        if *self.authentication.lock().await == Authentication::None {
+            return Err(russh::Error::Disconnect);
+        }
         let mut stream = channel.into_stream();
         tokio::spawn(async move {
             while let Some(message) = rx.recv().await {
@@ -143,18 +171,35 @@ impl Handler for ServerHandler {
         user: &str,
         public_key: &PublicKey,
     ) -> Result<Auth, Self::Error> {
-        if self
+        let fingerprint = public_key.fingerprint();
+        self.user = Some(user.to_string());
+        self.key_fingerprint = Some(fingerprint);
+        let authentication = self
             .server
             .fingerprints_validator
-            .is_key_allowed(public_key)
-        {
-            self.key_fingerprint = Some(public_key.fingerprint());
-            self.user = Some(user.to_string());
-            Ok(Auth::Accept)
-        } else {
-            Ok(Auth::Reject {
-                proceed_with_methods: None,
-            })
+            .authenticate_fingerprint(self.key_fingerprint.as_ref().unwrap());
+        let mut authentication_guard = self.authentication.lock().await;
+        *authentication_guard = authentication;
+        drop(authentication_guard);
+        match authentication {
+            Authentication::None => {
+                // Start timer for user to do local port forwarding.
+                // Otherwise, the connection will be canceled upon expiration
+                let authentication = Arc::clone(&self.authentication);
+                let Some(cancellation_tx) = self.cancellation_tx.take() else {
+                    return Err(russh::Error::Disconnect);
+                };
+                let timeout = self.server.idle_connection_timeout;
+                tokio::spawn(async move {
+                    sleep(timeout).await;
+                    if *authentication.lock().await == Authentication::None {
+                        let _ = cancellation_tx.send(());
+                    }
+                });
+                Ok(Auth::Accept)
+            }
+            Authentication::Proxy => unreachable!(),
+            Authentication::User | Authentication::Admin => Ok(Auth::Accept),
         }
     }
 
@@ -164,9 +209,31 @@ impl Handler for ServerHandler {
         data: &[u8],
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
+        match *self.authentication.lock().await {
+            Authentication::None => return Err(russh::Error::Disconnect),
+            Authentication::Proxy | Authentication::User | Authentication::Admin => (),
+        }
         // Sending Ctrl+C ends the session and disconnects the client
         if data == [3] {
             return Err(russh::Error::Disconnect);
+        }
+        Ok(())
+    }
+
+    // TO-DO: Admin interface
+    async fn pty_request(
+        &mut self,
+        _channel: ChannelId,
+        _term: &str,
+        _col_width: u32,
+        _row_height: u32,
+        _pix_width: u32,
+        _pix_height: u32,
+        _modes: &[(russh::Pty, u32)],
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        if *self.authentication.lock().await != Authentication::Admin {
+            return Ok(());
         }
         Ok(())
     }
@@ -177,6 +244,11 @@ impl Handler for ServerHandler {
         port: &mut u32,
         session: &mut Session,
     ) -> Result<bool, Self::Error> {
+        // Only allow remote forwarding for authorized keys
+        match *self.authentication.lock().await {
+            Authentication::None | Authentication::Proxy => return Err(russh::Error::Disconnect),
+            Authentication::User | Authentication::Admin => (),
+        }
         let address = address.to_string();
         let handle = session.handle();
         match *port {
@@ -328,7 +400,6 @@ impl Handler for ServerHandler {
         port: u32,
         _session: &mut Session,
     ) -> Result<bool, Self::Error> {
-        // TO-DO: Handle more than HTTP
         match port {
             22 => {
                 if let Some(assigned_host) =
@@ -366,7 +437,7 @@ impl Handler for ServerHandler {
         }
     }
 
-    // TO-DO: Add proper authentication for forwarding
+    // TO-DO: Add user-defined authentication mechanism for forwarding (tunneling)
     async fn channel_open_direct_tcpip(
         &mut self,
         channel: Channel<Msg>,
@@ -383,6 +454,11 @@ impl Handler for ServerHandler {
                     .tunneling_channel(originator_address, originator_port as u16)
                     .await
                 {
+                    let mut authentication = self.authentication.lock().await;
+                    if *authentication == Authentication::None {
+                        *authentication = Authentication::Proxy;
+                    };
+                    drop(authentication);
                     tokio::spawn(async move {
                         let mut stream = channel.into_stream();
                         let _ = copy_bidirectional(&mut stream, io.inner_mut()).await;
@@ -404,6 +480,11 @@ impl Handler for ServerHandler {
                     .tunneling_channel(originator_address, originator_port as u16)
                     .await
                 {
+                    let mut authentication = self.authentication.lock().await;
+                    if *authentication == Authentication::None {
+                        *authentication = Authentication::Proxy;
+                    };
+                    drop(authentication);
                     tokio::spawn(async move {
                         let mut stream = channel.into_stream();
                         let _ = copy_bidirectional(&mut stream, io.inner_mut()).await;
@@ -424,6 +505,11 @@ impl Handler for ServerHandler {
                 .tunneling_channel(originator_address, originator_port as u16)
                 .await
             {
+                let mut authentication = self.authentication.lock().await;
+                if *authentication == Authentication::None {
+                    *authentication = Authentication::Proxy;
+                };
+                drop(authentication);
                 tokio::spawn(async move {
                     let mut stream = channel.into_stream();
                     let _ = copy_bidirectional(&mut stream, io.inner_mut()).await;

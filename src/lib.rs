@@ -1,4 +1,7 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 
 use anyhow::Context;
 use http::DomainRedirect;
@@ -10,7 +13,7 @@ use russh_keys::decode_secret_key;
 use rustls::ServerConfig;
 use rustls_acme::is_tls_alpn_challenge;
 use tcp::TcpHandler;
-use tokio::{fs, io::AsyncWriteExt, net::TcpListener};
+use tokio::{fs, io::AsyncWriteExt, net::TcpListener, sync::oneshot};
 use tokio_rustls::LazyConfigAcceptor;
 
 use crate::{
@@ -49,6 +52,7 @@ pub(crate) struct SandholeServer {
     pub(crate) http_port: u16,
     pub(crate) https_port: u16,
     pub(crate) ssh_port: u16,
+    pub(crate) idle_connection_timeout: Duration,
 }
 
 pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
@@ -78,9 +82,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     };
 
     let fingerprints = Arc::new(
-        FingerprintsValidator::watch(config.public_keys_directory.clone())
-            .await
-            .with_context(|| "Error setting up public keys watcher")?,
+        FingerprintsValidator::watch(
+            config.user_keys_directory.clone(),
+            config.admin_keys_directory.clone(),
+        )
+        .await
+        .with_context(|| "Error setting up public keys watcher")?,
     );
     let alpn_resolver: Box<dyn AlpnChallengeResolver> = match config.acme_contact_email {
         Some(contact) => {
@@ -233,9 +240,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     });
 
     let ssh_config = Arc::new(Config {
-        inactivity_timeout: Some(std::time::Duration::from_secs(3_600)),
-        auth_rejection_time: std::time::Duration::from_secs(1),
-        auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
+        inactivity_timeout: Some(Duration::from_secs(3_600)),
+        auth_rejection_time: Duration::min(config.idle_connection_timeout, Duration::from_secs(2)),
+        auth_rejection_time_initial: Some(Duration::from_secs(0)),
         keys: vec![key],
         ..Default::default()
     });
@@ -245,11 +252,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         tcp: tcp_connections,
         fingerprints_validator: fingerprints,
         address_delegator: addressing,
-        tcp_handler: tcp_handler,
+        tcp_handler,
         domain: config.domain,
         http_port: config.http_port,
         https_port: config.https_port,
         ssh_port: config.ssh_port,
+        idle_connection_timeout: config.idle_connection_timeout,
     });
     let ssh_listener = TcpListener::bind((config.listen_address.clone(), config.ssh_port))
         .await
@@ -262,7 +270,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         };
         debug_assert_eq!(stream.peer_addr().ok(), Some(address));
         let config = Arc::clone(&ssh_config);
-        let handler = sandhole.new_client(Some(address));
+        let (tx, rx) = oneshot::channel::<()>();
+        let handler = sandhole.new_client(Some(address), tx);
         tokio::spawn(async move {
             let session = match russh::server::run_stream(config, stream, handler).await {
                 Ok(session) => session,
@@ -271,12 +280,14 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     return;
                 }
             };
-            match session.await {
-                Ok(_) => (),
-                Err(_) => {
-                    // Connection closed with error
-                    return;
+            tokio::select! {
+                result = session => {
+                    if let Err(_) = result {
+                        // Connection closed with error
+                        return;
+                    }
                 }
+                _ = rx => return,
             }
         });
     }

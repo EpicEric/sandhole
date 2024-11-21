@@ -12,14 +12,15 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 
 Roughly in the order I intend to work on:
 
-- Temporarily allow unknown keys for SSH local port forwarding
-- Allow user-provided key fingerprints for a tunnel
-- Option to garbage-collect TCP/WebSocket connections
+- Figure out way to allow proxy jump without valid fingerprint, while avoiding security concerns
 - Use env_logger
-- API-based password authentication
+- Option to garbage-collect TCP/WebSocket connections
 - Admin interface through SSH
+- API-based password authentication
 - Documentation
 - Improve technical debts
+  - TO-DOs
+  - Allow user-provided key fingerprints for tunnel authentication
 - And more
 
 ## Features

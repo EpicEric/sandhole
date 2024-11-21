@@ -1,6 +1,7 @@
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 
 use clap::{command, Parser, ValueEnum};
+use humantime::Duration;
 use sandhole::{
     config::{ApplicationConfig, BindHostnames as BHConfig, RandomSubdomainSeed as RSSConfig},
     entrypoint,
@@ -61,10 +62,15 @@ struct Args {
     #[arg(long, default_value_t = String::from(env!("CARGO_PKG_REPOSITORY")))]
     domain_redirect: String,
 
-    /// Directory containing authorized public keys.
+    /// Directory containing public keys of authorized users.
     /// Each file must contain exactly one key.
-    #[arg(long, default_value_os = "./deploy/public_keys/")]
-    public_keys_directory: PathBuf,
+    #[arg(long, default_value_os = "./deploy/user_keys/")]
+    user_keys_directory: PathBuf,
+
+    /// Directory containing public keys of admin users.
+    /// Each file must contain exactly one key.
+    #[arg(long, default_value_os = "./deploy/admin_keys/")]
+    admin_keys_directory: PathBuf,
 
     /// Directory containing SSL certificates and keys.
     /// Each sub-directory inside of this one must contain a certificate chain in a
@@ -132,6 +138,12 @@ struct Args {
     #[arg(long, default_value_t = false)]
     allow_requested_ports: bool,
 
+    /// Grace period for dangling/unauthenticated SSH connections before they are forcefully disconnected.
+    ///
+    /// A low value may cause valid proxy/tunnel connections to be erroneously removed.
+    #[arg(long, default_value = "5s")]
+    idle_connection_timeout: Duration,
+
     /// Which value to seed with when generating random subdomains, for determinism. This allows binding to the same
     /// random address until Sandhole is restarted.
     ///
@@ -141,9 +153,9 @@ struct Args {
     #[arg(long, value_enum)]
     random_subdomain_seed: Option<RandomSubdomainSeed>,
 
-    /// Time in seconds until an outgoing HTTP request is automatically canceled.
-    #[arg(long, default_value_t = 10)]
-    request_timeout: u64,
+    /// Time until an outgoing HTTP request is automatically canceled.
+    #[arg(long, default_value = "10s")]
+    request_timeout: Duration,
 }
 
 #[tokio::main]
@@ -152,7 +164,8 @@ async fn main() -> anyhow::Result<()> {
     let config = ApplicationConfig {
         domain: args.domain,
         domain_redirect: args.domain_redirect,
-        public_keys_directory: args.public_keys_directory,
+        user_keys_directory: args.user_keys_directory,
+        admin_keys_directory: args.admin_keys_directory,
         certificates_directory: args.certificates_directory,
         private_key_file: args.private_key_file,
         listen_address: args.listen_address,
@@ -167,8 +180,9 @@ async fn main() -> anyhow::Result<()> {
         txt_record_prefix: args.txt_record_prefix,
         allow_provided_subdomains: args.allow_provided_subdomains,
         allow_requested_ports: args.allow_requested_ports,
+        idle_connection_timeout: args.idle_connection_timeout.into(),
         random_subdomain_seed: args.random_subdomain_seed.map(Into::into),
-        request_timeout: Duration::from_secs(args.request_timeout),
+        request_timeout: args.request_timeout.into(),
     };
     entrypoint(config).await
 }
