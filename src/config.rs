@@ -21,6 +21,7 @@ pub struct ApplicationConfig {
     pub domain_redirect: String,
     pub user_keys_directory: PathBuf,
     pub admin_keys_directory: PathBuf,
+    pub password_authentication_url: Option<String>,
     pub certificates_directory: PathBuf,
     pub private_key_file: PathBuf,
     pub listen_address: String,
@@ -35,7 +36,8 @@ pub struct ApplicationConfig {
     pub txt_record_prefix: String,
     pub allow_provided_subdomains: bool,
     pub allow_requested_ports: bool,
-    pub idle_connection_timeout: Duration,
     pub random_subdomain_seed: Option<RandomSubdomainSeed>,
+    pub idle_connection_timeout: Duration,
+    pub authentication_request_timeout: Duration,
     pub request_timeout: Duration,
 }

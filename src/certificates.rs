@@ -6,6 +6,7 @@ use std::{
 };
 
 use crate::{connections::ConnectionMapReactor, directory::watch_directory};
+use log::{error, warn};
 #[cfg(test)]
 use mockall::automock;
 use notify::RecommendedWatcher;
@@ -46,8 +47,8 @@ impl AlpnChallengeResolver for DummyAlpnChallengeResolver {
 
 #[derive(Debug)]
 pub(crate) struct CertificateResolver {
-    pub(crate) certificates: Arc<RwLock<Trie<String, Arc<CertifiedKey>>>>,
-    alpn_resolver: Arc<RwLock<Box<dyn AlpnChallengeResolver>>>,
+    certificates: Arc<RwLock<Trie<String, Arc<CertifiedKey>>>>,
+    alpn_resolver: RwLock<Box<dyn AlpnChallengeResolver>>,
     join_handle: JoinHandle<()>,
     _watcher: RecommendedWatcher,
 }
@@ -55,7 +56,7 @@ pub(crate) struct CertificateResolver {
 impl CertificateResolver {
     pub(crate) async fn watch(
         directory: PathBuf,
-        alpn_resolver: Arc<RwLock<Box<dyn AlpnChallengeResolver>>>,
+        alpn_resolver: RwLock<Box<dyn AlpnChallengeResolver>>,
     ) -> anyhow::Result<Self> {
         let certificates: Arc<RwLock<Trie<String, Arc<CertifiedKey>>>> =
             Arc::new(RwLock::new(TrieBuilder::new().build()));
@@ -83,7 +84,7 @@ impl CertificateResolver {
                                 {
                                     Ok(cert) => cert,
                                     Err(err) => {
-                                        eprintln!(
+                                        warn!(
                                             "Unable to load certificate chain in {:?}: {}",
                                             entry.path().join("fullchain.pem"),
                                             err
@@ -96,7 +97,7 @@ impl CertificateResolver {
                                 ) {
                                     Ok(key) => key,
                                     Err(err) => {
-                                        eprintln!(
+                                        warn!(
                                             "Unable to load certficate key in {:?}: {}",
                                             entry.path().join("privkey.pem"),
                                             err
@@ -105,7 +106,7 @@ impl CertificateResolver {
                                     }
                                 };
                                 let Ok(key) = any_supported_type(&key) else {
-                                    eprintln!(
+                                    warn!(
                                         "Invalid key in {:?}: no supported type",
                                         entry.path().join("privkey.pem")
                                     );
@@ -133,14 +134,13 @@ impl CertificateResolver {
                         *certs_clone.write().unwrap() = trie;
                     }
                     Err(err) => {
-                        eprintln!(
+                        error!(
                             "Unable to read certificates directory {:?}: {}",
                             &directory, err
                         );
                     }
                 }
                 init_tx.take().map(|tx| tx.send(()));
-                // TO-DO: Better debouncing
                 tokio::time::sleep(Duration::from_secs(2)).await
             }
         });
@@ -232,7 +232,7 @@ mod certificate_resolver_tests {
     async fn allows_valid_domains() {
         let resolver = CertificateResolver::watch(
             CERTIFICATES_DIRECTORY.parse().unwrap(),
-            Arc::new(RwLock::new(Box::new(DummyAlpnChallengeResolver))),
+            RwLock::new(Box::new(DummyAlpnChallengeResolver)),
         )
         .await
         .unwrap();
@@ -248,7 +248,7 @@ mod certificate_resolver_tests {
     async fn forbids_invalid_domains() {
         let resolver = CertificateResolver::watch(
             CERTIFICATES_DIRECTORY.parse().unwrap(),
-            Arc::new(RwLock::new(Box::new(DummyAlpnChallengeResolver))),
+            RwLock::new(Box::new(DummyAlpnChallengeResolver)),
         )
         .await
         .unwrap();
@@ -267,7 +267,7 @@ mod certificate_resolver_tests {
         let resolver = Arc::new(
             CertificateResolver::watch(
                 CERTIFICATES_DIRECTORY.parse().unwrap(),
-                Arc::new(RwLock::new(Box::new(mock))),
+                RwLock::new(Box::new(mock)),
             )
             .await
             .unwrap(),

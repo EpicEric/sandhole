@@ -16,6 +16,7 @@ use hyper::{
     Request, Response, StatusCode,
 };
 use hyper_util::rt::TokioIo;
+use log::warn;
 #[cfg(test)]
 use mockall::automock;
 use tokio::{
@@ -186,7 +187,7 @@ where
         None => {
             tokio::spawn(async move {
                 if let Err(err) = conn.await {
-                    println!("Connection failed: {:?}", err);
+                    warn!("Connection failed: {:?}", err);
                 }
             });
             let response = timeout(request_timeout, sender.send_request(request))
@@ -207,7 +208,7 @@ where
         Some(request_upgrade) => {
             tokio::spawn(async move {
                 if let Err(err) = conn.with_upgrades().await {
-                    println!("Connection failed: {:?}", err);
+                    warn!("Connection failed: {:?}", err);
                 }
             });
             let request_type = request_upgrade.to_str()?.to_string();

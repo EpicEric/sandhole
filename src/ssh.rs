@@ -1,17 +1,15 @@
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
+    ops::Deref,
     sync::Arc,
 };
 
-use crate::{
-    addressing::{AddressDelegator, DnsResolver},
-    http::HttpHandler,
-    SandholeServer,
-};
+use crate::{http::HttpHandler, SandholeServer};
 
 use async_trait::async_trait;
 use hyper_util::rt::TokioIo;
+use log::{info, warn};
 use russh::{
     server::{Auth, Handler, Msg, Session},
     Channel, ChannelId, ChannelStream, MethodSet,
@@ -20,7 +18,7 @@ use russh_keys::key::PublicKey;
 use tokio::{
     io::{copy_bidirectional, AsyncWriteExt},
     sync::{mpsc, oneshot, Mutex},
-    time::sleep,
+    time::{sleep, timeout},
 };
 
 #[derive(Clone)]
@@ -83,7 +81,7 @@ pub(crate) enum Authentication {
 
 // TO-DO: Optimize memory usage
 pub(crate) struct ServerHandler {
-    cancellation_tx: Option<oneshot::Sender<()>>,
+    cancelation_tx: Option<oneshot::Sender<()>>,
     peer: SocketAddr,
     user: Option<String>,
     key_fingerprint: Option<String>,
@@ -95,7 +93,6 @@ pub(crate) struct ServerHandler {
     tcp_ports: HashSet<u16>,
     host_addressing: HashMap<(String, u32), String>,
     port_addressing: HashMap<(String, u32), u16>,
-    address_delegator: Arc<AddressDelegator<DnsResolver>>,
     server: Arc<SandholeServer>,
 }
 
@@ -103,7 +100,7 @@ pub(crate) trait Server {
     fn new_client(
         &mut self,
         peer_address: Option<SocketAddr>,
-        cancellation_tx: oneshot::Sender<()>,
+        cancelation_tx: oneshot::Sender<()>,
     ) -> ServerHandler;
 }
 
@@ -111,12 +108,12 @@ impl Server for Arc<SandholeServer> {
     fn new_client(
         &mut self,
         peer_address: Option<SocketAddr>,
-        cancellation_tx: oneshot::Sender<()>,
+        cancelation_tx: oneshot::Sender<()>,
     ) -> ServerHandler {
         let (tx, rx) = mpsc::channel(64);
         let peer_address = peer_address.unwrap();
         ServerHandler {
-            cancellation_tx: Some(cancellation_tx),
+            cancelation_tx: Some(cancelation_tx),
             peer: peer_address,
             user: None,
             key_fingerprint: None,
@@ -128,7 +125,6 @@ impl Server for Arc<SandholeServer> {
             tcp_ports: HashSet::new(),
             host_addressing: HashMap::new(),
             port_addressing: HashMap::new(),
-            address_delegator: Arc::clone(&self.address_delegator),
             server: Arc::clone(self),
         }
     }
@@ -166,6 +162,27 @@ impl Handler for ServerHandler {
         })
     }
 
+    async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
+        if let Some(api_login) = self.server.api_login.deref() {
+            if let Ok(is_authenticated) =
+                timeout(self.server.authentication_request_timeout, async {
+                    api_login.authenticate(user, password).await
+                })
+                .await
+            {
+                if is_authenticated {
+                    *self.authentication.lock().await = Authentication::User;
+                    return Ok(Auth::Accept);
+                }
+            } else {
+                warn!("Authentication request timed out");
+            }
+        }
+        Ok(Auth::Reject {
+            proceed_with_methods: None,
+        })
+    }
+
     async fn auth_publickey(
         &mut self,
         user: &str,
@@ -186,14 +203,14 @@ impl Handler for ServerHandler {
                 // Start timer for user to do local port forwarding.
                 // Otherwise, the connection will be canceled upon expiration
                 let authentication = Arc::clone(&self.authentication);
-                let Some(cancellation_tx) = self.cancellation_tx.take() else {
+                let Some(cancelation_tx) = self.cancelation_tx.take() else {
                     return Err(russh::Error::Disconnect);
                 };
                 let timeout = self.server.idle_connection_timeout;
                 tokio::spawn(async move {
                     sleep(timeout).await;
                     if *authentication.lock().await == Authentication::None {
-                        let _ = cancellation_tx.send(());
+                        let _ = cancelation_tx.send(());
                     }
                 });
                 Ok(Auth::Accept)
@@ -255,13 +272,14 @@ impl Handler for ServerHandler {
             22 => {
                 // Assign SSH host through config
                 let assigned_host = self
+                    .server
                     .address_delegator
                     .get_address(&address, &self.user, &self.key_fingerprint, &self.peer)
                     .await;
                 self.ssh_hosts.insert(assigned_host.clone());
                 self.host_addressing
                     .insert((address.clone(), *port), assigned_host.clone());
-                println!("Serving SSH for {} ({})", &assigned_host, self.peer);
+                info!("Serving SSH for {} ({})", &assigned_host, self.peer);
                 let _ = self
                     .tx
                     .send(
@@ -301,13 +319,14 @@ impl Handler for ServerHandler {
             80 | 443 => {
                 // Assign HTTP host through config
                 let assigned_host = self
+                    .server
                     .address_delegator
                     .get_address(&address, &self.user, &self.key_fingerprint, &self.peer)
                     .await;
                 self.http_hosts.insert(assigned_host.clone());
                 self.host_addressing
                     .insert((address.clone(), *port), assigned_host.clone());
-                println!("Serving HTTP for {} ({})", &assigned_host, self.peer);
+                info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
                 let _ = self
                     .tx
                     .send(
@@ -364,7 +383,7 @@ impl Handler for ServerHandler {
                 self.tcp_ports.insert(assigned_port);
                 self.port_addressing
                     .insert((address.clone(), *port), assigned_port);
-                println!(
+                info!(
                     "Serving TCP port {} for {} ({})",
                     &assigned_port, &address, self.peer
                 );
@@ -437,7 +456,6 @@ impl Handler for ServerHandler {
         }
     }
 
-    // TO-DO: Add user-defined authentication mechanism for forwarding (tunneling)
     async fn channel_open_direct_tcpip(
         &mut self,
         channel: Channel<Msg>,
@@ -463,7 +481,7 @@ impl Handler for ServerHandler {
                         let mut stream = channel.into_stream();
                         let _ = copy_bidirectional(&mut stream, io.inner_mut()).await;
                     });
-                    println!(
+                    info!(
                         "Accepted connection from {} => {} ({})",
                         self.peer, host_to_connect, handler.peer,
                     );
@@ -489,7 +507,7 @@ impl Handler for ServerHandler {
                         let mut stream = channel.into_stream();
                         let _ = copy_bidirectional(&mut stream, io.inner_mut()).await;
                     });
-                    println!(
+                    info!(
                         "Accepted connection from {} => {} ({})",
                         self.peer, host_to_connect, handler.peer,
                     );
@@ -514,7 +532,7 @@ impl Handler for ServerHandler {
                     let mut stream = channel.into_stream();
                     let _ = copy_bidirectional(&mut stream, io.inner_mut()).await;
                 });
-                println!(
+                info!(
                     "Accepted connection from {} => {} ({})",
                     self.peer, host_to_connect, handler.peer,
                 );

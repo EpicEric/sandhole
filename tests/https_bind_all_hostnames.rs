@@ -36,6 +36,7 @@ async fn https_force_random_subdomains() {
         domain_redirect: "https://tokio.rs/".into(),
         user_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys").into(),
         admin_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys").into(),
+        password_authentication_url: None,
         certificates_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates")
             .into(),
         private_key_file: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh").into(),
@@ -51,8 +52,9 @@ async fn https_force_random_subdomains() {
         allow_provided_subdomains: false,
         allow_requested_ports: false,
         random_subdomain_seed: None,
-        idle_connection_timeout: Duration::from_secs(1),
         txt_record_prefix: "_sandhole".into(),
+        idle_connection_timeout: Duration::from_secs(1),
+        authentication_request_timeout: Duration::from_secs(5),
         request_timeout: Duration::from_secs(5),
     };
     tokio::spawn(async move { entrypoint(config).await });
@@ -143,7 +145,7 @@ async fn https_force_random_subdomains() {
         .unwrap();
     tokio::spawn(async move {
         if let Err(err) = conn.await {
-            println!("Connection failed: {:?}", err);
+            eprintln!("Connection failed: {:?}", err);
         }
     });
     let request = Request::builder()

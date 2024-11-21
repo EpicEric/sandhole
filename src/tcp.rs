@@ -6,6 +6,7 @@ use crate::{
     ssh::SshTunnelHandler,
 };
 use dashmap::DashMap;
+use log::error;
 use rand::{thread_rng, Rng};
 use tokio::{io::copy_bidirectional, net::TcpListener, task::JoinHandle};
 
@@ -88,7 +89,7 @@ impl ConnectionMapReactor<u16> for Arc<TcpHandler> {
                                         }
                                     }
                                 }
-                                Err(err) => eprintln!("Error listening on port {}: {}", port, err),
+                                Err(err) => error!("Error listening on port {}: {}", port, err),
                             }
                         }
                     }));

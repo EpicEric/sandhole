@@ -7,6 +7,8 @@ use anyhow::Context;
 use http::DomainRedirect;
 use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
 use hyper_util::rt::TokioIo;
+use log::{info, warn};
+use login::ApiLogin;
 use rand::rngs::OsRng;
 use russh::server::Config;
 use russh_keys::decode_secret_key;
@@ -37,6 +39,7 @@ mod directory;
 mod error;
 mod fingerprints;
 mod http;
+mod login;
 mod ssh;
 mod tcp;
 
@@ -46,12 +49,14 @@ pub(crate) struct SandholeServer {
     pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>>>,
     pub(crate) tcp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
     pub(crate) fingerprints_validator: Arc<FingerprintsValidator>,
+    pub(crate) api_login: Arc<Option<ApiLogin>>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
     pub(crate) tcp_handler: Arc<TcpHandler>,
     pub(crate) domain: String,
     pub(crate) http_port: u16,
     pub(crate) https_port: u16,
     pub(crate) ssh_port: u16,
+    pub(crate) authentication_request_timeout: Duration,
     pub(crate) idle_connection_timeout: Duration,
 }
 
@@ -59,7 +64,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let key = match fs::read_to_string(config.private_key_file.as_path()).await {
         Ok(key) => decode_secret_key(&key, None).with_context(|| "Error decoding secret key")?,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            println!("Key file not found. Creating...");
+            info!("Key file not found. Creating...");
             let key = ssh_key::PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
                 .with_context(|| "Error creating secret key")?;
             fs::create_dir_all(
@@ -89,6 +94,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .await
         .with_context(|| "Error setting up public keys watcher")?,
     );
+    let api_login = Arc::new(config.password_authentication_url.map(ApiLogin::new));
     let alpn_resolver: Box<dyn AlpnChallengeResolver> = match config.acme_contact_email {
         Some(contact) => {
             if config.https_port == 443 {
@@ -98,8 +104,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     config.acme_use_staging,
                 ))
             } else {
-                eprintln!(
-                    "WARNING: ACME challenges are only supported on HTTPS port 443 (currently {}). Disabling.",
+                warn!(
+                    "ACME challenges are only supported on HTTPS port 443 (currently {}). Disabling.",
                     config.https_port
                 );
                 Box::new(DummyAlpnChallengeResolver)
@@ -110,7 +116,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let certificates = Arc::new(
         CertificateResolver::watch(
             config.certificates_directory.clone(),
-            Arc::new(RwLock::new(alpn_resolver)),
+            RwLock::new(alpn_resolver),
         )
         .await
         .with_context(|| "Error setting up certificates watcher")?,
@@ -225,14 +231,14 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                                     let _ = conn.await;
                                 }
                                 Err(err) => {
-                                    eprintln!("Error establishing TLS connection: {:?}", err);
+                                    warn!("Error establishing TLS connection: {:?}", err);
                                 }
                             }
                         });
                     }
                 }
                 Err(err) => {
-                    eprintln!("Failed to establish TLS handshake: {:?}", err);
+                    warn!("Failed to establish TLS handshake: {:?}", err);
                     continue;
                 }
             }
@@ -251,18 +257,20 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         ssh: ssh_connections,
         tcp: tcp_connections,
         fingerprints_validator: fingerprints,
+        api_login,
         address_delegator: addressing,
         tcp_handler,
         domain: config.domain,
         http_port: config.http_port,
         https_port: config.https_port,
         ssh_port: config.ssh_port,
+        authentication_request_timeout: config.authentication_request_timeout,
         idle_connection_timeout: config.idle_connection_timeout,
     });
     let ssh_listener = TcpListener::bind((config.listen_address.clone(), config.ssh_port))
         .await
         .with_context(|| "Error listening to SSH port and address")?;
-    println!("sandhole is now running.");
+    info!("sandhole is now running.");
     loop {
         let (stream, address) = match ssh_listener.accept().await {
             Ok((stream, address)) => (stream, address),

@@ -1,5 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
+use log::warn;
 use rustls::{
     server::{ClientHello, ResolvesServerCert},
     sign::CertifiedKey,
@@ -53,7 +54,7 @@ impl AlpnChallengeResolver for AcmeResolver {
             loop {
                 match new_state.next().await.unwrap() {
                     Ok(_) => (),
-                    Err(err) => eprintln!(": {:?}", err),
+                    Err(err) => warn!("ACME listener error: {:?}", err),
                 }
             }
         }));

@@ -29,6 +29,7 @@ async fn ssh_proxy_jump() {
         domain_redirect: "https://tokio.rs/".into(),
         user_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys").into(),
         admin_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys").into(),
+        password_authentication_url: None,
         certificates_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates")
             .into(),
         private_key_file: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh").into(),
@@ -44,8 +45,9 @@ async fn ssh_proxy_jump() {
         allow_provided_subdomains: false,
         allow_requested_ports: false,
         random_subdomain_seed: None,
-        idle_connection_timeout: Duration::from_secs(2),
         txt_record_prefix: "_sandhole".into(),
+        idle_connection_timeout: Duration::from_secs(2),
+        authentication_request_timeout: Duration::from_secs(5),
         request_timeout: Duration::from_secs(5),
     };
     tokio::spawn(async move { entrypoint(config).await });

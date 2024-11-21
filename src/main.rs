@@ -72,6 +72,15 @@ struct Args {
     #[arg(long, default_value_os = "./deploy/admin_keys/")]
     admin_keys_directory: PathBuf,
 
+    /// If set, defines a URL against which password authentication requests will
+    /// be validated. This is done by sending the following JSON payload:
+    ///
+    /// `{"user": "...", "password": "..."}`
+    ///
+    /// Any 2xx response indicates that the credentials are authorized.
+    #[arg(long)]
+    password_authentication_url: Option<String>,
+
     /// Directory containing SSL certificates and keys.
     /// Each sub-directory inside of this one must contain a certificate chain in a
     /// `fullchain.pem` file and its private key in a `privkey.pem` file.
@@ -138,12 +147,6 @@ struct Args {
     #[arg(long, default_value_t = false)]
     allow_requested_ports: bool,
 
-    /// Grace period for dangling/unauthenticated SSH connections before they are forcefully disconnected.
-    ///
-    /// A low value may cause valid proxy/tunnel connections to be erroneously removed.
-    #[arg(long, default_value = "2s")]
-    idle_connection_timeout: Duration,
-
     /// Which value to seed with when generating random subdomains, for determinism. This allows binding to the same
     /// random address until Sandhole is restarted.
     ///
@@ -153,6 +156,17 @@ struct Args {
     #[arg(long, value_enum)]
     random_subdomain_seed: Option<RandomSubdomainSeed>,
 
+    /// Grace period for dangling/unauthenticated SSH connections before they are forcefully disconnected.
+    ///
+    /// A low value may cause valid proxy/tunnel connections to be erroneously removed.
+    #[arg(long, default_value = "2s")]
+    idle_connection_timeout: Duration,
+
+    /// Time until a user+password authentication request is canceled.
+    /// Any timed out requests will not authenticate the user.
+    #[arg(long, default_value = "5s")]
+    authentication_request_timeout: Duration,
+
     /// Time until an outgoing HTTP request is automatically canceled.
     #[arg(long, default_value = "10s")]
     request_timeout: Duration,
@@ -160,12 +174,14 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    env_logger::init();
     let args = Args::parse();
     let config = ApplicationConfig {
         domain: args.domain,
         domain_redirect: args.domain_redirect,
         user_keys_directory: args.user_keys_directory,
         admin_keys_directory: args.admin_keys_directory,
+        password_authentication_url: args.password_authentication_url,
         certificates_directory: args.certificates_directory,
         private_key_file: args.private_key_file,
         listen_address: args.listen_address,
@@ -180,8 +196,9 @@ async fn main() -> anyhow::Result<()> {
         txt_record_prefix: args.txt_record_prefix,
         allow_provided_subdomains: args.allow_provided_subdomains,
         allow_requested_ports: args.allow_requested_ports,
-        idle_connection_timeout: args.idle_connection_timeout.into(),
         random_subdomain_seed: args.random_subdomain_seed.map(Into::into),
+        idle_connection_timeout: args.idle_connection_timeout.into(),
+        authentication_request_timeout: args.authentication_request_timeout.into(),
         request_timeout: args.request_timeout.into(),
     };
     entrypoint(config).await

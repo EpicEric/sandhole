@@ -6,6 +6,7 @@ use std::{
 };
 
 use crate::{directory::watch_directory, ssh::Authentication};
+use log::{error, warn};
 use notify::RecommendedWatcher;
 use russh_keys::load_public_key;
 use tokio::{fs::read_dir, sync::oneshot, task::JoinHandle};
@@ -56,7 +57,7 @@ impl FingerprintsValidator {
                                     user_set.insert(data.fingerprint());
                                 }
                                 Err(err) => {
-                                    eprintln!(
+                                    warn!(
                                         "Unable to load public key in {:?}: {}",
                                         entry.file_name(),
                                         err
@@ -67,7 +68,7 @@ impl FingerprintsValidator {
                         *user_fingerprints_clone.write().unwrap() = user_set;
                     }
                     Err(err) => {
-                        eprintln!(
+                        error!(
                             "Unable to read user keys directory {:?}: {}",
                             &user_keys_directory, err
                         );
@@ -83,7 +84,7 @@ impl FingerprintsValidator {
                                     admin_set.insert(data.fingerprint());
                                 }
                                 Err(err) => {
-                                    eprintln!(
+                                    warn!(
                                         "Unable to load public key in {:?}: {}",
                                         entry.file_name(),
                                         err
@@ -94,14 +95,13 @@ impl FingerprintsValidator {
                         *admin_fingerprints_clone.write().unwrap() = admin_set;
                     }
                     Err(err) => {
-                        eprintln!(
+                        error!(
                             "Unable to read admin keys directory {:?}: {}",
                             &admin_keys_directory, err
                         );
                     }
                 }
                 init_tx.take().map(|tx| tx.send(()));
-                // TO-DO: Better debouncing
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
         });

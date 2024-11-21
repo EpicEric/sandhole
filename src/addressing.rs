@@ -2,6 +2,7 @@ use std::{hash::Hash, net::SocketAddr};
 
 use async_trait::async_trait;
 use hickory_resolver::TokioAsyncResolver;
+use log::warn;
 #[cfg(test)]
 use mockall::automock;
 use rand::{seq::SliceRandom, thread_rng, Rng, RngCore, SeedableRng};
@@ -140,12 +141,12 @@ impl<R: Resolver> AddressDelegator<R> {
                     return format!("{}.{}", address, self.root_domain);
                 }
             }
-            eprintln!(
+            warn!(
                 "Invalid address requested, defaulting to random: {}",
                 requested_address
             );
         } else {
-            eprintln!(
+            warn!(
                 "Invalid address requested, defaulting to random: {}",
                 requested_address
             );
@@ -176,7 +177,7 @@ impl<R: Resolver> AddressDelegator<R> {
                         user.hash(&mut hasher);
                         hash_initialized = true;
                     } else {
-                        eprintln!("No SSH user when assigning subdomain. Defaulting to random.")
+                        warn!("No SSH user when assigning subdomain. Defaulting to random.")
                     }
                 }
                 RandomSubdomainSeed::KeyFingerprint => {
@@ -185,7 +186,7 @@ impl<R: Resolver> AddressDelegator<R> {
                         fingerprint.hash(&mut hasher);
                         hash_initialized = true;
                     } else {
-                        eprintln!(
+                        warn!(
                             "No SSH key fingerprint when assigning subdomain. Defaulting to random."
                         )
                     }
