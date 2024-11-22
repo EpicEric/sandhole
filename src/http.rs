@@ -33,7 +33,7 @@ const X_FORWARDED_PORT: &str = "X-Forwarded-Port";
 #[cfg_attr(test, automock)]
 #[async_trait]
 pub(crate) trait HttpHandler<T: Sync> {
-    fn log_channel(&self) -> mpsc::Sender<Vec<u8>>;
+    fn log_channel(&self) -> mpsc::UnboundedSender<Vec<u8>>;
     async fn tunneling_channel(&self, ip: &str, port: u16) -> anyhow::Result<TokioIo<T>>;
 }
 
@@ -43,7 +43,7 @@ fn http_log(
     host: &str,
     uri: &str,
     elapsed_time: Duration,
-    tx: Option<mpsc::Sender<Vec<u8>>>,
+    tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
 ) {
     let status_escape_color = match status {
         100..=199 => "\x1b[37m",
@@ -54,7 +54,7 @@ fn http_log(
         _ => unreachable!(),
     };
     let line = format!(
-        "\x1b[2m{:19}\x1b[22m {}[{:3}] \x1b[0;1;44m{:^7}\x1b[0m {} => {} \x1b[2m{}\x1b[0m\r\n",
+        " \x1b[2m{:19}\x1b[22m {}[{:3}] \x1b[0;1;44m{:^7}\x1b[0m {} => {} \x1b[2m{}\x1b[0m\r\n",
         chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
         status_escape_color,
         status,
@@ -64,7 +64,7 @@ fn http_log(
         pretty_duration::pretty_duration(&elapsed_time, None)
     );
     print!("{}", line);
-    let _ = tx.map(|tx| tx.try_send(line.into_bytes()));
+    let _ = tx.map(|tx| tx.send(line.into_bytes()));
 }
 
 pub(crate) enum Protocol {
@@ -462,7 +462,7 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(ConnectionMap::new(None));
         let (server, handler) = tokio::io::duplex(1024);
-        let (logging_tx, logging_rx) = mpsc::channel::<Vec<u8>>(1);
+        let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let mut mock = MockHttpHandler::new();
         mock.expect_log_channel()
             .once()
@@ -536,7 +536,7 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(ConnectionMap::new(None));
         let (server, handler) = tokio::io::duplex(1024);
-        let (logging_tx, logging_rx) = mpsc::channel::<Vec<u8>>(1);
+        let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let mut mock = MockHttpHandler::new();
         mock.expect_log_channel()
             .once()
@@ -610,7 +610,7 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(ConnectionMap::new(None));
         let (server, handler) = tokio::io::duplex(1024);
-        let (logging_tx, logging_rx) = mpsc::channel::<Vec<u8>>(1);
+        let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let mut mock = MockHttpHandler::new();
         mock.expect_log_channel()
             .once()

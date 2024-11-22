@@ -6,13 +6,13 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
 This is still in early development, and mostly serves as an experiment. Contributions are welcome.
 
-If you're looking for a complete solution, check out [sish](https://github.com/antoniomika/sish/) instead.
+If you're looking for a complete solution, I recommend checking out [sish](https://github.com/antoniomika/sish/) instead.
 
 ### TO-DO
 
 Roughly in the order I intend to work on:
 
-- Admin interface through SSH
+- Show connections in admin interface
 - Documentation
 - Create issues for technical debts
   - Option to garbage-collect TCP/WebSocket connections

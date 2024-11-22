@@ -1,15 +1,16 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt::Display,
     net::SocketAddr,
     ops::Deref,
     sync::Arc,
 };
 
-use crate::{http::HttpHandler, tcp::PortHandler, SandholeServer};
+use crate::{admin::AdminInterface, http::HttpHandler, tcp::PortHandler, SandholeServer};
 
 use async_trait::async_trait;
 use hyper_util::rt::TokioIo;
-use log::{info, warn};
+use log::{debug, info, warn};
 use russh::{
     server::{Auth, Handler, Msg, Session},
     Channel, ChannelId, ChannelStream, MethodSet,
@@ -24,7 +25,7 @@ use tokio::{
 #[derive(Clone)]
 pub(crate) struct SshTunnelHandler {
     handle: russh::server::Handle,
-    tx: mpsc::Sender<Vec<u8>>,
+    tx: mpsc::UnboundedSender<Vec<u8>>,
     peer: SocketAddr,
     address: String,
     port: u32,
@@ -33,7 +34,7 @@ pub(crate) struct SshTunnelHandler {
 impl SshTunnelHandler {
     pub(crate) fn new(
         handle: russh::server::Handle,
-        tx: mpsc::Sender<Vec<u8>>,
+        tx: mpsc::UnboundedSender<Vec<u8>>,
         peer: SocketAddr,
         address: String,
         port: u32,
@@ -50,7 +51,7 @@ impl SshTunnelHandler {
 
 #[async_trait]
 impl HttpHandler<ChannelStream<Msg>> for SshTunnelHandler {
-    fn log_channel(&self) -> mpsc::Sender<Vec<u8>> {
+    fn log_channel(&self) -> mpsc::UnboundedSender<Vec<u8>> {
         self.tx.clone()
     }
     async fn tunneling_channel(
@@ -79,14 +80,28 @@ pub(crate) enum Authentication {
     Admin,
 }
 
+impl Display for Authentication {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Authentication::None => f.write_str("no authentication"),
+            Authentication::Proxy => f.write_str("proxy authentication"),
+            Authentication::User => f.write_str("user authentication"),
+            Authentication::Admin => f.write_str("admin authentication"),
+        }
+    }
+}
+
 pub(crate) struct ServerHandler {
     cancelation_tx: Option<oneshot::Sender<()>>,
     peer: SocketAddr,
     user: Option<String>,
     key_fingerprint: Option<String>,
     authentication: Arc<Mutex<Authentication>>,
-    tx: mpsc::Sender<Vec<u8>>,
-    rx: Option<mpsc::Receiver<Vec<u8>>>,
+    admin_interface: Option<AdminInterface>,
+    col_width: Option<u32>,
+    row_height: Option<u32>,
+    tx: mpsc::UnboundedSender<Vec<u8>>,
+    rx: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
     ssh_hosts: HashSet<String>,
     http_hosts: HashSet<String>,
     tcp_ports: HashSet<u16>,
@@ -109,7 +124,7 @@ impl Server for Arc<SandholeServer> {
         peer_address: Option<SocketAddr>,
         cancelation_tx: oneshot::Sender<()>,
     ) -> ServerHandler {
-        let (tx, rx) = mpsc::channel(64);
+        let (tx, rx) = mpsc::unbounded_channel();
         let peer_address = peer_address.unwrap();
         ServerHandler {
             cancelation_tx: Some(cancelation_tx),
@@ -117,6 +132,9 @@ impl Server for Arc<SandholeServer> {
             user: None,
             key_fingerprint: None,
             authentication: Arc::new(Mutex::new(Authentication::None)),
+            admin_interface: None,
+            col_width: None,
+            row_height: None,
             tx,
             rx: Some(rx),
             ssh_hosts: HashSet::new(),
@@ -139,7 +157,7 @@ impl Handler for ServerHandler {
         _session: &mut Session,
     ) -> Result<bool, Self::Error> {
         let Some(mut rx) = self.rx.take() else {
-            return Err(russh::Error::Disconnect);
+            return Ok(false);
         };
         if *self.authentication.lock().await == Authentication::None {
             return Err(russh::Error::Disconnect);
@@ -170,7 +188,9 @@ impl Handler for ServerHandler {
                 .await
             {
                 if is_authenticated {
-                    *self.authentication.lock().await = Authentication::User;
+                    let authentication = Authentication::User;
+                    *self.authentication.lock().await = authentication;
+                    info!("{} connected with {} (password)", self.peer, authentication);
                     return Ok(Auth::Accept);
                 }
             } else {
@@ -194,11 +214,11 @@ impl Handler for ServerHandler {
             .server
             .fingerprints_validator
             .authenticate_fingerprint(self.key_fingerprint.as_ref().unwrap());
-        {
-            let mut authentication_guard = self.authentication.lock().await;
-            *authentication_guard = authentication;
-            drop(authentication_guard);
-        }
+        *self.authentication.lock().await = authentication;
+        info!(
+            "{} connected with {} (public key)",
+            self.peer, authentication
+        );
         match authentication {
             Authentication::None => {
                 // Start timer for user to do local port forwarding.
@@ -233,26 +253,85 @@ impl Handler for ServerHandler {
         }
         // Sending Ctrl+C ends the session and disconnects the client
         if data == [3] {
+            self.tx.send(b"\x1b[?25h".to_vec()).unwrap();
             return Err(russh::Error::Disconnect);
+        }
+        debug!("received data {:?}", data);
+        let authentication = *self.authentication.lock().await;
+        if let (Authentication::Admin, Some(admin_interface)) =
+            (authentication, self.admin_interface.as_mut())
+        {
+            // Tab
+            if data == [b'\t'] {
+                admin_interface.advance_tab();
+            }
         }
         Ok(())
     }
 
-    // TO-DO: Admin interface
-    async fn pty_request(
+    async fn exec_request(
         &mut self,
         _channel: ChannelId,
+        data: &[u8],
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        debug!("exec_request data {:?}", data);
+        let authentication = *self.authentication.lock().await;
+        match String::from_utf8_lossy(data).split_whitespace().next() {
+            Some("admin") => {
+                if authentication != Authentication::Admin {
+                    return Err(russh::Error::RequestDenied);
+                }
+                let mut admin_interface = AdminInterface::new(self.tx.clone());
+                if let (Some(col_width), Some(row_height)) = (self.col_width, self.row_height) {
+                    let _ = admin_interface.resize(col_width as u16, row_height as u16);
+                }
+                self.admin_interface = Some(admin_interface);
+            }
+            Some(command) => {
+                debug!("Unknown command {} received", command);
+            }
+            None => (),
+        }
+        Ok(())
+    }
+
+    async fn pty_request(
+        &mut self,
+        channel: ChannelId,
         _term: &str,
-        _col_width: u32,
-        _row_height: u32,
+        col_width: u32,
+        row_height: u32,
         _pix_width: u32,
         _pix_height: u32,
         _modes: &[(russh::Pty, u32)],
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        debug!("pty_request");
+        self.col_width = Some(col_width);
+        self.row_height = Some(row_height);
+        session.channel_success(channel);
+        Ok(())
+    }
+
+    async fn window_change_request(
+        &mut self,
+        _channel: ChannelId,
+        col_width: u32,
+        row_height: u32,
+        _pix_width: u32,
+        _pix_height: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        if *self.authentication.lock().await != Authentication::Admin {
-            return Ok(());
+        if let Some(admin_interface) = self.admin_interface.as_mut() {
+            if admin_interface
+                .resize(col_width as u16, row_height as u16)
+                .is_err()
+            {
+                warn!("Failed to resize terminal");
+            }
         }
+
         Ok(())
     }
 
@@ -302,8 +381,7 @@ impl Handler for ServerHandler {
                             },
                         )
                         .into_bytes(),
-                    )
-                    .await;
+                    );
                 self.server.ssh.insert(
                     assigned_host.clone(),
                     self.peer,
@@ -328,34 +406,28 @@ impl Handler for ServerHandler {
                 self.host_addressing
                     .insert((address.clone(), *port), assigned_host.clone());
                 info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
-                let _ = self
-                    .tx
-                    .send(
-                        format!(
-                            "Serving HTTP on http://{}{}\r\n",
-                            &assigned_host,
-                            match self.server.http_port {
-                                80 => "".into(),
-                                port => format!(":{}", port),
-                            }
-                        )
-                        .into_bytes(),
+                let _ = self.tx.send(
+                    format!(
+                        "Serving HTTP on http://{}{}\r\n",
+                        &assigned_host,
+                        match self.server.http_port {
+                            80 => "".into(),
+                            port => format!(":{}", port),
+                        }
                     )
-                    .await;
-                let _ = self
-                    .tx
-                    .send(
-                        format!(
-                            "Serving HTTPS on https://{}{}\r\n",
-                            &assigned_host,
-                            match self.server.https_port {
-                                443 => "".into(),
-                                port => format!(":{}", port),
-                            }
-                        )
-                        .into_bytes(),
+                    .into_bytes(),
+                );
+                let _ = self.tx.send(
+                    format!(
+                        "Serving HTTPS on https://{}{}\r\n",
+                        &assigned_host,
+                        match self.server.https_port {
+                            443 => "".into(),
+                            port => format!(":{}", port),
+                        }
                     )
-                    .await;
+                    .into_bytes(),
+                );
                 self.server.http.insert(
                     assigned_host.clone(),
                     self.peer,
@@ -388,16 +460,13 @@ impl Handler for ServerHandler {
                     "Serving TCP port {} for {} ({})",
                     &assigned_port, &address, self.peer
                 );
-                let _ = self
-                    .tx
-                    .send(
-                        format!(
-                            "Serving TCP port on {}:{}\r\n",
-                            self.server.domain, &assigned_port,
-                        )
-                        .into_bytes(),
+                let _ = self.tx.send(
+                    format!(
+                        "Serving TCP port on {}:{}\r\n",
+                        self.server.domain, &assigned_port,
                     )
-                    .await;
+                    .into_bytes(),
+                );
                 self.server.tcp.insert(
                     assigned_port,
                     self.peer,
@@ -490,8 +559,7 @@ impl Handler for ServerHandler {
                     );
                     let _ = self
                         .tx
-                        .send(format!("Forwarding HTTP from {}\r\n", host_to_connect).into_bytes())
-                        .await;
+                        .send(format!("Forwarding HTTP from {}\r\n", host_to_connect).into_bytes());
                     return Ok(true);
                 }
             }
@@ -518,8 +586,7 @@ impl Handler for ServerHandler {
                     );
                     let _ = self
                         .tx
-                        .send(format!("Forwarding SSH from {}\r\n", host_to_connect).into_bytes())
-                        .await;
+                        .send(format!("Forwarding SSH from {}\r\n", host_to_connect).into_bytes());
                     return Ok(true);
                 }
             }
@@ -545,8 +612,7 @@ impl Handler for ServerHandler {
                 );
                 let _ = self
                     .tx
-                    .send(format!("Forwarding TCP from {}\r\n", host_to_connect).into_bytes())
-                    .await;
+                    .send(format!("Forwarding TCP from {}\r\n", host_to_connect).into_bytes());
                 return Ok(true);
             }
         }
@@ -568,5 +634,6 @@ impl Drop for ServerHandler {
         for port in self.tcp_ports.iter() {
             self.server.tcp.remove(port, self.peer);
         }
+        info!("{} disconnected", self.peer);
     }
 }

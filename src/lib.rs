@@ -32,6 +32,7 @@ use crate::{
 
 mod acme;
 mod addressing;
+mod admin;
 mod certificates;
 pub mod config;
 mod connections;

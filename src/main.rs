@@ -174,7 +174,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    env_logger::init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Args::parse();
     let config = ApplicationConfig {
         domain: args.domain,
@@ -221,7 +221,7 @@ fn validate_txt_record_prefix(prefix: &str) -> Result<String, String> {
 fn validate_port(port: &str) -> Result<u16, String> {
     match port.parse::<u16>() {
         Err(err) => Err(format!("{}", err)),
-        Ok(port) if port == 0 => Err("port cannot be zero".into()),
+        Ok(0) => Err("port cannot be zero".into()),
         Ok(port) => Ok(port),
     }
 }
