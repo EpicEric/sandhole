@@ -2,6 +2,7 @@
 name = "sandhole"
 version = "0.1.0"
 edition = "2021"
+description = "Expose HTTP/SSH/TCP services through SSH port forwarding."
 repository = "https://github.com/EpicEric/sandhole"
 license = "MIT"
 authors = ["Eric Rodrigues Pires <eric@eric.dev.br>"]

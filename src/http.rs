@@ -64,7 +64,6 @@ fn http_log(
         pretty_duration::pretty_duration(&elapsed_time, None)
     );
     print!("{}", line);
-    // TO-DO: Check from config if we should log back to client
     let _ = tx.map(|tx| tx.try_send(line.into_bytes()));
 }
 

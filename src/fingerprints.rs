@@ -51,7 +51,6 @@ impl FingerprintsValidator {
                 match read_dir(user_keys_directory.as_path()).await {
                     Ok(mut read_dir) => {
                         while let Ok(Some(entry)) = read_dir.next_entry().await {
-                            // TO-DO: Load multiple keys from single file
                             match load_public_key(entry.path()) {
                                 Ok(data) => {
                                     user_set.insert(data.fingerprint());
@@ -78,7 +77,6 @@ impl FingerprintsValidator {
                 match read_dir(admin_keys_directory.as_path()).await {
                     Ok(mut read_dir) => {
                         while let Ok(Some(entry)) = read_dir.next_entry().await {
-                            // TO-DO: Load multiple keys from single file
                             match load_public_key(entry.path()) {
                                 Ok(data) => {
                                     admin_set.insert(data.fingerprint());

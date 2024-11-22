@@ -56,11 +56,15 @@ pub(crate) struct SandholeServer {
     pub(crate) http_port: u16,
     pub(crate) https_port: u16,
     pub(crate) ssh_port: u16,
+    pub(crate) force_random_ports: bool,
     pub(crate) authentication_request_timeout: Duration,
     pub(crate) idle_connection_timeout: Duration,
 }
 
 pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Unable to install CryptoProvider");
     let key = match fs::read_to_string(config.private_key_file.as_path()).await {
         Ok(key) => decode_secret_key(&key, None).with_context(|| "Error decoding secret key")?,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -127,7 +131,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let tcp_handler: Arc<TcpHandler> = Arc::new(TcpHandler::new(
         config.listen_address.clone(),
         Arc::clone(&tcp_connections),
-        !config.allow_requested_ports,
     ));
     tcp_connections.update_reactor(Some(Arc::clone(&tcp_handler)));
     let addressing = Arc::new(AddressDelegator::new(
@@ -186,7 +189,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .await
         .with_context(|| "Error listening to HTTP port and address")?;
     let certificates_clone = Arc::clone(&certificates);
-    let server_config = Arc::new(
+    let tls_server_config = Arc::new(
         ServerConfig::builder()
             .with_no_client_auth()
             .with_cert_resolver(certificates),
@@ -196,7 +199,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         loop {
             let http_map = Arc::clone(&http_map);
             let domain_redirect = Arc::clone(&domain_redirect);
-            let server_config = Arc::clone(&server_config);
+            let server_config = Arc::clone(&tls_server_config);
             let (stream, address) = https_listener.accept().await.unwrap();
             let service = service_fn(move |req: Request<Incoming>| {
                 proxy_handler(
@@ -264,6 +267,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         http_port: config.http_port,
         https_port: config.https_port,
         ssh_port: config.ssh_port,
+        force_random_ports: !config.allow_requested_ports,
         authentication_request_timeout: config.authentication_request_timeout,
         idle_connection_timeout: config.idle_connection_timeout,
     });
@@ -283,21 +287,19 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         tokio::spawn(async move {
             let mut session = match russh::server::run_stream(config, stream, handler).await {
                 Ok(session) => session,
-                Err(_) => {
-                    // Connection setup failed
+                Err(err) => {
+                    warn!("Connection setup failed: {}", err);
                     return;
                 }
             };
             tokio::select! {
                 result = &mut session => {
-                    if let Err(_) = result {
-                        // Connection closed with error
-                        return;
+                    if let Err(err) = result {
+                        warn!("Connection closed with error: {}", err);
                     }
                 }
                 _ = rx => {
                     let _ = session.handle().disconnect(russh::Disconnect::ByApplication, "".into(), "English".into()).await;
-                    return;
                 },
             }
         });

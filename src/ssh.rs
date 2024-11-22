@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{http::HttpHandler, SandholeServer};
+use crate::{http::HttpHandler, tcp::PortHandler, SandholeServer};
 
 use async_trait::async_trait;
 use hyper_util::rt::TokioIo;
@@ -79,7 +79,6 @@ pub(crate) enum Authentication {
     Admin,
 }
 
-// TO-DO: Optimize memory usage
 pub(crate) struct ServerHandler {
     cancelation_tx: Option<oneshot::Sender<()>>,
     peer: SocketAddr,
@@ -195,9 +194,11 @@ impl Handler for ServerHandler {
             .server
             .fingerprints_validator
             .authenticate_fingerprint(self.key_fingerprint.as_ref().unwrap());
-        let mut authentication_guard = self.authentication.lock().await;
-        *authentication_guard = authentication;
-        drop(authentication_guard);
+        {
+            let mut authentication_guard = self.authentication.lock().await;
+            *authentication_guard = authentication;
+            drop(authentication_guard);
+        }
         match authentication {
             Authentication::None => {
                 // Start timer for user to do local port forwarding.
@@ -372,11 +373,11 @@ impl Handler for ServerHandler {
             1..=1024 => Ok(false),
             _ => {
                 let assigned_port = if *port == 0 {
-                    let assigned_port = self.server.tcp_handler.get_free_port();
+                    let assigned_port = self.server.tcp_handler.get_free_port().await;
                     *port = assigned_port.into();
                     assigned_port
-                } else if self.server.tcp_handler.force_random_ports() {
-                    self.server.tcp_handler.get_free_port()
+                } else if self.server.force_random_ports {
+                    self.server.tcp_handler.get_free_port().await
                 } else {
                     *port as u16
                 };
@@ -472,11 +473,13 @@ impl Handler for ServerHandler {
                     .tunneling_channel(originator_address, originator_port as u16)
                     .await
                 {
-                    let mut authentication = self.authentication.lock().await;
-                    if *authentication == Authentication::None {
-                        *authentication = Authentication::Proxy;
-                    };
-                    drop(authentication);
+                    {
+                        let mut authentication = self.authentication.lock().await;
+                        if *authentication == Authentication::None {
+                            *authentication = Authentication::Proxy;
+                        };
+                        drop(authentication);
+                    }
                     tokio::spawn(async move {
                         let mut stream = channel.into_stream();
                         let _ = copy_bidirectional(&mut stream, io.inner_mut()).await;
@@ -498,11 +501,13 @@ impl Handler for ServerHandler {
                     .tunneling_channel(originator_address, originator_port as u16)
                     .await
                 {
-                    let mut authentication = self.authentication.lock().await;
-                    if *authentication == Authentication::None {
-                        *authentication = Authentication::Proxy;
-                    };
-                    drop(authentication);
+                    {
+                        let mut authentication = self.authentication.lock().await;
+                        if *authentication == Authentication::None {
+                            *authentication = Authentication::Proxy;
+                        };
+                        drop(authentication);
+                    }
                     tokio::spawn(async move {
                         let mut stream = channel.into_stream();
                         let _ = copy_bidirectional(&mut stream, io.inner_mut()).await;
@@ -523,11 +528,13 @@ impl Handler for ServerHandler {
                 .tunneling_channel(originator_address, originator_port as u16)
                 .await
             {
-                let mut authentication = self.authentication.lock().await;
-                if *authentication == Authentication::None {
-                    *authentication = Authentication::Proxy;
-                };
-                drop(authentication);
+                {
+                    let mut authentication = self.authentication.lock().await;
+                    if *authentication == Authentication::None {
+                        *authentication = Authentication::Proxy;
+                    };
+                    drop(authentication);
+                }
                 tokio::spawn(async move {
                     let mut stream = channel.into_stream();
                     let _ = copy_bidirectional(&mut stream, io.inner_mut()).await;

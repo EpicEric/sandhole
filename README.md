@@ -12,14 +12,16 @@ If you're looking for a complete solution, check out [sish](https://github.com/a
 
 Roughly in the order I intend to work on:
 
-- Option to garbage-collect TCP/WebSocket connections
-- Option to disable load-balancing
 - Admin interface through SSH
 - Documentation
 - Create issues for technical debts
-  - TO-DOs
+  - Option to garbage-collect TCP/WebSocket connections
+  - Option to disable load-balancing
   - Allow user-provided key fingerprints for tunnel authentication
-- And more
+  - Check viability of verifying whole subdomain chain for a matching fingerprint
+  - Support loading multiple pubkeys from a single file
+  - Option to not log back requests to the client
+  - Try to optimize ServerHandler's memory usage
 
 ## Features
 

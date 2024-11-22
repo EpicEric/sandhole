@@ -96,15 +96,15 @@ struct Args {
     listen_address: String,
 
     /// Port to listen for SSH connections.
-    #[arg(long, default_value_t = 2222)]
+    #[arg(long, default_value_t = 2222, value_parser = validate_port)]
     ssh_port: u16,
 
     /// Port to listen for HTTP connections.
-    #[arg(long, default_value_t = 80)]
+    #[arg(long, default_value_t = 80, value_parser = validate_port)]
     http_port: u16,
 
     /// Port to listen for HTTPS connections.
-    #[arg(long, default_value_t = 443)]
+    #[arg(long, default_value_t = 443, value_parser = validate_port)]
     https_port: u16,
 
     /// Always redirect HTTP requests to HTTPS.
@@ -215,5 +215,13 @@ fn validate_txt_record_prefix(prefix: &str) -> Result<String, String> {
         Err("prefix cannot contain period".into())
     } else {
         Ok(prefix.to_string())
+    }
+}
+
+fn validate_port(port: &str) -> Result<u16, String> {
+    match port.parse::<u16>() {
+        Err(err) => Err(format!("{}", err)),
+        Ok(port) if port == 0 => Err("port cannot be zero".into()),
+        Ok(port) => Ok(port),
     }
 }
