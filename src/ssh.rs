@@ -359,7 +359,6 @@ impl Handler for ServerHandler {
             Authentication::None | Authentication::Proxy => return Err(russh::Error::Disconnect),
             Authentication::User | Authentication::Admin => (),
         }
-        let address = address.to_string();
         let handle = session.handle();
         match *port {
             22 => {
@@ -367,11 +366,21 @@ impl Handler for ServerHandler {
                 let assigned_host = self
                     .server
                     .address_delegator
-                    .get_address(&address, &self.user, &self.key_fingerprint, &self.peer)
+                    .get_address(address, &self.user, &self.key_fingerprint, &self.peer)
                     .await;
+                if !is_alias(&assigned_host) {
+                    info!(
+                        "Failed to bind SSH for {}: must be alias, not localhost",
+                        self.peer
+                    );
+                    let _ = self
+                        .tx
+                        .send(format!("Error: Alias is required for SSH host").into_bytes());
+                    return Ok(false);
+                }
                 self.ssh_hosts.insert(assigned_host.clone());
                 self.host_addressing
-                    .insert((address.clone(), *port), assigned_host.clone());
+                    .insert((address.to_string(), *port), assigned_host.clone());
                 info!("Serving SSH for {} ({})", &assigned_host, self.peer);
                 let _ = self
                     .tx
@@ -402,7 +411,7 @@ impl Handler for ServerHandler {
                         handle,
                         self.tx.clone(),
                         self.peer,
-                        address,
+                        address.to_string(),
                         *port,
                     )),
                 );
@@ -413,11 +422,11 @@ impl Handler for ServerHandler {
                 let assigned_host = self
                     .server
                     .address_delegator
-                    .get_address(&address, &self.user, &self.key_fingerprint, &self.peer)
+                    .get_address(address, &self.user, &self.key_fingerprint, &self.peer)
                     .await;
                 self.http_hosts.insert(assigned_host.clone());
                 self.host_addressing
-                    .insert((address.clone(), *port), assigned_host.clone());
+                    .insert((address.to_string(), *port), assigned_host.clone());
                 info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
                 let _ = self.tx.send(
                     format!(
@@ -448,14 +457,20 @@ impl Handler for ServerHandler {
                         handle,
                         self.tx.clone(),
                         self.peer,
-                        address,
+                        address.to_string(),
                         *port,
                     )),
                 );
                 Ok(true)
             }
             // Handle TCP
-            1..=1024 => Ok(false),
+            1..=1024 if !is_alias(address) => {
+                info!(
+                    "Failed to bind TCP port {} ({}): port too low",
+                    port, self.peer
+                );
+                Ok(false)
+            }
             _ => {
                 let assigned_port = if *port == 0 {
                     let assigned_port = self.server.tcp_handler.get_free_port().await;
@@ -467,28 +482,42 @@ impl Handler for ServerHandler {
                     *port as u16
                 };
                 self.tcp_aliases
-                    .insert(TcpAlias(address.clone(), assigned_port));
+                    .insert(TcpAlias(address.to_string(), assigned_port));
                 self.port_addressing
-                    .insert((address.clone(), *port), assigned_port);
-                info!(
-                    "Serving TCP port {} for {} ({})",
-                    &assigned_port, &address, self.peer
-                );
-                let _ = self.tx.send(
-                    format!(
-                        "Serving TCP port on {}:{}\r\n",
-                        self.server.domain, &assigned_port,
-                    )
-                    .into_bytes(),
-                );
+                    .insert((address.to_string(), *port), assigned_port);
+                if is_alias(address) {
+                    info!(
+                        "Tunneling TCP port {} for alias {} ({})",
+                        &assigned_port, address, self.peer
+                    );
+                    let _ = self.tx.send(
+                        format!(
+                            "Serving TCP port on {}:{}\r\n",
+                            self.server.domain, &assigned_port,
+                        )
+                        .into_bytes(),
+                    );
+                } else {
+                    info!(
+                        "Serving TCP for localhost:{} ({})",
+                        &assigned_port, self.peer
+                    );
+                    let _ = self.tx.send(
+                        format!(
+                            "Serving TCP port on {}:{}\r\n",
+                            self.server.domain, &assigned_port,
+                        )
+                        .into_bytes(),
+                    );
+                }
                 self.server.tcp.insert(
-                    TcpAlias(address.clone(), assigned_port),
+                    TcpAlias(address.to_string(), assigned_port),
                     self.peer,
                     Arc::new(SshTunnelHandler::new(
                         handle,
                         self.tx.clone(),
                         self.peer,
-                        address,
+                        address.to_string(),
                         *port,
                     )),
                 );
@@ -655,4 +684,8 @@ impl Drop for ServerHandler {
         }
         info!("{} disconnected", self.peer);
     }
+}
+
+fn is_alias(address: &str) -> bool {
+    address != "localhost" && !address.is_empty() && address != "*"
 }
