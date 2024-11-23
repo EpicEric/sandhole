@@ -13,7 +13,7 @@ use hyper_util::rt::TokioIo;
 use log::{debug, info, warn};
 use russh::{
     server::{Auth, Handler, Msg, Session},
-    Channel, ChannelId, ChannelStream, MethodSet,
+    Channel, ChannelId, ChannelStream, Disconnect, MethodSet,
 };
 use russh_keys::key::PublicKey;
 use tokio::{
@@ -245,7 +245,7 @@ impl Handler for ServerHandler {
         &mut self,
         _channel: ChannelId,
         data: &[u8],
-        _session: &mut Session,
+        session: &mut Session,
     ) -> Result<(), Self::Error> {
         match *self.authentication.lock().await {
             Authentication::None => return Err(russh::Error::Disconnect),
@@ -254,16 +254,22 @@ impl Handler for ServerHandler {
         // Sending Ctrl+C ends the session and disconnects the client
         if data == [3] {
             self.tx.send(b"\x1b[?25h".to_vec()).unwrap();
-            return Err(russh::Error::Disconnect);
+            session.disconnect(Disconnect::ByApplication, "", "English");
+            return Ok(());
         }
         debug!("received data {:?}", data);
         let authentication = *self.authentication.lock().await;
         if let (Authentication::Admin, Some(admin_interface)) =
             (authentication, self.admin_interface.as_mut())
         {
-            // Tab
-            if data == [b'\t'] {
-                admin_interface.advance_tab();
+            match data {
+                // Tab
+                b"\t" => admin_interface.advance_tab(),
+                // Up
+                b"\x1b[A" => admin_interface.move_up(),
+                // Down
+                b"\x1b[B" => admin_interface.move_down(),
+                _ => (),
             }
         }
         Ok(())
@@ -282,7 +288,8 @@ impl Handler for ServerHandler {
                 if authentication != Authentication::Admin {
                     return Err(russh::Error::RequestDenied);
                 }
-                let mut admin_interface = AdminInterface::new(self.tx.clone());
+                let mut admin_interface =
+                    AdminInterface::new(self.tx.clone(), Arc::clone(&self.server));
                 if let (Some(col_width), Some(row_height)) = (self.col_width, self.row_height) {
                     let _ = admin_interface.resize(col_width as u16, row_height as u16);
                 }

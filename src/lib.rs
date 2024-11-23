@@ -1,4 +1,5 @@
 use std::{
+    net::SocketAddr,
     sync::{Arc, RwLock},
     time::Duration,
 };
@@ -15,7 +16,7 @@ use russh_keys::decode_secret_key;
 use rustls::ServerConfig;
 use rustls_acme::is_tls_alpn_challenge;
 use tcp::TcpHandler;
-use tokio::{fs, io::AsyncWriteExt, net::TcpListener, sync::oneshot};
+use tokio::{fs, io::AsyncWriteExt, net::TcpListener, sync::oneshot, time::sleep};
 use tokio_rustls::LazyConfigAcceptor;
 
 use crate::{
@@ -49,6 +50,9 @@ pub(crate) struct SandholeServer {
     pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, Arc<CertificateResolver>>>,
     pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>>>,
     pub(crate) tcp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
+    pub(crate) http_data: Arc<RwLock<Vec<(String, Vec<SocketAddr>)>>>,
+    pub(crate) ssh_data: Arc<RwLock<Vec<(String, Vec<SocketAddr>)>>>,
+    pub(crate) tcp_data: Arc<RwLock<Vec<(u16, Vec<SocketAddr>)>>>,
     pub(crate) fingerprints_validator: Arc<FingerprintsValidator>,
     pub(crate) api_login: Arc<Option<ApiLogin>>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
@@ -63,6 +67,7 @@ pub(crate) struct SandholeServer {
 }
 
 pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
+    // Initialize crypto and credentials
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .expect("Unable to install CryptoProvider");
@@ -91,6 +96,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         Err(err) => return Err(err).with_context(|| "Error reading secret key"),
     };
 
+    // Initialize modules
     let fingerprints = Arc::new(
         FingerprintsValidator::watch(
             config.user_keys_directory.clone(),
@@ -147,6 +153,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         to: config.domain_redirect,
     });
 
+    // HTTP handlers
     let http_listener = TcpListener::bind((config.listen_address.clone(), config.http_port))
         .await
         .with_context(|| "Error listening to HTTP port and address")?;
@@ -186,6 +193,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         }
     });
 
+    // HTTPS handlers
     let https_listener = TcpListener::bind((config.listen_address.clone(), config.https_port))
         .await
         .with_context(|| "Error listening to HTTP port and address")?;
@@ -235,20 +243,59 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                                     let _ = conn.await;
                                 }
                                 Err(err) => {
-                                    warn!("Error establishing TLS connection: {:?}", err);
+                                    warn!("Error establishing TLS connection: {}", err);
                                 }
                             }
                         });
                     }
                 }
                 Err(err) => {
-                    warn!("Failed to establish TLS handshake: {:?}", err);
+                    warn!("Failed to establish TLS handshake: {}", err);
                     continue;
                 }
             }
         }
     });
 
+    // Telemetry
+    let http_data = Arc::new(RwLock::new(vec![]));
+    let data_clone = Arc::clone(&http_data);
+    let connections_clone = Arc::clone(&http_connections);
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_millis(3_000)).await;
+            let mut data = connections_clone.data();
+            data.sort();
+            data.iter_mut().for_each(|(_, v)| v.sort());
+            *data_clone.write().unwrap() = data;
+        }
+    });
+    let ssh_data = Arc::new(RwLock::new(vec![]));
+    let data_clone = Arc::clone(&ssh_data);
+    let connections_clone = Arc::clone(&ssh_connections);
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_millis(3_000)).await;
+            let mut data = connections_clone.data();
+            data.sort();
+            data.iter_mut().for_each(|(_, v)| v.sort());
+            *data_clone.write().unwrap() = data;
+        }
+    });
+    let tcp_data = Arc::new(RwLock::new(vec![]));
+    let data_clone = Arc::clone(&tcp_data);
+    let connections_clone = Arc::clone(&tcp_connections);
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_millis(3_000)).await;
+            let mut data = connections_clone.data();
+            data.sort();
+            data.iter_mut().for_each(|(_, v)| v.sort());
+            *data_clone.write().unwrap() = data;
+        }
+    });
+
+    // Start Sandhole
     let ssh_config = Arc::new(Config {
         inactivity_timeout: Some(Duration::from_secs(3_600)),
         auth_rejection_time: Duration::from_secs(2),
@@ -260,6 +307,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         http: http_connections,
         ssh: ssh_connections,
         tcp: tcp_connections,
+        http_data,
+        ssh_data,
+        tcp_data,
         fingerprints_validator: fingerprints,
         api_login,
         address_delegator: addressing,

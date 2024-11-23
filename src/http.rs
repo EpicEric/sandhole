@@ -46,18 +46,31 @@ fn http_log(
     tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
 ) {
     let status_escape_color = match status {
-        100..=199 => "\x1b[37m",
-        200..=299 => "\x1b[34m",
-        300..=399 => "\x1b[32m",
-        400..=499 => "\x1b[33m",
-        500..=599 => "\x1b[31m",
+        100..=199 => "37m",
+        200..=299 => "34m",
+        300..=399 => "32m",
+        400..=499 => "33m",
+        500..=599 => "31m",
         _ => unreachable!(),
     };
+    let method_escape_color = match method {
+        "POST" => "42m",
+        "PUT" => "43m",
+        "DELETE" => "41m",
+        "HEAD" => "46m",
+        "OPTIONS" => "45m",
+        "CONNECT" => "45m",
+        "PATCH" => "43m",
+        "TRACE" => "45m",
+        // GET or other
+        _ => "44m",
+    };
     let line = format!(
-        " \x1b[2m{:19}\x1b[22m {}[{:3}] \x1b[0;1;44m{:^7}\x1b[0m {} => {} \x1b[2m{}\x1b[0m\r\n",
+        " \x1b[2m{:19}\x1b[22m \x1b[{}[{:3}] \x1b[0;1;{}{:^7}\x1b[0m {} => {} \x1b[2m{}\x1b[0m\r\n",
         chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
         status_escape_color,
         status,
+        method_escape_color,
         method,
         host,
         uri,

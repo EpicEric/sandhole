@@ -79,6 +79,23 @@ where
     pub(crate) fn update_reactor(&self, reactor: Option<R>) {
         *self.reactor.write().unwrap() = reactor;
     }
+
+    pub(crate) fn data(&self) -> Vec<(K, Vec<SocketAddr>)> {
+        self.map
+            .iter()
+            .map(|entry| {
+                (
+                    entry.key().clone(),
+                    entry
+                        .value()
+                        .iter()
+                        .map(|(peer, _)| peer)
+                        .copied()
+                        .collect(),
+                )
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
