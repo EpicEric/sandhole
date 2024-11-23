@@ -608,7 +608,7 @@ impl Handler for ServerHandler {
         } else if let Some(handler) = self
             .server
             .tcp
-            .get(&BorrowedTcpAlias(&host_to_connect, &port_to_connect) as &dyn TcpAliasKey)
+            .get(&BorrowedTcpAlias(host_to_connect, &port_to_connect) as &dyn TcpAliasKey)
         {
             if let Ok(mut io) = handler
                 .tunneling_channel(originator_address, originator_port as u16)

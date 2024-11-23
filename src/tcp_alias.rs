@@ -23,7 +23,7 @@ pub(crate) trait TcpAliasKey {
 }
 
 impl TcpAliasKey for TcpAlias {
-    fn key<'k>(&'k self) -> BorrowedTcpAlias<'k> {
+    fn key(&self) -> BorrowedTcpAlias {
         BorrowedTcpAlias(self.0.as_str(), &self.1)
     }
 }
@@ -44,7 +44,7 @@ impl<'a> Eq for (dyn TcpAliasKey + 'a) {}
 
 impl<'a> PartialOrd for (dyn TcpAliasKey + 'a) {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.key().partial_cmp(&other.key())
+        Some(self.cmp(other))
     }
 }
 

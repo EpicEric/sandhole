@@ -8,8 +8,12 @@ use std::{
 use crate::{directory::watch_directory, ssh::Authentication};
 use log::{error, warn};
 use notify::RecommendedWatcher;
-use russh_keys::load_public_key;
-use tokio::{fs::read_dir, sync::oneshot, task::JoinHandle};
+use ssh_key::{HashAlg, PublicKey};
+use tokio::{
+    fs::{read_dir, read_to_string},
+    sync::oneshot,
+    task::JoinHandle,
+};
 
 #[derive(Debug)]
 pub(crate) struct FingerprintsValidator {
@@ -47,58 +51,88 @@ impl FingerprintsValidator {
                 {
                     break;
                 }
-                let mut user_set = HashSet::new();
-                match read_dir(user_keys_directory.as_path()).await {
-                    Ok(mut read_dir) => {
-                        while let Ok(Some(entry)) = read_dir.next_entry().await {
-                            match load_public_key(entry.path()) {
-                                Ok(data) => {
-                                    user_set.insert(data.fingerprint());
+                tokio::join!(
+                    async {
+                        let mut user_set = HashSet::new();
+                        match read_dir(user_keys_directory.as_path()).await {
+                            Ok(mut read_dir) => {
+                                while let Ok(Some(entry)) = read_dir.next_entry().await {
+                                    match read_to_string(entry.path()).await {
+                                        Ok(data) => {
+                                            user_set.extend(
+                                                data.lines()
+                                                    .flat_map(|line| {
+                                                        PublicKey::from_openssh(line).ok()
+                                                    })
+                                                    .flat_map(|key| {
+                                                        key.fingerprint(HashAlg::Sha256)
+                                                            .to_string()
+                                                            .split(':')
+                                                            .nth(1)
+                                                            .map(str::to_string)
+                                                    }),
+                                            );
+                                        }
+                                        Err(err) => {
+                                            warn!(
+                                                "Unable to load user key in {:?}: {}",
+                                                entry.file_name(),
+                                                err
+                                            );
+                                        }
+                                    }
                                 }
-                                Err(err) => {
-                                    warn!(
-                                        "Unable to load public key in {:?}: {}",
-                                        entry.file_name(),
-                                        err
-                                    );
-                                }
+                                *user_fingerprints_clone.write().unwrap() = user_set;
+                            }
+                            Err(err) => {
+                                error!(
+                                    "Unable to read user keys directory {:?}: {}",
+                                    &user_keys_directory, err
+                                );
                             }
                         }
-                        *user_fingerprints_clone.write().unwrap() = user_set;
-                    }
-                    Err(err) => {
-                        error!(
-                            "Unable to read user keys directory {:?}: {}",
-                            &user_keys_directory, err
-                        );
-                    }
-                }
-                let mut admin_set = HashSet::new();
-                match read_dir(admin_keys_directory.as_path()).await {
-                    Ok(mut read_dir) => {
-                        while let Ok(Some(entry)) = read_dir.next_entry().await {
-                            match load_public_key(entry.path()) {
-                                Ok(data) => {
-                                    admin_set.insert(data.fingerprint());
+                    },
+                    async {
+                        let mut admin_set = HashSet::new();
+                        match read_dir(admin_keys_directory.as_path()).await {
+                            Ok(mut read_dir) => {
+                                while let Ok(Some(entry)) = read_dir.next_entry().await {
+                                    match read_to_string(entry.path()).await {
+                                        Ok(data) => {
+                                            admin_set.extend(
+                                                data.lines()
+                                                    .flat_map(|line| {
+                                                        PublicKey::from_openssh(line).ok()
+                                                    })
+                                                    .flat_map(|key| {
+                                                        key.fingerprint(HashAlg::Sha256)
+                                                            .to_string()
+                                                            .split(':')
+                                                            .nth(1)
+                                                            .map(str::to_string)
+                                                    }),
+                                            );
+                                        }
+                                        Err(err) => {
+                                            warn!(
+                                                "Unable to load admin key in {:?}: {}",
+                                                entry.file_name(),
+                                                err
+                                            );
+                                        }
+                                    }
                                 }
-                                Err(err) => {
-                                    warn!(
-                                        "Unable to load public key in {:?}: {}",
-                                        entry.file_name(),
-                                        err
-                                    );
-                                }
+                                *admin_fingerprints_clone.write().unwrap() = admin_set;
+                            }
+                            Err(err) => {
+                                error!(
+                                    "Unable to read admin keys directory {:?}: {}",
+                                    &admin_keys_directory, err
+                                );
                             }
                         }
-                        *admin_fingerprints_clone.write().unwrap() = admin_set;
                     }
-                    Err(err) => {
-                        error!(
-                            "Unable to read admin keys directory {:?}: {}",
-                            &admin_keys_directory, err
-                        );
-                    }
-                }
+                );
                 init_tx.take().map(|tx| tx.send(()));
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
