@@ -15,7 +15,7 @@ use russh::server::Config;
 use russh_keys::decode_secret_key;
 use rustls::ServerConfig;
 use rustls_acme::is_tls_alpn_challenge;
-use tcp::TcpHandler;
+use tcp::{TcpAlias, TcpHandler};
 use tokio::{fs, io::AsyncWriteExt, net::TcpListener, sync::oneshot, time::sleep};
 use tokio_rustls::LazyConfigAcceptor;
 
@@ -45,14 +45,16 @@ mod login;
 mod ssh;
 mod tcp;
 
+type DataTable<T> = RwLock<Vec<(T, Vec<SocketAddr>)>>;
+
 #[derive(Clone)]
 pub(crate) struct SandholeServer {
     pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, Arc<CertificateResolver>>>,
     pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>>>,
-    pub(crate) tcp: Arc<ConnectionMap<(String, u16), Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
-    pub(crate) http_data: Arc<RwLock<Vec<(String, Vec<SocketAddr>)>>>,
-    pub(crate) ssh_data: Arc<RwLock<Vec<(String, Vec<SocketAddr>)>>>,
-    pub(crate) tcp_data: Arc<RwLock<Vec<((String, u16), Vec<SocketAddr>)>>>,
+    pub(crate) tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
+    pub(crate) http_data: Arc<DataTable<String>>,
+    pub(crate) ssh_data: Arc<DataTable<String>>,
+    pub(crate) tcp_data: Arc<DataTable<TcpAlias>>,
     pub(crate) fingerprints_validator: Arc<FingerprintsValidator>,
     pub(crate) api_login: Arc<Option<ApiLogin>>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,

@@ -13,8 +13,10 @@ use tokio::{io::copy_bidirectional, net::TcpListener, task::JoinHandle};
 pub(crate) struct TcpHandler {
     listen_address: String,
     sockets: DashMap<u16, DroppableHandle<()>>,
-    conn_manager: Arc<ConnectionMap<(String, u16), Arc<SshTunnelHandler>, Arc<Self>>>,
+    conn_manager: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<Self>>>,
 }
+
+pub(crate) type TcpAlias = (String, u16);
 
 struct DroppableHandle<T>(JoinHandle<T>);
 
@@ -27,7 +29,7 @@ impl<T> Drop for DroppableHandle<T> {
 impl TcpHandler {
     pub(crate) fn new(
         listen_address: String,
-        conn_manager: Arc<ConnectionMap<(String, u16), Arc<SshTunnelHandler>, Arc<Self>>>,
+        conn_manager: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<Self>>>,
     ) -> Self {
         TcpHandler {
             listen_address,
@@ -78,8 +80,8 @@ impl PortHandler for Arc<TcpHandler> {
     }
 }
 
-impl ConnectionMapReactor<(String, u16)> for Arc<TcpHandler> {
-    fn call(&self, ports: Vec<(String, u16)>) {
+impl ConnectionMapReactor<TcpAlias> for Arc<TcpHandler> {
+    fn call(&self, ports: Vec<TcpAlias>) {
         let mut ports: HashSet<u16> = ports
             .into_iter()
             .filter_map(|(address, port)| {

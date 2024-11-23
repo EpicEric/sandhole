@@ -10,6 +10,8 @@ use webpki::types::DnsName;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum RandomSubdomainSeed {
+    /// From IP address, SSH user, and requested address. Recommended if unsure
+    IpAndUser,
     /// From SSH user and requested address.
     User,
     /// From SSH key fingerprint and requested address.
@@ -22,6 +24,7 @@ impl From<RandomSubdomainSeed> for RSSConfig {
     fn from(value: RandomSubdomainSeed) -> Self {
         match value {
             RandomSubdomainSeed::User => RSSConfig::User,
+            RandomSubdomainSeed::IpAndUser => RSSConfig::IpAndUser,
             RandomSubdomainSeed::Fingerprint => RSSConfig::KeyFingerprint,
             RandomSubdomainSeed::Address => RSSConfig::SocketAddress,
         }

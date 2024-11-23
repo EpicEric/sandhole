@@ -3,6 +3,7 @@ use std::{path::PathBuf, time::Duration};
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RandomSubdomainSeed {
     User,
+    IpAndUser,
     KeyFingerprint,
     SocketAddress,
 }

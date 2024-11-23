@@ -6,7 +6,12 @@ use std::{
     sync::Arc,
 };
 
-use crate::{admin::AdminInterface, http::HttpHandler, tcp::PortHandler, SandholeServer};
+use crate::{
+    admin::AdminInterface,
+    http::HttpHandler,
+    tcp::{PortHandler, TcpAlias},
+    SandholeServer,
+};
 
 use async_trait::async_trait;
 use hyper_util::rt::TokioIo;
@@ -104,7 +109,7 @@ pub(crate) struct ServerHandler {
     rx: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
     ssh_hosts: HashSet<String>,
     http_hosts: HashSet<String>,
-    tcp_aliases: HashSet<(String, u16)>,
+    tcp_aliases: HashSet<TcpAlias>,
     host_addressing: HashMap<(String, u32), String>,
     port_addressing: HashMap<(String, u32), u16>,
     server: Arc<SandholeServer>,

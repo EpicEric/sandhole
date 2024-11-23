@@ -10,7 +10,7 @@ Given a remote service running as
 ssh -R my.tunnel:3000:localhost:2000 server.com -p 2222
 ```
 
-Note that the server won't listen on port 3000; instead, you can establish a local forward of the port on your machine:
+Note that the server won't listen on port 3000; instead, you can establish a local forward to the port from your machine:
 
 ```shell
 ssh -L 4000:my.tunnel:3000

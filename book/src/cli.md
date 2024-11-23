@@ -138,6 +138,8 @@ Options:
           If unset, defaults to a random seed.
 
           Possible values:
+          - ip-and-user: From IP address, SSH user, and requested address.
+                         Recommended if unsure
           - user:        From SSH user and requested address
           - fingerprint: From SSH key fingerprint and requested address
           - address:     From SSH connection socket (address + port) and

@@ -192,6 +192,14 @@ impl<R: Resolver> AddressDelegator<R> {
                         )
                     }
                 }
+                RandomSubdomainSeed::IpAndUser => {
+                    requested_address.hash(&mut hasher);
+                    socket_address.ip().hash(&mut hasher);
+                    if let Some(user) = user {
+                        user.hash(&mut hasher);
+                    }
+                    hash_initialized = true;
+                }
                 RandomSubdomainSeed::SocketAddress => {
                     requested_address.hash(&mut hasher);
                     socket_address.hash(&mut hasher);
