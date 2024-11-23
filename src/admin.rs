@@ -195,7 +195,6 @@ impl AdminInterface {
                             }
                         })
                         .unwrap();
-                    // TO-DO: Figure out how to fix cursor on shutdown without displaying it all the time.
                     terminal.show_cursor().unwrap();
                     drop(interface);
                 }

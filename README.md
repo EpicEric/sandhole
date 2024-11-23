@@ -16,22 +16,6 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
 This is still in early development, and mostly serves as an experiment. Contributions are welcome, but try it in production at your own risk.
 
-### TO-DO
-
-Roughly in the order I intend to work on:
-
-- Documentation
-- Create issues for technical debts
-  - Option to only bind hostnames that resolve to same A/AAAA value
-  - Option to garbage-collect TCP/WebSocket connections
-  - Option to disable load-balancing
-  - Allow user-provided key fingerprints for tunnel authentication
-  - Check viability of verifying whole subdomain chain for a matching fingerprint
-  - Support loading multiple pubkeys from a single file
-  - Option to not log back requests to the client
-  - Try to optimize ServerHandler's memory usage
-  - Add more telemetry to admin interface
-
 ## Alternatives
 
 - [sish](https://github.com/antoniomika/sish/) - My favorite one. Written in Golang.
