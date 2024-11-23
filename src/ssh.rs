@@ -104,7 +104,7 @@ pub(crate) struct ServerHandler {
     rx: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
     ssh_hosts: HashSet<String>,
     http_hosts: HashSet<String>,
-    tcp_ports: HashSet<u16>,
+    tcp_aliases: HashSet<(String, u16)>,
     host_addressing: HashMap<(String, u32), String>,
     port_addressing: HashMap<(String, u32), u16>,
     server: Arc<SandholeServer>,
@@ -139,7 +139,7 @@ impl Server for Arc<SandholeServer> {
             rx: Some(rx),
             ssh_hosts: HashSet::new(),
             http_hosts: HashSet::new(),
-            tcp_ports: HashSet::new(),
+            tcp_aliases: HashSet::new(),
             host_addressing: HashMap::new(),
             port_addressing: HashMap::new(),
             server: Arc::clone(self),
@@ -460,7 +460,7 @@ impl Handler for ServerHandler {
                 } else {
                     *port as u16
                 };
-                self.tcp_ports.insert(assigned_port);
+                self.tcp_aliases.insert((address.clone(), assigned_port));
                 self.port_addressing
                     .insert((address.clone(), *port), assigned_port);
                 info!(
@@ -475,7 +475,7 @@ impl Handler for ServerHandler {
                     .into_bytes(),
                 );
                 self.server.tcp.insert(
-                    assigned_port,
+                    (address.clone(), assigned_port),
                     self.peer,
                     Arc::new(SshTunnelHandler::new(
                         handle,
@@ -523,8 +523,11 @@ impl Handler for ServerHandler {
                 if let Some(assigned_port) =
                     self.port_addressing.remove(&(address.to_string(), port))
                 {
-                    self.server.tcp.remove(&assigned_port, self.peer);
-                    self.tcp_ports.remove(&assigned_port);
+                    self.server
+                        .tcp
+                        .remove(&(address.to_string(), assigned_port), self.peer);
+                    self.tcp_aliases
+                        .remove(&(address.to_string(), assigned_port));
                     Ok(true)
                 } else {
                     Ok(false)
@@ -597,7 +600,11 @@ impl Handler for ServerHandler {
                     return Ok(true);
                 }
             }
-        } else if let Some(handler) = self.server.tcp.get(&port_to_connect) {
+        } else if let Some(handler) = self
+            .server
+            .tcp
+            .get(&(host_to_connect.to_string(), port_to_connect))
+        {
             if let Ok(mut io) = handler
                 .tunneling_channel(originator_address, originator_port as u16)
                 .await
@@ -638,7 +645,7 @@ impl Drop for ServerHandler {
         for host in self.http_hosts.iter() {
             self.server.http.remove(host, self.peer);
         }
-        for port in self.tcp_ports.iter() {
+        for port in self.tcp_aliases.iter() {
             self.server.tcp.remove(port, self.peer);
         }
         info!("{} disconnected", self.peer);

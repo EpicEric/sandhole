@@ -52,12 +52,13 @@ async fn ssh_proxy_jump() {
         request_timeout: Duration::from_secs(5),
     };
     tokio::spawn(async move { entrypoint(config).await });
-    if let Err(_) = timeout(Duration::from_secs(5), async {
+    if timeout(Duration::from_secs(5), async {
         while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {
             sleep(Duration::from_millis(100)).await;
         }
     })
     .await
+    .is_err()
     {
         panic!("Timeout waiting for Sandhole to start.")
     };
@@ -108,7 +109,7 @@ async fn ssh_proxy_jump() {
         .channel_open_session()
         .await
         .expect("Failed to open session to proxied SSH server");
-    if let Err(_) = timeout(Duration::from_secs(5), async {
+    if timeout(Duration::from_secs(5), async {
         match session_channel.wait().await.unwrap() {
             russh::ChannelMsg::Data { data } => {
                 assert_eq!(String::from_utf8(data.to_vec()).unwrap(), "Hello, world!");
@@ -117,6 +118,7 @@ async fn ssh_proxy_jump() {
         }
     })
     .await
+    .is_err()
     {
         panic!("Timeout waiting for proxy server to reply.")
     };

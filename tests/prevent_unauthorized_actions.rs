@@ -51,17 +51,18 @@ async fn prevent_unauthorized_actions() {
         request_timeout: Duration::from_secs(5),
     };
     tokio::spawn(async move { entrypoint(config).await });
-    if let Err(_) = timeout(Duration::from_secs(5), async {
+    if timeout(Duration::from_secs(5), async {
         while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {
             sleep(Duration::from_millis(100)).await;
         }
     })
     .await
+    .is_err()
     {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied
+    // 2. Start SSH client that will be proxied via alias
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
@@ -93,7 +94,7 @@ async fn prevent_unauthorized_actions() {
     assert!(session.tcpip_forward("my.hostname", 12345).await.is_err());
     assert!(session.is_closed());
 
-    // 3b. Try to local-forward with an inexistent host
+    // 3b. Try to local-forward with an inexistent alias
     let key = russh_keys::key::KeyPair::generate_ed25519();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)

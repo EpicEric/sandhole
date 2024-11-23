@@ -1,22 +1,22 @@
 # Advanced uses
 
-## Local forwarding
+## Local forwarding and aliasing
 
 In addition to remote port forwarding, Sandhole also supports local port forwarding. This allows you to create SSH-based tunnels to connect to a service.
 
 Given a remote service running as
 
 ```shell
-ssh -R 3000:localhost:2000 server.com -p 2222
+ssh -R my.tunnel:3000:localhost:2000 server.com -p 2222
 ```
 
-You can establish a local forward of the port on your machine:
+Note that the server won't listen on port 3000; instead, you can establish a local forward of the port on your machine:
 
 ```shell
-ssh -L 4000:localhost:3000
+ssh -L 4000:my.tunnel:3000
 ```
 
-Then you can access `localhost:4000`, and all traffic will be redirected to port 2000 on the remote service.
+Then you can access `localhost:4000`, and all traffic will be redirected to port 2000 on the remote service. It's almost like a VPN!
 
 Currently, there are no authentication options for local forwarding, but this is a planned feature.
 

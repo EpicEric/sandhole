@@ -13,7 +13,7 @@ use tokio::{io::copy_bidirectional, net::TcpListener, task::JoinHandle};
 pub(crate) struct TcpHandler {
     listen_address: String,
     sockets: DashMap<u16, DroppableHandle<()>>,
-    conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<Self>>>,
+    conn_manager: Arc<ConnectionMap<(String, u16), Arc<SshTunnelHandler>, Arc<Self>>>,
 }
 
 struct DroppableHandle<T>(JoinHandle<T>);
@@ -27,7 +27,7 @@ impl<T> Drop for DroppableHandle<T> {
 impl TcpHandler {
     pub(crate) fn new(
         listen_address: String,
-        conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<Self>>>,
+        conn_manager: Arc<ConnectionMap<(String, u16), Arc<SshTunnelHandler>, Arc<Self>>>,
     ) -> Self {
         TcpHandler {
             listen_address,
@@ -56,7 +56,7 @@ impl PortHandler for Arc<TcpHandler> {
             loop {
                 match listener.accept().await {
                     Ok((mut stream, address)) => {
-                        if let Some(handler) = clone.conn_manager.get(&port) {
+                        if let Some(handler) = clone.conn_manager.get(&("localhost".into(), port)) {
                             if let Ok(mut channel) = handler
                                 .tunneling_channel(&address.ip().to_string(), address.port())
                                 .await
@@ -78,9 +78,18 @@ impl PortHandler for Arc<TcpHandler> {
     }
 }
 
-impl ConnectionMapReactor<u16> for Arc<TcpHandler> {
-    fn call(&self, ports: Vec<u16>) {
-        let mut ports: HashSet<u16> = ports.into_iter().collect();
+impl ConnectionMapReactor<(String, u16)> for Arc<TcpHandler> {
+    fn call(&self, ports: Vec<(String, u16)>) {
+        let mut ports: HashSet<u16> = ports
+            .into_iter()
+            .filter_map(|(address, port)| {
+                if address == "localhost" {
+                    Some(port)
+                } else {
+                    None
+                }
+            })
+            .collect();
         self.sockets.retain(|port, _| ports.contains(port));
         ports.retain(|port| !self.sockets.contains_key(port));
         if !ports.is_empty() {

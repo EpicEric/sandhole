@@ -26,6 +26,7 @@ For example, to bind under `test.server.com`, we could use either of these comma
 
 ```shell
 ssh -R test:80:localhost:3000 server.com -p 2222
+# -- OR --
 ssh -R test.server.com:80:localhost:3000 server.com -p 2222
 ```
 
@@ -33,6 +34,8 @@ And if we'd like to bind to a specific port, say 4321:
 
 ```shell
 ssh -R 4321:localhost:3000 server.com -p 2222
+# -- OR --
+ssh -R localhost:4321:localhost:3000 server.com -p 2222
 ```
 
 ### Automatic reconnection

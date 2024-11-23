@@ -59,12 +59,13 @@ async fn https_force_random_subdomains() {
         request_timeout: Duration::from_secs(5),
     };
     tokio::spawn(async move { entrypoint(config).await });
-    if let Err(_) = timeout(Duration::from_secs(5), async {
+    if timeout(Duration::from_secs(5), async {
         while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {
             sleep(Duration::from_millis(100)).await;
         }
     })
     .await
+    .is_err()
     {
         panic!("Timeout waiting for Sandhole to start.")
     };

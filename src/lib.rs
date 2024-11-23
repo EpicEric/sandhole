@@ -49,10 +49,10 @@ mod tcp;
 pub(crate) struct SandholeServer {
     pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, Arc<CertificateResolver>>>,
     pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>>>,
-    pub(crate) tcp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
+    pub(crate) tcp: Arc<ConnectionMap<(String, u16), Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
     pub(crate) http_data: Arc<RwLock<Vec<(String, Vec<SocketAddr>)>>>,
     pub(crate) ssh_data: Arc<RwLock<Vec<(String, Vec<SocketAddr>)>>>,
-    pub(crate) tcp_data: Arc<RwLock<Vec<(u16, Vec<SocketAddr>)>>>,
+    pub(crate) tcp_data: Arc<RwLock<Vec<((String, u16), Vec<SocketAddr>)>>>,
     pub(crate) fingerprints_validator: Arc<FingerprintsValidator>,
     pub(crate) api_login: Arc<Option<ApiLogin>>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,

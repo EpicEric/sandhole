@@ -162,13 +162,14 @@ impl AdminInterface {
                                         let data = server.tcp_data.read().unwrap().clone();
                                         let rows = data.into_iter().map(|(k, v)| {
                                             let len = v.len() as u16;
-                                            Row::new(vec![k.to_string(), v.into_iter().map(|addr| addr.to_string()).collect::<Vec<_>>().join("\n")]).height(len)
+                                            Row::new(vec![k.0, k.1.to_string(), v.into_iter().map(|addr| addr.to_string()).collect::<Vec<_>>().join("\n")]).height(len)
                                         });
                                         let constraints = [
-                                            Constraint::Fill(2),
+                                            Constraint::Fill(1),
+                                            Constraint::Fill(1),
                                             Constraint::Fill(5),
                                         ];
-                                        let header = Row::new(["Port", "Peer(s)"]);
+                                        let header = Row::new(["Alias", "Port", "Peer(s)"]);
                                         let title = Block::new().title(Line::from("TCP services".green().bold()).centered());
                                         let style = Style::new().green();
                                         let table = Table::new(rows, constraints)

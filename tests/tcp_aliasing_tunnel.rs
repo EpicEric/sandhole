@@ -11,7 +11,6 @@ use sandhole::{
     entrypoint,
 };
 use tokio::{
-    io::AsyncReadExt,
     net::TcpStream,
     time::{sleep, timeout},
 };
@@ -73,17 +72,44 @@ async fn tcp_allow_requested_ports() {
         .await
         .expect("SSH authentication failed"));
     session
-        .tcpip_forward("localhost", 12345)
+        .tcpip_forward("my.tunnel", 12345)
         .await
         .expect("tcpip_forward failed");
+    assert!(
+        TcpStream::connect("127.0.0.1:12345").await.is_err(),
+        "alias shouldn't create socket listener"
+    );
 
-    // 3. Connect to the TCP port of our proxy
-    let mut tcp_stream = TcpStream::connect("127.0.0.1:12345")
+    // 3. Establish a tunnel via aliasing
+    let key = russh_keys::key::KeyPair::generate_ed25519();
+    let ssh_client = SshClient;
+    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
-        .expect("TCP connection failed");
-    let mut buf = String::with_capacity(13);
-    tcp_stream.read_to_string(&mut buf).await.unwrap();
-    assert_eq!(buf, "Hello, world!");
+        .expect("Failed to connect to SSH server");
+    assert!(session
+        .authenticate_publickey("user", Arc::new(key))
+        .await
+        .expect("SSH authentication failed"));
+    let mut channel = session
+        .channel_open_direct_tcpip("my.tunnel", 12345, "::1", 23456)
+        .await
+        .expect("Local forwarding failed");
+    if timeout(Duration::from_secs(5), async {
+        match channel.wait().await.unwrap() {
+            russh::ChannelMsg::Data { data } => {
+                assert_eq!(
+                    String::from_utf8(data.to_vec()).unwrap(),
+                    "Poor man's VPN..."
+                );
+            }
+            msg => panic!("Unexpected message {:?}", msg),
+        }
+    })
+    .await
+    .is_err()
+    {
+        panic!("Timeout waiting for proxy server to reply.")
+    };
 }
 
 struct SshClient;
@@ -105,7 +131,7 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        channel.data(&b"Hello, world!"[..]).await.unwrap();
+        channel.data(&b"Poor man's VPN..."[..]).await.unwrap();
         channel.eof().await.unwrap();
         Ok(())
     }
