@@ -92,7 +92,7 @@ async fn ssh_proxy_jump() {
         .await
         .expect("SSH authentication failed"));
     let channel = session
-        .channel_open_direct_tcpip("test.foobar.tld", 18022, "::", 12345)
+        .channel_open_direct_tcpip("test.foobar.tld", 18022, "::1", 12345)
         .await
         .expect("Local forwarding failed");
     let fake_socket = channel.into_stream();

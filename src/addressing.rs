@@ -140,10 +140,12 @@ impl<R: Resolver> AddressDelegator<R> {
                     return format!("{}.{}", address, self.root_domain);
                 }
             }
-            warn!(
-                "Invalid address requested ({}), defaulting to random",
-                requested_address
-            );
+            if requested_address != "localhost" {
+                warn!(
+                    "Invalid address requested ({}), defaulting to random",
+                    requested_address
+                );
+            }
         } else {
             warn!(
                 "Invalid address requested ({}), defaulting to random",
