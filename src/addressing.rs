@@ -141,12 +141,12 @@ impl<R: Resolver> AddressDelegator<R> {
                 }
             }
             warn!(
-                "Invalid address requested, defaulting to random: {}",
+                "Invalid address requested ({}), defaulting to random",
                 requested_address
             );
         } else {
             warn!(
-                "Invalid address requested, defaulting to random: {}",
+                "Invalid address requested ({}), defaulting to random",
                 requested_address
             );
         }

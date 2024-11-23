@@ -20,9 +20,9 @@ This is still in early development, and mostly serves as an experiment. Contribu
 
 Roughly in the order I intend to work on:
 
-- Option to create directories on first run
 - Documentation
 - Create issues for technical debts
+  - Option to only bind hostnames that resolve to same A/AAAA value
   - Option to garbage-collect TCP/WebSocket connections
   - Option to disable load-balancing
   - Allow user-provided key fingerprints for tunnel authentication

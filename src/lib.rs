@@ -77,26 +77,38 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             info!("Key file not found. Creating...");
             let key = ssh_key::PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
                 .with_context(|| "Error creating secret key")?;
-            fs::create_dir_all(
-                config
-                    .private_key_file
-                    .as_path()
-                    .parent()
-                    .ok_or(ServerError::InvalidFilePath)
-                    .with_context(|| "Error parsing secret key path")?,
-            )
-            .await
-            .with_context(|| "Error creating secret key directory")?;
+            if !config.disable_directory_creation {
+                fs::create_dir_all(
+                    config
+                        .private_key_file
+                        .as_path()
+                        .parent()
+                        .ok_or(ServerError::InvalidFilePath)
+                        .with_context(|| "Error parsing secret key path")?,
+                )
+                .await
+                .with_context(|| "Error creating secret key directory")?;
+            }
             let key_string = key.to_openssh(ssh_key::LineEnding::LF)?;
             let key = decode_secret_key(&key_string, None)
                 .with_context(|| "Error decoding secret key")?;
-            fs::write(config.private_key_file.as_path(), key_string).await?;
+            fs::write(config.private_key_file.as_path(), key_string)
+                .await
+                .with_context(|| "Error saving secret key to filesystem")?;
             key
         }
         Err(err) => return Err(err).with_context(|| "Error reading secret key"),
     };
 
     // Initialize modules
+    if !config.disable_directory_creation {
+        fs::create_dir_all(config.user_keys_directory.as_path())
+            .await
+            .with_context(|| "Error creating user keys directory")?;
+        fs::create_dir_all(config.admin_keys_directory.as_path())
+            .await
+            .with_context(|| "Error creating admin keys directory")?;
+    }
     let fingerprints = Arc::new(
         FingerprintsValidator::watch(
             config.user_keys_directory.clone(),
@@ -124,6 +136,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         }
         None => Box::new(DummyAlpnChallengeResolver),
     };
+    if !config.disable_directory_creation {
+        fs::create_dir_all(config.certificates_directory.as_path())
+            .await
+            .with_context(|| "Error creating certificates directory")?;
+    }
     let certificates = Arc::new(
         CertificateResolver::watch(
             config.certificates_directory.clone(),

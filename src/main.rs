@@ -72,24 +72,27 @@ struct Args {
     #[arg(long, default_value_os = "./deploy/admin_keys/")]
     admin_keys_directory: PathBuf,
 
-    /// If set, defines a URL against which password authentication requests will
-    /// be validated. This is done by sending the following JSON payload:
-    ///
-    /// `{"user": "...", "password": "..."}`
-    ///
-    /// Any 2xx response indicates that the credentials are authorized.
-    #[arg(long)]
-    password_authentication_url: Option<String>,
-
     /// Directory containing SSL certificates and keys.
     /// Each sub-directory inside of this one must contain a certificate chain in a
     /// `fullchain.pem` file and its private key in a `privkey.pem` file.
     #[arg(long, default_value_os = "./deploy/certificates/")]
     certificates_directory: PathBuf,
 
+    /// Directory to use as a cache for Let's Encrypt's account and certificates.
+    /// This will automatically be created for you.
+    ///
+    /// Note that this setting ignores the --disable-directory-creation flag.
+    #[arg(long, default_value_os = "./deploy/acme_cache")]
+    acme_cache_directory: PathBuf,
+
     /// File path to the server's secret key. If missing, it will be created for you.
     #[arg(long, default_value_os = "./deploy/server_keys/ssh")]
     private_key_file: PathBuf,
+
+    /// If set, disables automatic creation of the directories expected by the application.
+    /// This may result in application errors if the directories are missing.
+    #[arg(long, default_value_t = false)]
+    disable_directory_creation: bool,
 
     /// Address to listen for all client connections.
     #[arg(long, default_value_t = String::from("::"))]
@@ -117,15 +120,19 @@ struct Args {
     #[arg(long)]
     acme_contact_email: Option<String>,
 
-    /// Directory to use as a cache for Let's Encrypt's account and certificates.
-    #[arg(long, default_value_os = "./deploy/acme_cache")]
-    acme_cache_directory: PathBuf,
-
     /// Controls whether to use the staging directory for Let's Encrypt certificates (default is production).
-    ///
-    /// Only use this option for testing.
+    /// Only set this option for testing.
     #[arg(long, default_value_t = false)]
     acme_use_staging: bool,
+
+    /// If set, defines a URL against which password authentication requests will
+    /// be validated. This is done by sending the following JSON payload:
+    ///
+    /// `{"user": "...", "password": "..."}`
+    ///
+    /// Any 2xx response indicates that the credentials are authorized.
+    #[arg(long)]
+    password_authentication_url: Option<String>,
 
     /// Policy on whether to allow binding specific hostnames.
     ///
@@ -181,17 +188,18 @@ async fn main() -> anyhow::Result<()> {
         domain_redirect: args.domain_redirect,
         user_keys_directory: args.user_keys_directory,
         admin_keys_directory: args.admin_keys_directory,
-        password_authentication_url: args.password_authentication_url,
         certificates_directory: args.certificates_directory,
+        acme_cache_directory: args.acme_cache_directory,
         private_key_file: args.private_key_file,
+        disable_directory_creation: args.disable_directory_creation,
         listen_address: args.listen_address,
         ssh_port: args.ssh_port,
         http_port: args.http_port,
         https_port: args.https_port,
         force_https: args.force_https,
         acme_contact_email: args.acme_contact_email,
-        acme_cache_directory: args.acme_cache_directory,
         acme_use_staging: args.acme_use_staging,
+        password_authentication_url: args.password_authentication_url,
         bind_hostnames: args.bind_hostnames.into(),
         txt_record_prefix: args.txt_record_prefix,
         allow_provided_subdomains: args.allow_provided_subdomains,

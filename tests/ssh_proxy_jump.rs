@@ -33,6 +33,7 @@ async fn ssh_proxy_jump() {
         certificates_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates")
             .into(),
         private_key_file: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh").into(),
+        disable_directory_creation: true,
         listen_address: "127.0.0.1".into(),
         ssh_port: 18022,
         http_port: 18080,
