@@ -2,6 +2,8 @@
 
 Expose HTTP/SSH/TCP services through SSH port forwarding.
 
+[Check out the Sandhole book.](https://epiceric.github.io/sandhole/)
+
 ## Features
 
 - Reverse proxy that only requires your services to have a regular SSH client.
