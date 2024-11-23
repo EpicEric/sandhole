@@ -1,8 +1,9 @@
 use std::{hash::Hash, net::SocketAddr};
 
 use async_trait::async_trait;
-use hickory_resolver::TokioAsyncResolver;
-use log::warn;
+use hickory_resolver::{proto::rr::RecordType, TokioAsyncResolver};
+use itertools::Itertools;
+use log::{debug, warn};
 #[cfg(test)]
 use mockall::automock;
 use rand::{seq::SliceRandom, thread_rng, Rng, RngCore, SeedableRng};
@@ -24,7 +25,7 @@ pub(crate) trait Resolver {
         fingerprint: &str,
     ) -> bool;
 
-    async fn has_valid_dns_records(&self, requested_address: &str) -> bool;
+    async fn has_cname_record_for_domain(&self, requested_address: &str, domain: &str) -> bool;
 }
 
 impl DnsResolver {
@@ -49,20 +50,35 @@ impl Resolver for DnsResolver {
             .txt_lookup(format!("{}.{}.", txt_record_prefix, requested_address))
             .await
         {
-            lookup
-                .iter()
-                .flat_map(|txt| txt.iter())
-                .any(|data| data.ends_with(fingerprint.as_bytes()))
+            lookup.iter().any(|txt| {
+                txt.iter()
+                    .any(|data| data.ends_with(fingerprint.as_bytes()))
+            })
         } else {
             false
         }
     }
 
-    async fn has_valid_dns_records(&self, requested_address: &str) -> bool {
-        self.0
-            .lookup_ip(format!("{}.", requested_address))
+    async fn has_cname_record_for_domain(&self, requested_address: &str, domain: &str) -> bool {
+        if let Ok(lookup) = self
+            .0
+            .lookup(format!("{}.", requested_address), RecordType::CNAME)
             .await
-            .is_ok_and(|lookup| lookup.iter().next().is_some())
+        {
+            lookup
+                .iter()
+                .filter_map(|rdata| rdata.clone().into_cname().ok())
+                .any(|cname| {
+                    let cname = cname
+                        .iter()
+                        .map(|data| String::from_utf8_lossy(data))
+                        .join(".");
+                    debug!("cname {}", &cname);
+                    cname == domain
+                })
+        } else {
+            false
+        }
     }
 }
 
@@ -109,15 +125,18 @@ impl<R: Resolver> AddressDelegator<R> {
             if matches!(self.bind_hostnames, BindHostnames::All) {
                 return requested_address.to_string();
             }
-            if matches!(self.bind_hostnames, BindHostnames::Valid)
+            if matches!(self.bind_hostnames, BindHostnames::Cname)
                 && requested_address != self.root_domain
-                && self.resolver.has_valid_dns_records(requested_address).await
+                && self
+                    .resolver
+                    .has_cname_record_for_domain(requested_address, &self.root_domain)
+                    .await
             {
                 return requested_address.to_string();
             }
             if matches!(
                 self.bind_hostnames,
-                BindHostnames::Valid | BindHostnames::Txt
+                BindHostnames::Cname | BindHostnames::Txt
             ) {
                 if let Some(fingerprint) = fingerprint {
                     if self
@@ -288,17 +307,17 @@ mod address_delegator_tests {
     }
 
     #[tokio::test]
-    async fn returns_provided_address_when_enforced_dns_is_valid() {
+    async fn returns_provided_address_when_cname_is_match() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
-        mock.expect_has_valid_dns_records()
+        mock.expect_has_cname_record_for_domain()
             .once()
             .return_const(true);
         let delegator = AddressDelegator::new(
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            BindHostnames::Valid,
+            BindHostnames::Cname,
             false,
             None,
         );
@@ -315,19 +334,19 @@ mod address_delegator_tests {
     }
 
     #[tokio::test]
-    async fn returns_provided_address_if_enforced_dns_matches_fingerprint() {
+    async fn returns_provided_address_if_cname_matches_fingerprint() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .with(eq("_some_prefix"), eq("some.address"), eq("fingerprint1"))
             .return_const(true);
-        mock.expect_has_valid_dns_records()
+        mock.expect_has_cname_record_for_domain()
             .once()
             .return_const(false);
         let delegator = AddressDelegator::new(
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            BindHostnames::Valid,
+            BindHostnames::Cname,
             false,
             None,
         );
@@ -543,7 +562,7 @@ mod address_delegator_tests {
             mock,
             "_some_prefix".into(),
             "root.tld".into(),
-            BindHostnames::Valid,
+            BindHostnames::Cname,
             false,
             None,
         );

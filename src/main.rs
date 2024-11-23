@@ -35,8 +35,8 @@ impl From<RandomSubdomainSeed> for RSSConfig {
 pub enum BindHostnames {
     /// Allow any hostnames unconditionally, including the main domain.
     All,
-    /// Allow any hostnames with valid DNS records, not including the main domain.
-    Valid,
+    /// Allow any hostnames with a CNAME record pointing to the main domain.
+    Cname,
     /// Allow any hostnames with a TXT record containing a fingerprint, including the main domain.
     Txt,
     /// Don't allow user-provided hostnames, enforce subdomains.
@@ -47,7 +47,7 @@ impl From<BindHostnames> for BHConfig {
     fn from(value: BindHostnames) -> Self {
         match value {
             BindHostnames::All => BHConfig::All,
-            BindHostnames::Valid => BHConfig::Valid,
+            BindHostnames::Cname => BHConfig::Cname,
             BindHostnames::Txt => BHConfig::Txt,
             BindHostnames::None => BHConfig::None,
         }

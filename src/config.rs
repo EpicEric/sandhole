@@ -11,7 +11,7 @@ pub enum RandomSubdomainSeed {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BindHostnames {
     All,
-    Valid,
+    Cname,
     Txt,
     None,
 }

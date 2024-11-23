@@ -3423,6 +3423,7 @@ dependencies = [
  "humantime",
  "hyper",
  "hyper-util",
+ "itertools 0.13.0",
  "log",
  "mockall",
  "notify",

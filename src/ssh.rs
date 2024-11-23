@@ -9,7 +9,8 @@ use std::{
 use crate::{
     admin::AdminInterface,
     http::HttpHandler,
-    tcp::{PortHandler, TcpAlias},
+    tcp::PortHandler,
+    tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
     SandholeServer,
 };
 
@@ -465,7 +466,8 @@ impl Handler for ServerHandler {
                 } else {
                     *port as u16
                 };
-                self.tcp_aliases.insert((address.clone(), assigned_port));
+                self.tcp_aliases
+                    .insert(TcpAlias(address.clone(), assigned_port));
                 self.port_addressing
                     .insert((address.clone(), *port), assigned_port);
                 info!(
@@ -480,7 +482,7 @@ impl Handler for ServerHandler {
                     .into_bytes(),
                 );
                 self.server.tcp.insert(
-                    (address.clone(), assigned_port),
+                    TcpAlias(address.clone(), assigned_port),
                     self.peer,
                     Arc::new(SshTunnelHandler::new(
                         handle,
@@ -528,11 +530,9 @@ impl Handler for ServerHandler {
                 if let Some(assigned_port) =
                     self.port_addressing.remove(&(address.to_string(), port))
                 {
-                    self.server
-                        .tcp
-                        .remove(&(address.to_string(), assigned_port), self.peer);
-                    self.tcp_aliases
-                        .remove(&(address.to_string(), assigned_port));
+                    let key: &dyn TcpAliasKey = &BorrowedTcpAlias(address, &assigned_port);
+                    self.server.tcp.remove(key, self.peer);
+                    self.tcp_aliases.remove(key);
                     Ok(true)
                 } else {
                     Ok(false)
@@ -608,7 +608,7 @@ impl Handler for ServerHandler {
         } else if let Some(handler) = self
             .server
             .tcp
-            .get(&(host_to_connect.to_string(), port_to_connect))
+            .get(&BorrowedTcpAlias(&host_to_connect, &port_to_connect) as &dyn TcpAliasKey)
         {
             if let Ok(mut io) = handler
                 .tunneling_channel(originator_address, originator_port as u16)

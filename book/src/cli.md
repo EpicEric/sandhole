@@ -106,8 +106,8 @@ Options:
           Possible values:
           - all:   Allow any hostnames unconditionally, including the main
                    domain
-          - valid: Allow any hostnames with valid DNS records, not including the
-                   main domain
+          - cname: Allow any hostnames with a CNAME record pointing to the main
+                   domain
           - txt:   Allow any hostnames with a TXT record containing a
                    fingerprint, including the main domain
           - none:  Don't allow user-provided hostnames, enforce subdomains

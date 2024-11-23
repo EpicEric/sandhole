@@ -4,6 +4,7 @@ use crate::{
     connections::{ConnectionMap, ConnectionMapReactor},
     http::HttpHandler,
     ssh::SshTunnelHandler,
+    tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
 };
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -15,8 +16,6 @@ pub(crate) struct TcpHandler {
     sockets: DashMap<u16, DroppableHandle<()>>,
     conn_manager: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<Self>>>,
 }
-
-pub(crate) type TcpAlias = (String, u16);
 
 struct DroppableHandle<T>(JoinHandle<T>);
 
@@ -58,7 +57,8 @@ impl PortHandler for Arc<TcpHandler> {
             loop {
                 match listener.accept().await {
                     Ok((mut stream, address)) => {
-                        if let Some(handler) = clone.conn_manager.get(&("localhost".into(), port)) {
+                        let key: &dyn TcpAliasKey = &BorrowedTcpAlias("localhost", &port);
+                        if let Some(handler) = clone.conn_manager.get(key) {
                             if let Ok(mut channel) = handler
                                 .tunneling_channel(&address.ip().to_string(), address.port())
                                 .await
@@ -84,7 +84,7 @@ impl ConnectionMapReactor<TcpAlias> for Arc<TcpHandler> {
     fn call(&self, ports: Vec<TcpAlias>) {
         let mut ports: HashSet<u16> = ports
             .into_iter()
-            .filter_map(|(address, port)| {
+            .filter_map(|TcpAlias(address, port)| {
                 if address == "localhost" {
                     Some(port)
                 } else {

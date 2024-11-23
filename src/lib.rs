@@ -15,7 +15,8 @@ use russh::server::Config;
 use russh_keys::decode_secret_key;
 use rustls::ServerConfig;
 use rustls_acme::is_tls_alpn_challenge;
-use tcp::{TcpAlias, TcpHandler};
+use tcp::TcpHandler;
+use tcp_alias::TcpAlias;
 use tokio::{fs, io::AsyncWriteExt, net::TcpListener, sync::oneshot, time::sleep};
 use tokio_rustls::LazyConfigAcceptor;
 
@@ -44,6 +45,7 @@ mod http;
 mod login;
 mod ssh;
 mod tcp;
+mod tcp_alias;
 
 type DataTable<T> = RwLock<Vec<(T, Vec<SocketAddr>)>>;
 

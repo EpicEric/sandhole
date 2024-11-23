@@ -24,6 +24,7 @@ http-body-util = "0.1.2"
 humantime = "2.1.0"
 hyper = { version = "1.5.0", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
+itertools = "0.13.0"
 log = "0.4.22"
 notify = "7.0.0"
 pretty-duration = "0.1.1"

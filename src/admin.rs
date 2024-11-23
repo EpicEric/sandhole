@@ -165,9 +165,9 @@ impl AdminInterface {
                                             Row::new(vec![k.0, k.1.to_string(), v.into_iter().map(|addr| addr.to_string()).collect::<Vec<_>>().join("\n")]).height(len)
                                         });
                                         let constraints = [
+                                            Constraint::Fill(2),
                                             Constraint::Fill(1),
-                                            Constraint::Fill(1),
-                                            Constraint::Fill(5),
+                                            Constraint::Fill(10),
                                         ];
                                         let header = Row::new(["Alias", "Port", "Peer(s)"]);
                                         let title = Block::new().title(Line::from("TCP services".green().bold()).centered());
