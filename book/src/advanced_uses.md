@@ -18,7 +18,11 @@ ssh -L 4000:my.tunnel:3000
 
 Then you can access `localhost:4000`, and all traffic will be redirected to port 2000 on the remote service. It's almost like a VPN!
 
-Currently, there are no authentication options for local forwarding, but this is a planned feature.
+If you'd like to restrict which users can access your service, you can provide the allowed fingerprints as a comma-separated list at the end of the command, like so:
+
+```shell
+ssh -R my.tunnel:3000:localhost:2000 server.com -p 2222 allowed-fingerprints=SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ
+```
 
 ## Custom domains
 

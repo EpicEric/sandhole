@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use crate::{
     connections::{ConnectionMap, ConnectionMapReactor},
-    http::HttpHandler,
+    handler::ConnectionHandler,
     ssh::SshTunnelHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
 };
@@ -60,10 +60,10 @@ impl PortHandler for Arc<TcpHandler> {
                         let key: &dyn TcpAliasKey = &BorrowedTcpAlias("localhost", &port);
                         if let Some(handler) = clone.conn_manager.get(key) {
                             if let Ok(mut channel) = handler
-                                .tunneling_channel(&address.ip().to_string(), address.port())
+                                .tunneling_channel(&address.ip().to_string(), address.port(), None)
                                 .await
                             {
-                                let _ = copy_bidirectional(&mut stream, channel.inner_mut()).await;
+                                let _ = copy_bidirectional(&mut stream, &mut channel).await;
                             }
                         }
                     }

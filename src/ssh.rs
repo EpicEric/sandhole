@@ -8,15 +8,15 @@ use std::{
 
 use crate::{
     admin::AdminInterface,
+    error::ServerError,
     fingerprints::AuthenticationType,
-    http::HttpHandler,
+    handler::ConnectionHandler,
     tcp::PortHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
     SandholeServer,
 };
 
 use async_trait::async_trait;
-use hyper_util::rt::TokioIo;
 use log::{debug, info, warn};
 use russh::{
     server::{Auth, Handler, Msg, Session},
@@ -25,12 +25,13 @@ use russh::{
 use russh_keys::key::PublicKey;
 use tokio::{
     io::{copy_bidirectional, AsyncWriteExt},
-    sync::{mpsc, oneshot, Mutex},
+    sync::{mpsc, oneshot, Mutex, RwLock},
     time::{sleep, timeout},
 };
 
 #[derive(Clone)]
 pub(crate) struct SshTunnelHandler {
+    allow_fingerprint: Arc<RwLock<Box<dyn Fn(Option<String>) -> bool + Send + Sync>>>,
     handle: russh::server::Handle,
     tx: mpsc::UnboundedSender<Vec<u8>>,
     peer: SocketAddr,
@@ -40,6 +41,7 @@ pub(crate) struct SshTunnelHandler {
 
 impl SshTunnelHandler {
     pub(crate) fn new(
+        allow_fingerprint: Arc<RwLock<Box<dyn Fn(Option<String>) -> bool + Send + Sync>>>,
         handle: russh::server::Handle,
         tx: mpsc::UnboundedSender<Vec<u8>>,
         peer: SocketAddr,
@@ -47,6 +49,7 @@ impl SshTunnelHandler {
         port: u32,
     ) -> Self {
         SshTunnelHandler {
+            allow_fingerprint,
             handle,
             address,
             peer,
@@ -57,7 +60,7 @@ impl SshTunnelHandler {
 }
 
 #[async_trait]
-impl HttpHandler<ChannelStream<Msg>> for SshTunnelHandler {
+impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
     fn log_channel(&self) -> mpsc::UnboundedSender<Vec<u8>> {
         self.tx.clone()
     }
@@ -65,18 +68,23 @@ impl HttpHandler<ChannelStream<Msg>> for SshTunnelHandler {
         &self,
         ip: &str,
         port: u16,
-    ) -> anyhow::Result<TokioIo<ChannelStream<Msg>>> {
+        fingerprint: Option<String>,
+    ) -> anyhow::Result<ChannelStream<Msg>> {
+        // TO-DO: Check reference for allowed fingerprints (maybe with a closure)
+        if !(self.allow_fingerprint.read().await)(fingerprint.clone()) {
+            Err(ServerError::FingerprintDenied)?
+        }
         let channel = self
             .handle
             .channel_open_forwarded_tcpip(self.address.clone(), self.port, ip, port.into())
             .await?
             .into_stream();
-        Ok(TokioIo::new(channel))
+        Ok(channel)
     }
 }
 
-#[derive(Default)]
 struct UserData {
+    allow_fingerprint: Arc<RwLock<Box<dyn Fn(Option<String>) -> bool + Send + Sync>>>,
     col_width: Option<u32>,
     row_height: Option<u32>,
     ssh_hosts: HashSet<String>,
@@ -84,6 +92,21 @@ struct UserData {
     tcp_aliases: HashSet<TcpAlias>,
     host_addressing: HashMap<(String, u32), String>,
     port_addressing: HashMap<(String, u32), u16>,
+}
+
+impl Default for UserData {
+    fn default() -> Self {
+        Self {
+            allow_fingerprint: Arc::new(RwLock::new(Box::new(|_| true))),
+            col_width: Default::default(),
+            row_height: Default::default(),
+            ssh_hosts: Default::default(),
+            http_hosts: Default::default(),
+            tcp_aliases: Default::default(),
+            host_addressing: Default::default(),
+            port_addressing: Default::default(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -108,11 +131,11 @@ impl From<AuthenticationType> for AuthenticatedData {
         match value {
             AuthenticationType::None => AuthenticatedData::None,
             AuthenticationType::User => AuthenticatedData::User {
-                user_data: Box::new(Default::default()),
+                user_data: Box::default(),
             },
             AuthenticationType::Admin => AuthenticatedData::Admin {
-                user_data: Box::new(Default::default()),
-                admin_data: Box::new(Default::default()),
+                user_data: Box::default(),
+                admin_data: Box::default(),
             },
         }
     }
@@ -183,7 +206,7 @@ impl Handler for ServerHandler {
         let Some(mut rx) = self.rx.take() else {
             return Ok(false);
         };
-        if matches!(self.auth_data, AuthenticatedData::None) {
+        if let AuthenticatedData::None = self.auth_data {
             return Err(russh::Error::Disconnect);
         }
         let mut stream = channel.into_stream();
@@ -303,10 +326,8 @@ impl Handler for ServerHandler {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         debug!("exec_request data {:?}", data);
-        match (
-            String::from_utf8_lossy(data).split_whitespace().next(),
-            &mut self.auth_data,
-        ) {
+        let cmd = String::from_utf8_lossy(data);
+        match (cmd.split_whitespace().next(), &mut self.auth_data) {
             (
                 Some("admin"),
                 AuthenticatedData::Admin {
@@ -323,8 +344,26 @@ impl Handler for ServerHandler {
                 }
                 admin_data.admin_interface = Some(admin_interface);
             }
+            (
+                Some(cmd),
+                AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. },
+            ) if cmd.starts_with("allowed-fingerprints=") => {
+                let set: HashSet<String> = cmd
+                    .trim_start_matches("allowed-fingerprints=")
+                    .split(',')
+                    .filter_map(|key| key.split(':').last().map(|k| k.to_string()))
+                    .collect();
+                *user_data.allow_fingerprint.write().await =
+                    Box::new(move |fingerprint| fingerprint.is_some_and(|fp| set.contains(&fp)))
+            }
             (Some(command), _) => {
-                debug!("Unknown command {} received", command);
+                debug!(
+                    "Invalid command {} received for {} ({})",
+                    command, self.auth_data, self.peer
+                );
+                let _ = self
+                    .tx
+                    .send(format!("Ignoring unknown command {}...", command).into_bytes());
             }
             (None, _) => (),
         }
@@ -409,9 +448,11 @@ impl Handler for ServerHandler {
                         "Failed to bind SSH for {}: must be alias, not localhost",
                         self.peer
                     );
-                    let _ = self
-                        .tx
-                        .send(format!("Error: Alias is required for SSH host").into_bytes());
+                    let _ = self.tx.send(
+                        "Error: Alias is required for SSH host"
+                            .to_string()
+                            .into_bytes(),
+                    );
                     return Ok(false);
                 }
                 user_data.ssh_hosts.insert(assigned_host.clone());
@@ -445,6 +486,7 @@ impl Handler for ServerHandler {
                     assigned_host.clone(),
                     self.peer,
                     Arc::new(SshTunnelHandler::new(
+                        Arc::clone(&user_data.allow_fingerprint),
                         handle,
                         self.tx.clone(),
                         self.peer,
@@ -492,6 +534,7 @@ impl Handler for ServerHandler {
                     assigned_host.clone(),
                     self.peer,
                     Arc::new(SshTunnelHandler::new(
+                        Arc::clone(&user_data.allow_fingerprint),
                         handle,
                         self.tx.clone(),
                         self.peer,
@@ -554,6 +597,7 @@ impl Handler for ServerHandler {
                     TcpAlias(address.to_string(), assigned_port),
                     self.peer,
                     Arc::new(SshTunnelHandler::new(
+                        Arc::clone(&user_data.allow_fingerprint),
                         handle,
                         self.tx.clone(),
                         self.peer,
@@ -634,19 +678,20 @@ impl Handler for ServerHandler {
         if port_to_connect == self.server.http_port || port_to_connect == self.server.https_port {
             if let Some(handler) = self.server.http.get(host_to_connect) {
                 if let Ok(mut io) = handler
-                    .tunneling_channel(originator_address, originator_port as u16)
+                    .tunneling_channel(
+                        originator_address,
+                        originator_port as u16,
+                        self.key_fingerprint.clone(),
+                    )
                     .await
                 {
-                    match &mut self.auth_data {
-                        AuthenticatedData::None => {
-                            self.auth_data = AuthenticatedData::Proxy;
-                            *self.is_proxied.lock().await = true;
-                        }
-                        _ => (),
+                    if let AuthenticatedData::None = self.auth_data {
+                        self.auth_data = AuthenticatedData::Proxy;
+                        *self.is_proxied.lock().await = true;
                     }
                     tokio::spawn(async move {
                         let mut stream = channel.into_stream();
-                        let _ = copy_bidirectional(&mut stream, io.inner_mut()).await;
+                        let _ = copy_bidirectional(&mut stream, &mut io).await;
                     });
                     info!(
                         "Accepted connection from {} => {} ({})",
@@ -661,19 +706,20 @@ impl Handler for ServerHandler {
         } else if port_to_connect == self.server.ssh_port {
             if let Some(handler) = self.server.ssh.get(host_to_connect) {
                 if let Ok(mut io) = handler
-                    .tunneling_channel(originator_address, originator_port as u16)
+                    .tunneling_channel(
+                        originator_address,
+                        originator_port as u16,
+                        self.key_fingerprint.clone(),
+                    )
                     .await
                 {
-                    match &mut self.auth_data {
-                        AuthenticatedData::None => {
-                            self.auth_data = AuthenticatedData::Proxy;
-                            *self.is_proxied.lock().await = true;
-                        }
-                        _ => (),
+                    if let AuthenticatedData::None = self.auth_data {
+                        self.auth_data = AuthenticatedData::Proxy;
+                        *self.is_proxied.lock().await = true;
                     }
                     tokio::spawn(async move {
                         let mut stream = channel.into_stream();
-                        let _ = copy_bidirectional(&mut stream, io.inner_mut()).await;
+                        let _ = copy_bidirectional(&mut stream, &mut io).await;
                     });
                     info!(
                         "Accepted connection from {} => {} ({})",
@@ -691,19 +737,20 @@ impl Handler for ServerHandler {
             .get(&BorrowedTcpAlias(host_to_connect, &port_to_connect) as &dyn TcpAliasKey)
         {
             if let Ok(mut io) = handler
-                .tunneling_channel(originator_address, originator_port as u16)
+                .tunneling_channel(
+                    originator_address,
+                    originator_port as u16,
+                    self.key_fingerprint.clone(),
+                )
                 .await
             {
-                match &mut self.auth_data {
-                    AuthenticatedData::None => {
-                        self.auth_data = AuthenticatedData::Proxy;
-                        *self.is_proxied.lock().await = true;
-                    }
-                    _ => (),
+                if let AuthenticatedData::None = self.auth_data {
+                    self.auth_data = AuthenticatedData::Proxy;
+                    *self.is_proxied.lock().await = true;
                 }
                 tokio::spawn(async move {
                     let mut stream = channel.into_stream();
-                    let _ = copy_bidirectional(&mut stream, io.inner_mut()).await;
+                    let _ = copy_bidirectional(&mut stream, &mut io).await;
                 });
                 info!(
                     "Accepted connection from {} => {} ({})",
@@ -715,9 +762,10 @@ impl Handler for ServerHandler {
                 return Ok(true);
             }
         }
-        match &self.auth_data {
-            AuthenticatedData::None => Err(russh::Error::Disconnect),
-            _ => Ok(false),
+        if let AuthenticatedData::None = self.auth_data {
+            Err(russh::Error::Disconnect)
+        } else {
+            Ok(false)
         }
     }
 }

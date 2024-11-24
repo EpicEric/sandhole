@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 use std::{net::SocketAddr, sync::Arc};
 
 use crate::connections::ConnectionMapReactor;
+use crate::handler::ConnectionHandler;
 
 use super::{connections::ConnectionMap, error::ServerError};
-use async_trait::async_trait;
 use axum::{
     body::Body as AxumBody,
     response::{IntoResponse, Redirect},
@@ -17,8 +17,6 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use log::warn;
-#[cfg(test)]
-use mockall::automock;
 use tokio::{
     io::{copy_bidirectional, AsyncRead, AsyncWrite},
     sync::mpsc,
@@ -29,13 +27,6 @@ const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 const X_FORWARDED_HOST: &str = "X-Forwarded-Host";
 const X_FORWARDED_PROTO: &str = "X-Forwarded-Proto";
 const X_FORWARDED_PORT: &str = "X-Forwarded-Port";
-
-#[cfg_attr(test, automock)]
-#[async_trait]
-pub(crate) trait HttpHandler<T: Sync> {
-    fn log_channel(&self) -> mpsc::UnboundedSender<Vec<u8>>;
-    async fn tunneling_channel(&self, ip: &str, port: u16) -> anyhow::Result<TokioIo<T>>;
-}
 
 fn http_log(
     status: u16,
@@ -108,7 +99,7 @@ pub(crate) async fn proxy_handler<B, H, T, R>(
     request_timeout: Duration,
 ) -> anyhow::Result<Response<AxumBody>>
 where
-    H: HttpHandler<T>,
+    H: ConnectionHandler<T>,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     B: Body + Send + 'static,
     <B as Body>::Data: Send + Sync + 'static,
@@ -189,9 +180,14 @@ where
         .headers_mut()
         .insert(X_FORWARDED_PORT, port.parse().unwrap());
 
-    let io = handler.tunneling_channel(&ip, tcp_address.port()).await?;
+    let Ok(io) = handler
+        .tunneling_channel(&ip, tcp_address.port(), None)
+        .await
+    else {
+        return Ok((StatusCode::NOT_FOUND, "").into_response());
+    };
     let tx = handler.log_channel();
-    let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(io)).await?;
 
     let method = request.method().to_string();
     let uri = request.uri().path().to_string();
@@ -276,16 +272,16 @@ mod proxy_handler_tests {
     use tokio_tungstenite::client_async;
     use tower::Service;
 
-    use crate::connections::MockConnectionMapReactor;
+    use crate::{connections::MockConnectionMapReactor, handler::MockConnectionHandler};
 
-    use super::{proxy_handler, ConnectionMap, DomainRedirect, MockHttpHandler, Protocol};
+    use super::{proxy_handler, ConnectionMap, DomainRedirect, Protocol};
 
     #[tokio::test]
     async fn errors_on_missing_host_header() {
         let conn_manager: Arc<
             ConnectionMap<
                 String,
-                Arc<MockHttpHandler<DuplexStream>>,
+                Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
         > = Arc::new(ConnectionMap::new(None));
@@ -314,7 +310,7 @@ mod proxy_handler_tests {
         let conn_manager: Arc<
             ConnectionMap<
                 String,
-                Arc<MockHttpHandler<DuplexStream>>,
+                Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
         > = Arc::new(ConnectionMap::new(None));
@@ -346,7 +342,7 @@ mod proxy_handler_tests {
         let conn_manager: Arc<
             ConnectionMap<
                 String,
-                Arc<MockHttpHandler<DuplexStream>>,
+                Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
         > = Arc::new(ConnectionMap::new(None));
@@ -382,11 +378,11 @@ mod proxy_handler_tests {
         let conn_manager: Arc<
             ConnectionMap<
                 String,
-                Arc<MockHttpHandler<DuplexStream>>,
+                Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
         > = Arc::new(ConnectionMap::new(None));
-        let mut mock = MockHttpHandler::new();
+        let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel().never();
         mock.expect_tunneling_channel().never();
         conn_manager.insert(
@@ -426,11 +422,11 @@ mod proxy_handler_tests {
         let conn_manager: Arc<
             ConnectionMap<
                 String,
-                Arc<MockHttpHandler<DuplexStream>>,
+                Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
         > = Arc::new(ConnectionMap::new(None));
-        let mut mock = MockHttpHandler::new();
+        let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel().never();
         mock.expect_tunneling_channel().never();
         conn_manager.insert(
@@ -470,19 +466,19 @@ mod proxy_handler_tests {
         let conn_manager: Arc<
             ConnectionMap<
                 String,
-                Arc<MockHttpHandler<DuplexStream>>,
+                Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
         > = Arc::new(ConnectionMap::new(None));
         let (server, handler) = tokio::io::duplex(1024);
         let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-        let mut mock = MockHttpHandler::new();
+        let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
             .return_once(move || logging_tx);
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(TokioIo::new(handler)));
+            .return_once(move |_, _, _| Ok(handler));
         conn_manager.insert(
             "with.handler".into(),
             "127.0.0.1:12345".parse().unwrap(),
@@ -544,19 +540,19 @@ mod proxy_handler_tests {
         let conn_manager: Arc<
             ConnectionMap<
                 String,
-                Arc<MockHttpHandler<DuplexStream>>,
+                Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
         > = Arc::new(ConnectionMap::new(None));
         let (server, handler) = tokio::io::duplex(1024);
         let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-        let mut mock = MockHttpHandler::new();
+        let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
             .return_once(move || logging_tx);
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(TokioIo::new(handler)));
+            .return_once(move |_, _, _| Ok(handler));
         conn_manager.insert(
             "root.domain".into(),
             "127.0.0.1:12345".parse().unwrap(),
@@ -618,19 +614,19 @@ mod proxy_handler_tests {
         let conn_manager: Arc<
             ConnectionMap<
                 String,
-                Arc<MockHttpHandler<DuplexStream>>,
+                Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
         > = Arc::new(ConnectionMap::new(None));
         let (server, handler) = tokio::io::duplex(1024);
         let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-        let mut mock = MockHttpHandler::new();
+        let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
             .return_once(move || logging_tx);
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(TokioIo::new(handler)));
+            .return_once(move |_, _, _| Ok(handler));
         conn_manager.insert(
             "with.websocket".into(),
             "127.0.0.1:12345".parse().unwrap(),

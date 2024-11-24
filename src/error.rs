@@ -10,4 +10,6 @@ pub(crate) enum ServerError {
     RequestTimeout,
     #[error("Invalid file path")]
     InvalidFilePath,
+    #[error("Fingerprint denied")]
+    FingerprintDenied,
 }

@@ -41,6 +41,7 @@ mod connections;
 mod directory;
 mod error;
 mod fingerprints;
+mod handler;
 mod http;
 mod login;
 mod ssh;
