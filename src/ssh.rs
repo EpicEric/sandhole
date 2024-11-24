@@ -307,7 +307,9 @@ impl Handler for ServerHandler {
                 if let Some(admin_interface) = admin_data.admin_interface.as_mut() {
                     match data {
                         // Tab
-                        b"\t" => admin_interface.advance_tab(),
+                        b"\t" => admin_interface.next_tab(),
+                        // Shift+Tab
+                        b"\x1b[Z" => admin_interface.previous_tab(),
                         // Up
                         b"\x1b[A" => admin_interface.move_up(),
                         // Down

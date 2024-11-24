@@ -7,12 +7,13 @@ use std::{
 
 use log::debug;
 use ratatui::{
-    layout::{Constraint, Margin},
+    buffer::Buffer,
+    layout::{Constraint, Layout, Margin, Rect},
     prelude::CrosstermBackend,
     style::{Style, Stylize},
     symbols::border,
     text::{Line, Text},
-    widgets::{Block, Paragraph, Row, Table, TableState},
+    widgets::{Block, Paragraph, Row, StatefulWidget, Table, TableState, Tabs, Widget},
     Terminal, TerminalOptions, Viewport,
 };
 use tokio::{
@@ -50,10 +51,159 @@ enum Tab {
     Tcp,
 }
 
+impl Tab {
+    fn render(area: Rect, buf: &mut Buffer, selected: usize) {
+        Tabs::new(vec![
+            Line::from("  HTTP  ".black().on_blue()),
+            Line::from("  SSH  ".black().on_yellow()),
+            Line::from("  TCP  ".black().on_green()),
+        ])
+        .select(selected)
+        .highlight_style(Style::new().bold())
+        .divider(" ")
+        .render(area, buf);
+    }
+}
+
+impl Tab {
+    fn index(&self) -> usize {
+        match self {
+            Tab::Http => 0,
+            Tab::Ssh => 1,
+            Tab::Tcp => 2,
+        }
+    }
+}
+
 struct AdminState {
+    server: Arc<SandholeServer>,
     is_pty: bool,
     tab: Tab,
     table_state: TableState,
+}
+
+impl AdminState {
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        if self.is_pty {
+            let title = Line::from(" Sandhole admin ".bold());
+            let instructions = Line::from(vec![
+                " Change tab".into(),
+                " <Tab> ".blue().bold(),
+                " Quit".into(),
+                " <Ctrl-C> ".blue().bold(),
+            ]);
+            let block = Block::bordered()
+                .title(title.centered())
+                .title_bottom(instructions.centered())
+                .border_set(border::THICK);
+            block.render(area, buf);
+            let [tabs_area, inner_area] =
+                Layout::vertical([Constraint::Length(1), Constraint::Min(0)])
+                    .areas(area.inner(Margin::new(2, 2)));
+            Tab::render(tabs_area, buf, self.tab.index());
+            Block::bordered()
+                .border_style(match self.tab {
+                    Tab::Http => Style::new().blue(),
+                    Tab::Ssh => Style::new().yellow(),
+                    Tab::Tcp => Style::new().green(),
+                })
+                .border_set(border::PROPORTIONAL_TALL)
+                .render(inner_area, buf);
+            self.render_tab(inner_area.inner(Margin::new(2, 1)), buf);
+        } else {
+            let text = Text::from(vec![
+                Line::from(
+                    "PTY not detected! Make sure to connect with \"ssh -t ... admin\" instead."
+                        .red(),
+                ),
+                Line::from("Press Ctrl-C to close this connection."),
+            ]);
+            let widget = Paragraph::new(text).left_aligned();
+            widget.render(area, buf);
+        }
+    }
+
+    fn render_tab(&mut self, area: Rect, buf: &mut Buffer) {
+        match self.tab {
+            Tab::Http => {
+                let data = self.server.http_data.read().unwrap().clone();
+                let rows = data.into_iter().map(|(k, v)| {
+                    let len = v.len() as u16;
+                    Row::new(vec![
+                        k,
+                        v.into_iter()
+                            .map(|addr| addr.to_string())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    ])
+                    .height(len)
+                });
+                let constraints = [Constraint::Fill(2), Constraint::Fill(5)];
+                let header = Row::new(["Host", "Peer(s)"]);
+                let title =
+                    Block::new().title(Line::from("HTTP services".blue().bold()).centered());
+                let table = Table::new(rows, constraints)
+                    .header(header)
+                    .column_spacing(1)
+                    .block(title)
+                    .row_highlight_style(Style::new().blue().reversed());
+                StatefulWidget::render(table, area, buf, &mut self.table_state);
+            }
+            Tab::Ssh => {
+                let data = self.server.ssh_data.read().unwrap().clone();
+                let rows = data.into_iter().map(|(k, v)| {
+                    let len = v.len() as u16;
+                    Row::new(vec![
+                        k,
+                        v.into_iter()
+                            .map(|addr| addr.to_string())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    ])
+                    .height(len)
+                });
+                let constraints = [Constraint::Fill(2), Constraint::Fill(5)];
+                let header = Row::new(["Host", "Peer(s)"]);
+                let title =
+                    Block::new().title(Line::from("SSH services".yellow().bold()).centered());
+                let table = Table::new(rows, constraints)
+                    .header(header)
+                    .column_spacing(1)
+                    .block(title)
+                    .row_highlight_style(Style::new().yellow().reversed());
+                StatefulWidget::render(table, area, buf, &mut self.table_state);
+            }
+            Tab::Tcp => {
+                let data = self.server.tcp_data.read().unwrap().clone();
+                let rows = data.into_iter().map(|(k, v)| {
+                    let len = v.len() as u16;
+                    Row::new(vec![
+                        k.0,
+                        k.1.to_string(),
+                        v.into_iter()
+                            .map(|addr| addr.to_string())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    ])
+                    .height(len)
+                });
+                let constraints = [
+                    Constraint::Fill(2),
+                    Constraint::Length(5),
+                    Constraint::Fill(5),
+                ];
+                let header = Row::new(["Alias", "Port", "Peer(s)"]);
+                let title =
+                    Block::new().title(Line::from("TCP services".green().bold()).centered());
+                let table = Table::new(rows, constraints)
+                    .header(header)
+                    .column_spacing(1)
+                    .block(title)
+                    .row_highlight_style(Style::new().green().reversed());
+                StatefulWidget::render(table, area, buf, &mut self.table_state);
+            }
+        }
+    }
 }
 
 struct AdminTerminal {
@@ -82,6 +232,7 @@ impl AdminInterface {
         let interface = Arc::new(Mutex::new(AdminTerminal {
             terminal: Terminal::with_options(backend, options).unwrap(),
             state: AdminState {
+                server,
                 tab: Tab::Http,
                 is_pty: false,
                 table_state: Default::default(),
@@ -90,7 +241,6 @@ impl AdminInterface {
         let interface_clone = Arc::clone(&interface);
         let jh = tokio::spawn(async move {
             let interface = interface;
-            let server = server;
             loop {
                 {
                     let mut interface = interface.lock().unwrap();
@@ -100,100 +250,7 @@ impl AdminInterface {
                     } = interface.deref_mut();
                     terminal
                         .draw(|frame| {
-                            if state.is_pty {
-                                let title = Line::from(" Sandhole admin ".bold());
-                                let instructions = Line::from(vec![
-                                    " Change tab".into(),
-                                    " <Tab> ".blue().bold(),
-                                    " Quit".into(),
-                                    " <Ctrl-C> ".blue().bold(),
-                                ]);
-                                let block = Block::bordered()
-                                    .title(title.centered())
-                                    .title_bottom(instructions.centered())
-                                    .border_set(border::THICK);
-                                let area = frame.area();
-                                let inner = block.inner(area).inner(Margin::new(0, 1));
-                                frame.render_widget(block, area);
-                                match state.tab {
-                                    Tab::Http => {
-                                        let data = server.http_data.read().unwrap().clone();
-                                        let rows = data.into_iter().map(|(k, v)| {
-                                            let len = v.len() as u16;
-                                            Row::new(vec![k, v.into_iter().map(|addr| addr.to_string()).collect::<Vec<_>>().join("\n")]).height(len)
-                                        });
-                                        let constraints = [
-                                            Constraint::Fill(2),
-                                            Constraint::Fill(5),
-                                        ];
-                                        let header = Row::new(["Host", "Peer(s)"]);
-                                        let title = Block::new().title(Line::from("HTTP services".blue().bold()).centered());
-                                        let style = Style::new().blue();
-                                        let table = Table::new(rows, constraints)
-                                            .style(style)
-                                            .header(header)
-                                            .column_spacing(1)
-                                            .block(title)
-                                            .row_highlight_style(Style::new().reversed());
-                                        frame.render_stateful_widget(table, inner, &mut state.table_state);
-                                    },
-                                    Tab::Ssh => {
-                                        let data = server.ssh_data.read().unwrap().clone();
-                                        let rows = data.into_iter().map(|(k, v)| {
-                                            let len = v.len() as u16;
-                                            Row::new(vec![k, v.into_iter().map(|addr| addr.to_string()).collect::<Vec<_>>().join("\n")]).height(len)
-                                        });
-                                        let constraints = [
-                                            Constraint::Fill(2),
-                                            Constraint::Fill(5),
-                                        ];
-                                        let header = Row::new(["Host", "Peer(s)"]);
-                                        let title = Block::new().title(Line::from("SSH services".yellow().bold()).centered());
-                                        let style = Style::new().yellow();
-                                        let table = Table::new(rows, constraints)
-                                            .style(style)
-                                            .header(header)
-                                            .column_spacing(1)
-                                            .block(title)
-                                            .row_highlight_style(Style::new().reversed());
-                                        frame.render_stateful_widget(table, inner, &mut state.table_state);
-                                    },
-                                    Tab::Tcp => {
-                                        let data = server.tcp_data.read().unwrap().clone();
-                                        let rows = data.into_iter().map(|(k, v)| {
-                                            let len = v.len() as u16;
-                                            Row::new(vec![k.0, k.1.to_string(), v.into_iter().map(|addr| addr.to_string()).collect::<Vec<_>>().join("\n")]).height(len)
-                                        });
-                                        let constraints = [
-                                            Constraint::Fill(2),
-                                            Constraint::Fill(1),
-                                            Constraint::Fill(10),
-                                        ];
-                                        let header = Row::new(["Alias", "Port", "Peer(s)"]);
-                                        let title = Block::new().title(Line::from("TCP services".green().bold()).centered());
-                                        let style = Style::new().green();
-                                        let table = Table::new(rows, constraints)
-                                            .style(style)
-                                            .header(header)
-                                            .column_spacing(1)
-                                            .block(title)
-                                            .row_highlight_style(Style::new().reversed());
-                                        frame.render_stateful_widget(table, inner, &mut state.table_state);
-                                    },
-                                }
-                            } else {
-                                let text = Text::from(vec![
-                                    Line::from(
-                                        "PTY not detected! Make sure to connect with \"ssh -t ... admin\" instead."
-                                            .red(),
-                                    ),
-                                    Line::from(
-                                        "Press Ctrl-C to close this connection."
-                                    )]);
-                                let widget = Paragraph::new(text).left_aligned();
-                                let area = frame.area();
-                                frame.render_widget(widget, area);
-                            }
+                            state.render(frame.area(), frame.buffer_mut());
                         })
                         .unwrap();
                     terminal.show_cursor().unwrap();
@@ -230,8 +287,8 @@ impl AdminInterface {
         Ok(())
     }
 
-    pub(crate) fn advance_tab(&mut self) {
-        debug!("advance_tab");
+    pub(crate) fn next_tab(&mut self) {
+        debug!("next_tab");
         {
             let mut interface = self.interface.lock().unwrap();
             match interface.state.tab {
@@ -243,6 +300,27 @@ impl AdminInterface {
                 }
                 Tab::Tcp => {
                     interface.state.tab = Tab::Http;
+                }
+            }
+            interface.state.table_state = Default::default();
+            drop(interface);
+        }
+        let _ = self.change_notifier.send(());
+    }
+
+    pub(crate) fn previous_tab(&mut self) {
+        debug!("previous_tab");
+        {
+            let mut interface = self.interface.lock().unwrap();
+            match interface.state.tab {
+                Tab::Http => {
+                    interface.state.tab = Tab::Tcp;
+                }
+                Tab::Ssh => {
+                    interface.state.tab = Tab::Http;
+                }
+                Tab::Tcp => {
+                    interface.state.tab = Tab::Ssh;
                 }
             }
             interface.state.table_state = Default::default();

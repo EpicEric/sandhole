@@ -1,4 +1,10 @@
-use std::{borrow::Borrow, hash::Hash, net::SocketAddr, sync::RwLock};
+use std::{
+    borrow::Borrow,
+    collections::{BTreeMap, BTreeSet},
+    hash::Hash,
+    net::SocketAddr,
+    sync::RwLock,
+};
 
 use dashmap::DashMap;
 #[cfg(test)]
@@ -26,7 +32,7 @@ pub(crate) struct ConnectionMap<K, H, R = DummyConnectionMapReactor> {
 
 impl<K, H, R> ConnectionMap<K, H, R>
 where
-    K: Eq + Hash + Clone,
+    K: Eq + Hash + Clone + Ord + PartialOrd,
     H: Clone,
     R: ConnectionMapReactor<K> + Send + 'static,
 {
@@ -98,7 +104,7 @@ where
         *self.reactor.write().unwrap() = reactor;
     }
 
-    pub(crate) fn data(&self) -> Vec<(K, Vec<SocketAddr>)> {
+    pub(crate) fn data(&self) -> BTreeMap<K, BTreeSet<SocketAddr>> {
         self.map
             .iter()
             .map(|entry| {

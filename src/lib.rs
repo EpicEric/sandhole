@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
     net::SocketAddr,
     sync::{Arc, RwLock},
     time::Duration,
@@ -48,7 +49,7 @@ mod ssh;
 mod tcp;
 mod tcp_alias;
 
-type DataTable<T> = RwLock<Vec<(T, Vec<SocketAddr>)>>;
+type DataTable<T> = RwLock<BTreeMap<T, BTreeSet<SocketAddr>>>;
 
 #[derive(Clone)]
 pub(crate) struct SandholeServer {
@@ -289,39 +290,33 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     });
 
     // Telemetry
-    let http_data = Arc::new(RwLock::new(vec![]));
+    let http_data = Arc::new(RwLock::default());
     let data_clone = Arc::clone(&http_data);
     let connections_clone = Arc::clone(&http_connections);
     tokio::spawn(async move {
         loop {
             sleep(Duration::from_millis(3_000)).await;
-            let mut data = connections_clone.data();
-            data.sort();
-            data.iter_mut().for_each(|(_, v)| v.sort());
+            let data = connections_clone.data();
             *data_clone.write().unwrap() = data;
         }
     });
-    let ssh_data = Arc::new(RwLock::new(vec![]));
+    let ssh_data = Arc::new(RwLock::default());
     let data_clone = Arc::clone(&ssh_data);
     let connections_clone = Arc::clone(&ssh_connections);
     tokio::spawn(async move {
         loop {
             sleep(Duration::from_millis(3_000)).await;
-            let mut data = connections_clone.data();
-            data.sort();
-            data.iter_mut().for_each(|(_, v)| v.sort());
+            let data = connections_clone.data();
             *data_clone.write().unwrap() = data;
         }
     });
-    let tcp_data = Arc::new(RwLock::new(vec![]));
+    let tcp_data = Arc::new(RwLock::default());
     let data_clone = Arc::clone(&tcp_data);
     let connections_clone = Arc::clone(&tcp_connections);
     tokio::spawn(async move {
         loop {
             sleep(Duration::from_millis(3_000)).await;
-            let mut data = connections_clone.data();
-            data.sort();
-            data.iter_mut().for_each(|(_, v)| v.sort());
+            let data = connections_clone.data();
             *data_clone.write().unwrap() = data;
         }
     });
