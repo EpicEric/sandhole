@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{directory::watch_directory, ssh::Authentication};
+use crate::directory::watch_directory;
 use log::{error, warn};
 use notify::RecommendedWatcher;
 use ssh_key::{HashAlg, PublicKey};
@@ -14,6 +14,16 @@ use tokio::{
     sync::oneshot,
     task::JoinHandle,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum AuthenticationType {
+    /// Not authenticated.
+    None,
+    /// Authenticated as a valid user.
+    User,
+    /// Authenticated as an admin.
+    Admin,
+}
 
 #[derive(Debug)]
 pub(crate) struct FingerprintsValidator {
@@ -146,18 +156,18 @@ impl FingerprintsValidator {
         })
     }
 
-    pub(crate) fn authenticate_fingerprint(&self, fingerprint: &str) -> Authentication {
+    pub(crate) fn authenticate_fingerprint(&self, fingerprint: &str) -> AuthenticationType {
         if self
             .admin_fingerprints
             .read()
             .unwrap()
             .contains(fingerprint)
         {
-            Authentication::Admin
+            AuthenticationType::Admin
         } else if self.user_fingerprints.read().unwrap().contains(fingerprint) {
-            Authentication::User
+            AuthenticationType::User
         } else {
-            Authentication::None
+            AuthenticationType::None
         }
     }
 }
@@ -172,9 +182,7 @@ impl Drop for FingerprintsValidator {
 mod fingerprints_validator_tests {
     use std::sync::LazyLock;
 
-    use crate::ssh::Authentication;
-
-    use super::FingerprintsValidator;
+    use super::{AuthenticationType, FingerprintsValidator};
     use russh_keys::{key::PublicKey, parse_public_key_base64};
 
     static USER_KEYS_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys");
@@ -214,19 +222,19 @@ mod fingerprints_validator_tests {
         .unwrap();
         assert_eq!(
             validator.authenticate_fingerprint(&ADMIN_KEY.fingerprint()),
-            Authentication::Admin
+            AuthenticationType::Admin
         );
         assert_eq!(
             validator.authenticate_fingerprint(&KEY_ONE.fingerprint()),
-            Authentication::User
+            AuthenticationType::User
         );
         assert_eq!(
             validator.authenticate_fingerprint(&KEY_TWO.fingerprint()),
-            Authentication::User
+            AuthenticationType::User
         );
         assert_eq!(
             validator.authenticate_fingerprint(&UNKNOWN_KEY.fingerprint()),
-            Authentication::None
+            AuthenticationType::None
         );
     }
 }

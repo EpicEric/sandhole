@@ -8,6 +8,7 @@ use std::{
 
 use crate::{
     admin::AdminInterface,
+    fingerprints::AuthenticationType,
     http::HttpHandler,
     tcp::PortHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
@@ -74,25 +75,56 @@ impl HttpHandler<ChannelStream<Msg>> for SshTunnelHandler {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum Authentication {
-    /// Not authenticated.
-    None,
-    /// Authenticated as a proxy/tunneling user.
-    Proxy,
-    /// Authenticated as a valid user.
-    User,
-    /// Authenticated as an admin.
-    Admin,
+#[derive(Default)]
+struct UserData {
+    col_width: Option<u32>,
+    row_height: Option<u32>,
+    ssh_hosts: HashSet<String>,
+    http_hosts: HashSet<String>,
+    tcp_aliases: HashSet<TcpAlias>,
+    host_addressing: HashMap<(String, u32), String>,
+    port_addressing: HashMap<(String, u32), u16>,
 }
 
-impl Display for Authentication {
+#[derive(Default)]
+struct AdminData {
+    admin_interface: Option<AdminInterface>,
+}
+
+enum AuthenticatedData {
+    None,
+    Proxy,
+    User {
+        user_data: Box<UserData>,
+    },
+    Admin {
+        user_data: Box<UserData>,
+        admin_data: Box<AdminData>,
+    },
+}
+
+impl From<AuthenticationType> for AuthenticatedData {
+    fn from(value: AuthenticationType) -> Self {
+        match value {
+            AuthenticationType::None => AuthenticatedData::None,
+            AuthenticationType::User => AuthenticatedData::User {
+                user_data: Box::new(Default::default()),
+            },
+            AuthenticationType::Admin => AuthenticatedData::Admin {
+                user_data: Box::new(Default::default()),
+                admin_data: Box::new(Default::default()),
+            },
+        }
+    }
+}
+
+impl Display for AuthenticatedData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Authentication::None => f.write_str("no authentication"),
-            Authentication::Proxy => f.write_str("proxy authentication"),
-            Authentication::User => f.write_str("user authentication"),
-            Authentication::Admin => f.write_str("admin authentication"),
+            AuthenticatedData::None => f.write_str("no authentication"),
+            AuthenticatedData::Proxy => f.write_str("no authentication (proxy)"),
+            AuthenticatedData::User { .. } => f.write_str("user authentication"),
+            AuthenticatedData::Admin { .. } => f.write_str("admin authentication"),
         }
     }
 }
@@ -102,17 +134,10 @@ pub(crate) struct ServerHandler {
     peer: SocketAddr,
     user: Option<String>,
     key_fingerprint: Option<String>,
-    authentication: Arc<Mutex<Authentication>>,
-    admin_interface: Option<AdminInterface>,
-    col_width: Option<u32>,
-    row_height: Option<u32>,
+    is_proxied: Arc<Mutex<bool>>,
+    auth_data: AuthenticatedData,
     tx: mpsc::UnboundedSender<Vec<u8>>,
     rx: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
-    ssh_hosts: HashSet<String>,
-    http_hosts: HashSet<String>,
-    tcp_aliases: HashSet<TcpAlias>,
-    host_addressing: HashMap<(String, u32), String>,
-    port_addressing: HashMap<(String, u32), u16>,
     server: Arc<SandholeServer>,
 }
 
@@ -137,17 +162,10 @@ impl Server for Arc<SandholeServer> {
             peer: peer_address,
             user: None,
             key_fingerprint: None,
-            authentication: Arc::new(Mutex::new(Authentication::None)),
-            admin_interface: None,
-            col_width: None,
-            row_height: None,
+            is_proxied: Arc::new(Mutex::new(false)),
+            auth_data: AuthenticatedData::None,
             tx,
             rx: Some(rx),
-            ssh_hosts: HashSet::new(),
-            http_hosts: HashSet::new(),
-            tcp_aliases: HashSet::new(),
-            host_addressing: HashMap::new(),
-            port_addressing: HashMap::new(),
             server: Arc::clone(self),
         }
     }
@@ -165,7 +183,7 @@ impl Handler for ServerHandler {
         let Some(mut rx) = self.rx.take() else {
             return Ok(false);
         };
-        if *self.authentication.lock().await == Authentication::None {
+        if matches!(self.auth_data, AuthenticatedData::None) {
             return Err(russh::Error::Disconnect);
         }
         let mut stream = channel.into_stream();
@@ -194,9 +212,8 @@ impl Handler for ServerHandler {
                 .await
             {
                 if is_authenticated {
-                    let authentication = Authentication::User;
-                    *self.authentication.lock().await = authentication;
-                    info!("{} connected with {} (password)", self.peer, authentication);
+                    self.auth_data = AuthenticatedData::from(AuthenticationType::User);
+                    info!("{} connected with {} (password)", self.peer, self.auth_data);
                     return Ok(Auth::Accept);
                 }
             } else {
@@ -220,30 +237,29 @@ impl Handler for ServerHandler {
             .server
             .fingerprints_validator
             .authenticate_fingerprint(self.key_fingerprint.as_ref().unwrap());
-        *self.authentication.lock().await = authentication;
+        self.auth_data = AuthenticatedData::from(authentication);
         info!(
             "{} connected with {} (public key)",
-            self.peer, authentication
+            self.peer, self.auth_data
         );
         match authentication {
-            Authentication::None => {
+            AuthenticationType::None => {
                 // Start timer for user to do local port forwarding.
                 // Otherwise, the connection will be canceled upon expiration
-                let authentication = Arc::clone(&self.authentication);
+                let authenticated = Arc::clone(&self.is_proxied);
                 let Some(cancelation_tx) = self.cancelation_tx.take() else {
                     return Err(russh::Error::Disconnect);
                 };
                 let timeout = self.server.idle_connection_timeout;
                 tokio::spawn(async move {
                     sleep(timeout).await;
-                    if *authentication.lock().await == Authentication::None {
+                    if !*authenticated.lock().await {
                         let _ = cancelation_tx.send(());
                     }
                 });
                 Ok(Auth::Accept)
             }
-            Authentication::Proxy => unreachable!(),
-            Authentication::User | Authentication::Admin => Ok(Auth::Accept),
+            AuthenticationType::User | AuthenticationType::Admin => Ok(Auth::Accept),
         }
     }
 
@@ -253,29 +269,28 @@ impl Handler for ServerHandler {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
-        match *self.authentication.lock().await {
-            Authentication::None => return Err(russh::Error::Disconnect),
-            Authentication::Proxy | Authentication::User | Authentication::Admin => (),
-        }
         // Sending Ctrl+C ends the session and disconnects the client
         if data == [3] {
-            self.tx.send(b"\x1b[?25h".to_vec()).unwrap();
+            // self.tx.send(b"\x1b[?25h".to_vec()).unwrap();
             session.disconnect(Disconnect::ByApplication, "", "English");
             return Ok(());
         }
         debug!("received data {:?}", data);
-        let authentication = *self.authentication.lock().await;
-        if let (Authentication::Admin, Some(admin_interface)) =
-            (authentication, self.admin_interface.as_mut())
-        {
-            match data {
-                // Tab
-                b"\t" => admin_interface.advance_tab(),
-                // Up
-                b"\x1b[A" => admin_interface.move_up(),
-                // Down
-                b"\x1b[B" => admin_interface.move_down(),
-                _ => (),
+        match &mut self.auth_data {
+            AuthenticatedData::None => return Err(russh::Error::Disconnect),
+            AuthenticatedData::Proxy | AuthenticatedData::User { .. } => (),
+            AuthenticatedData::Admin { admin_data, .. } => {
+                if let Some(admin_interface) = admin_data.admin_interface.as_mut() {
+                    match data {
+                        // Tab
+                        b"\t" => admin_interface.advance_tab(),
+                        // Up
+                        b"\x1b[A" => admin_interface.move_up(),
+                        // Down
+                        b"\x1b[B" => admin_interface.move_down(),
+                        _ => (),
+                    }
+                }
             }
         }
         Ok(())
@@ -288,23 +303,30 @@ impl Handler for ServerHandler {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         debug!("exec_request data {:?}", data);
-        let authentication = *self.authentication.lock().await;
-        match String::from_utf8_lossy(data).split_whitespace().next() {
-            Some("admin") => {
-                if authentication != Authentication::Admin {
-                    return Err(russh::Error::RequestDenied);
-                }
+        match (
+            String::from_utf8_lossy(data).split_whitespace().next(),
+            &mut self.auth_data,
+        ) {
+            (
+                Some("admin"),
+                AuthenticatedData::Admin {
+                    user_data,
+                    admin_data,
+                },
+            ) => {
                 let mut admin_interface =
                     AdminInterface::new(self.tx.clone(), Arc::clone(&self.server));
-                if let (Some(col_width), Some(row_height)) = (self.col_width, self.row_height) {
+                if let (Some(col_width), Some(row_height)) =
+                    (user_data.col_width, user_data.row_height)
+                {
                     let _ = admin_interface.resize(col_width as u16, row_height as u16);
                 }
-                self.admin_interface = Some(admin_interface);
+                admin_data.admin_interface = Some(admin_interface);
             }
-            Some(command) => {
+            (Some(command), _) => {
                 debug!("Unknown command {} received", command);
             }
-            None => (),
+            (None, _) => (),
         }
         Ok(())
     }
@@ -321,8 +343,13 @@ impl Handler for ServerHandler {
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         debug!("pty_request");
-        self.col_width = Some(col_width);
-        self.row_height = Some(row_height);
+        match &mut self.auth_data {
+            AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
+                user_data.col_width = Some(col_width);
+                user_data.row_height = Some(row_height);
+            }
+            AuthenticatedData::None | AuthenticatedData::Proxy => (),
+        }
         session.channel_success(channel);
         Ok(())
     }
@@ -336,12 +363,17 @@ impl Handler for ServerHandler {
         _pix_height: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        if let Some(admin_interface) = self.admin_interface.as_mut() {
-            if admin_interface
-                .resize(col_width as u16, row_height as u16)
-                .is_err()
-            {
-                warn!("Failed to resize terminal");
+        if let AuthenticatedData::Admin {
+            ref mut admin_data, ..
+        } = self.auth_data
+        {
+            if let Some(ref mut admin_interface) = admin_data.admin_interface {
+                if admin_interface
+                    .resize(col_width as u16, row_height as u16)
+                    .is_err()
+                {
+                    warn!("Failed to resize terminal");
+                }
             }
         }
 
@@ -355,10 +387,14 @@ impl Handler for ServerHandler {
         session: &mut Session,
     ) -> Result<bool, Self::Error> {
         // Only allow remote forwarding for authorized keys
-        match *self.authentication.lock().await {
-            Authentication::None | Authentication::Proxy => return Err(russh::Error::Disconnect),
-            Authentication::User | Authentication::Admin => (),
-        }
+        let user_data = match &mut self.auth_data {
+            AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
+                user_data
+            }
+            AuthenticatedData::None | AuthenticatedData::Proxy => {
+                return Err(russh::Error::Disconnect)
+            }
+        };
         let handle = session.handle();
         match *port {
             22 => {
@@ -378,8 +414,9 @@ impl Handler for ServerHandler {
                         .send(format!("Error: Alias is required for SSH host").into_bytes());
                     return Ok(false);
                 }
-                self.ssh_hosts.insert(assigned_host.clone());
-                self.host_addressing
+                user_data.ssh_hosts.insert(assigned_host.clone());
+                user_data
+                    .host_addressing
                     .insert((address.to_string(), *port), assigned_host.clone());
                 info!("Serving SSH for {} ({})", &assigned_host, self.peer);
                 let _ = self
@@ -424,8 +461,9 @@ impl Handler for ServerHandler {
                     .address_delegator
                     .get_address(address, &self.user, &self.key_fingerprint, &self.peer)
                     .await;
-                self.http_hosts.insert(assigned_host.clone());
-                self.host_addressing
+                user_data.http_hosts.insert(assigned_host.clone());
+                user_data
+                    .host_addressing
                     .insert((address.to_string(), *port), assigned_host.clone());
                 info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
                 let _ = self.tx.send(
@@ -481,9 +519,11 @@ impl Handler for ServerHandler {
                 } else {
                     *port as u16
                 };
-                self.tcp_aliases
+                user_data
+                    .tcp_aliases
                     .insert(TcpAlias(address.to_string(), assigned_port));
-                self.port_addressing
+                user_data
+                    .port_addressing
                     .insert((address.to_string(), *port), assigned_port);
                 if is_alias(address) {
                     info!(
@@ -532,36 +572,47 @@ impl Handler for ServerHandler {
         port: u32,
         _session: &mut Session,
     ) -> Result<bool, Self::Error> {
+        let user_data = match &mut self.auth_data {
+            AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
+                user_data
+            }
+            AuthenticatedData::None | AuthenticatedData::Proxy => {
+                return Err(russh::Error::Disconnect)
+            }
+        };
         match port {
             22 => {
-                if let Some(assigned_host) =
-                    self.host_addressing.remove(&(address.to_string(), port))
+                if let Some(assigned_host) = user_data
+                    .host_addressing
+                    .remove(&(address.to_string(), port))
                 {
                     self.server.ssh.remove(&assigned_host, self.peer);
-                    self.ssh_hosts.remove(&assigned_host);
+                    user_data.ssh_hosts.remove(&assigned_host);
                     Ok(true)
                 } else {
                     Ok(false)
                 }
             }
             80 | 443 => {
-                if let Some(assigned_host) =
-                    self.host_addressing.remove(&(address.to_string(), port))
+                if let Some(assigned_host) = user_data
+                    .host_addressing
+                    .remove(&(address.to_string(), port))
                 {
                     self.server.http.remove(&assigned_host, self.peer);
-                    self.http_hosts.remove(&assigned_host);
+                    user_data.http_hosts.remove(&assigned_host);
                     Ok(true)
                 } else {
                     Ok(false)
                 }
             }
             _ => {
-                if let Some(assigned_port) =
-                    self.port_addressing.remove(&(address.to_string(), port))
+                if let Some(assigned_port) = user_data
+                    .port_addressing
+                    .remove(&(address.to_string(), port))
                 {
                     let key: &dyn TcpAliasKey = &BorrowedTcpAlias(address, &assigned_port);
                     self.server.tcp.remove(key, self.peer);
-                    self.tcp_aliases.remove(key);
+                    user_data.tcp_aliases.remove(key);
                     Ok(true)
                 } else {
                     Ok(false)
@@ -586,12 +637,12 @@ impl Handler for ServerHandler {
                     .tunneling_channel(originator_address, originator_port as u16)
                     .await
                 {
-                    {
-                        let mut authentication = self.authentication.lock().await;
-                        if *authentication == Authentication::None {
-                            *authentication = Authentication::Proxy;
-                        };
-                        drop(authentication);
+                    match &mut self.auth_data {
+                        AuthenticatedData::None => {
+                            self.auth_data = AuthenticatedData::Proxy;
+                            *self.is_proxied.lock().await = true;
+                        }
+                        _ => (),
                     }
                     tokio::spawn(async move {
                         let mut stream = channel.into_stream();
@@ -613,12 +664,12 @@ impl Handler for ServerHandler {
                     .tunneling_channel(originator_address, originator_port as u16)
                     .await
                 {
-                    {
-                        let mut authentication = self.authentication.lock().await;
-                        if *authentication == Authentication::None {
-                            *authentication = Authentication::Proxy;
-                        };
-                        drop(authentication);
+                    match &mut self.auth_data {
+                        AuthenticatedData::None => {
+                            self.auth_data = AuthenticatedData::Proxy;
+                            *self.is_proxied.lock().await = true;
+                        }
+                        _ => (),
                     }
                     tokio::spawn(async move {
                         let mut stream = channel.into_stream();
@@ -643,12 +694,12 @@ impl Handler for ServerHandler {
                 .tunneling_channel(originator_address, originator_port as u16)
                 .await
             {
-                {
-                    let mut authentication = self.authentication.lock().await;
-                    if *authentication == Authentication::None {
-                        *authentication = Authentication::Proxy;
-                    };
-                    drop(authentication);
+                match &mut self.auth_data {
+                    AuthenticatedData::None => {
+                        self.auth_data = AuthenticatedData::Proxy;
+                        *self.is_proxied.lock().await = true;
+                    }
+                    _ => (),
                 }
                 tokio::spawn(async move {
                     let mut stream = channel.into_stream();
@@ -664,23 +715,28 @@ impl Handler for ServerHandler {
                 return Ok(true);
             }
         }
-        if *self.authentication.lock().await == Authentication::None {
-            return Err(russh::Error::Disconnect);
+        match &self.auth_data {
+            AuthenticatedData::None => Err(russh::Error::Disconnect),
+            _ => Ok(false),
         }
-        Ok(false)
     }
 }
 
 impl Drop for ServerHandler {
     fn drop(&mut self) {
-        for host in self.ssh_hosts.iter() {
-            self.server.ssh.remove(host, self.peer);
-        }
-        for host in self.http_hosts.iter() {
-            self.server.http.remove(host, self.peer);
-        }
-        for port in self.tcp_aliases.iter() {
-            self.server.tcp.remove(port, self.peer);
+        match &mut self.auth_data {
+            AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
+                for host in user_data.ssh_hosts.iter() {
+                    self.server.ssh.remove(host, self.peer);
+                }
+                for host in user_data.http_hosts.iter() {
+                    self.server.http.remove(host, self.peer);
+                }
+                for port in user_data.tcp_aliases.iter() {
+                    self.server.tcp.remove(port, self.peer);
+                }
+            }
+            AuthenticatedData::Proxy | AuthenticatedData::None => (),
         }
         info!("{} disconnected", self.peer);
     }
