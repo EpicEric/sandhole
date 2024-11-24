@@ -38,6 +38,8 @@ pub struct ApplicationConfig {
     pub http_port: u16,
     pub https_port: u16,
     pub force_https: bool,
+    pub disable_http_logs: bool,
+    pub disable_tcp_logs: bool,
     pub acme_contact_email: Option<String>,
     pub acme_use_staging: bool,
     pub password_authentication_url: Option<String>,

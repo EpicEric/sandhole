@@ -140,6 +140,14 @@ struct Args {
     #[arg(long, default_value_t = false)]
     force_https: bool,
 
+    /// Disable sending HTTP logs to clients.
+    #[arg(long, default_value_t = false)]
+    disable_http_logs: bool,
+
+    /// Disable sending TCP/proxy logs to clients.
+    #[arg(long, default_value_t = false)]
+    disable_tcp_logs: bool,
+
     /// Contact e-mail to use with Let's Encrypt. If set, enables ACME for HTTPS certificates.
     ///
     /// By providing your e-mail, you agree to Let's Encrypt Subscriber Agreement.
@@ -235,6 +243,8 @@ async fn main() -> anyhow::Result<()> {
         http_port: args.http_port,
         https_port: args.https_port,
         force_https: args.force_https,
+        disable_http_logs: args.disable_http_logs,
+        disable_tcp_logs: args.disable_tcp_logs,
         acme_contact_email: args.acme_contact_email,
         acme_use_staging: args.acme_use_staging,
         password_authentication_url: args.password_authentication_url,

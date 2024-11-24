@@ -29,12 +29,14 @@ const X_FORWARDED_PROTO: &str = "X-Forwarded-Proto";
 const X_FORWARDED_PORT: &str = "X-Forwarded-Port";
 
 fn http_log(
+    ip: &str,
     status: u16,
     method: &str,
     host: &str,
     uri: &str,
     elapsed_time: Duration,
     tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
+    disable_http_logs: bool,
 ) {
     let status_escape_color = match status {
         100..=199 => "37m",
@@ -57,7 +59,7 @@ fn http_log(
         _ => "44m",
     };
     let line = format!(
-        " \x1b[2m{:19}\x1b[22m \x1b[{}[{:3}] \x1b[0;1;{}{:^7}\x1b[0m {} => {} \x1b[2m{}\x1b[0m\r\n",
+        " \x1b[2m{:19}\x1b[22m \x1b[{}[{:3}] \x1b[0;1;{}{:^7}\x1b[0m {} => {} \x1b[2m({}) {}\x1b[0m\r\n",
         chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
         status_escape_color,
         status,
@@ -65,10 +67,13 @@ fn http_log(
         method,
         host,
         uri,
+        ip,
         pretty_duration::pretty_duration(&elapsed_time, None)
     );
     print!("{}", line);
-    let _ = tx.map(|tx| tx.send(line.into_bytes()));
+    if !disable_http_logs {
+        let _ = tx.map(|tx| tx.send(line.into_bytes()));
+    }
 }
 
 pub(crate) enum Protocol {
@@ -98,6 +103,7 @@ pub(crate) async fn proxy_handler<B, H, T, R>(
     protocol: Protocol,
     http_request_timeout: Duration,
     websocket_timeout: Option<Duration>,
+    disable_http_logs: bool,
 ) -> anyhow::Result<Response<AxumBody>>
 where
     H: ConnectionHandler<T>,
@@ -117,16 +123,19 @@ where
         .next()
         .ok_or(ServerError::InvalidHostHeader)?
         .to_owned();
+    let ip = tcp_address.ip().to_canonical().to_string();
     let Some(handler) = conn_manager.get(&host) else {
         if domain_redirect.from == host {
             let elapsed = timer.elapsed();
             http_log(
+                &ip,
                 StatusCode::SEE_OTHER.as_u16(),
                 request.method().as_str(),
                 &host,
                 request.uri().path(),
                 elapsed,
                 None,
+                disable_http_logs,
             );
             return Ok(Redirect::to(&domain_redirect.to).into_response());
         }
@@ -153,12 +162,14 @@ where
         )
         .into_response();
         http_log(
+            &ip,
             response.status().as_u16(),
             request.method().as_str(),
             &host,
             request.uri().path(),
             elapsed,
             None,
+            disable_http_logs,
         );
         return Ok(response);
     }
@@ -167,7 +178,6 @@ where
         Protocol::Https { port } => ("https", port.to_string()),
         Protocol::TlsRedirect { .. } => unreachable!(),
     };
-    let ip = tcp_address.ip().to_string();
     request
         .headers_mut()
         .insert(X_FORWARDED_FOR, ip.parse().unwrap());
@@ -204,12 +214,14 @@ where
                 .map_err(|_| ServerError::RequestTimeout)??;
             let elapsed = timer.elapsed();
             http_log(
+                &ip,
                 response.status().as_u16(),
                 &method,
                 &host,
                 &uri,
                 elapsed,
                 Some(tx),
+                disable_http_logs,
             );
             Ok(response.into_response())
         }
@@ -227,12 +239,14 @@ where
                 .map_err(|_| ServerError::RequestTimeout)??;
             let elapsed = timer.elapsed();
             http_log(
+                &ip,
                 response.status().as_u16(),
                 &method,
                 &host,
                 &uri,
                 elapsed,
                 Some(tx),
+                disable_http_logs,
             );
             match response.status() {
                 StatusCode::SWITCHING_PROTOCOLS => {
@@ -321,6 +335,7 @@ mod proxy_handler_tests {
             Protocol::Http { port: 80 },
             Duration::from_secs(5),
             None,
+            false,
         )
         .await;
         assert!(response.is_err());
@@ -352,6 +367,7 @@ mod proxy_handler_tests {
             Protocol::Http { port: 80 },
             Duration::from_secs(5),
             None,
+            false,
         )
         .await;
         assert!(response.is_ok());
@@ -385,6 +401,7 @@ mod proxy_handler_tests {
             Protocol::Http { port: 80 },
             Duration::from_secs(5),
             None,
+            false,
         )
         .await;
         assert!(response.is_ok());
@@ -432,6 +449,7 @@ mod proxy_handler_tests {
             Protocol::TlsRedirect { from: 80, to: 443 },
             Duration::from_secs(5),
             None,
+            false,
         )
         .await;
         assert!(response.is_ok());
@@ -479,6 +497,7 @@ mod proxy_handler_tests {
             Protocol::TlsRedirect { from: 80, to: 8443 },
             Duration::from_secs(5),
             None,
+            false,
         )
         .await;
         assert!(response.is_ok());
@@ -555,6 +574,7 @@ mod proxy_handler_tests {
             Protocol::Https { port: 443 },
             Duration::from_secs(5),
             None,
+            false,
         )
         .await;
         assert!(!logging_rx.is_empty());
@@ -632,6 +652,7 @@ mod proxy_handler_tests {
             Protocol::Https { port: 443 },
             Duration::from_secs(5),
             None,
+            false,
         )
         .await;
         assert!(!logging_rx.is_empty());
@@ -703,6 +724,7 @@ mod proxy_handler_tests {
                 Protocol::Https { port: 443 },
                 Duration::from_secs(5),
                 None,
+                false,
             )
         });
         let jh2 = tokio::spawn(async move {

@@ -39,6 +39,8 @@ async fn ssh_proxy_jump() {
         http_port: 18080,
         https_port: 18443,
         force_https: false,
+        disable_http_logs: false,
+        disable_tcp_logs: false,
         acme_contact_email: None,
         acme_cache_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache").into(),
         acme_use_staging: true,

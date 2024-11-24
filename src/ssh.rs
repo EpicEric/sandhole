@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     collections::{HashMap, HashSet},
     fmt::Display,
     net::SocketAddr,
@@ -91,7 +92,7 @@ struct UserData {
     http_hosts: HashSet<String>,
     tcp_aliases: HashSet<TcpAlias>,
     host_addressing: HashMap<(String, u32), String>,
-    port_addressing: HashMap<(String, u32), u16>,
+    port_addressing: HashMap<(String, u32), TcpAlias>,
 }
 
 impl Default for UserData {
@@ -597,11 +598,16 @@ impl Handler for ServerHandler {
                 } else {
                     *port as u16
                 };
+                let tcp_alias = if is_alias(address) {
+                    address
+                } else {
+                    "localhost"
+                };
                 if self
                     .server
                     .tcp
                     .insert(
-                        TcpAlias(address.to_string(), assigned_port),
+                        TcpAlias(tcp_alias.to_string(), assigned_port),
                         self.peer,
                         Arc::new(SshTunnelHandler::new(
                             Arc::clone(&user_data.allow_fingerprint),
@@ -616,10 +622,11 @@ impl Handler for ServerHandler {
                 {
                     user_data
                         .tcp_aliases
-                        .insert(TcpAlias(address.to_string(), assigned_port));
-                    user_data
-                        .port_addressing
-                        .insert((address.to_string(), *port), assigned_port);
+                        .insert(TcpAlias(tcp_alias.to_string(), assigned_port));
+                    user_data.port_addressing.insert(
+                        (address.to_string(), *port),
+                        TcpAlias(tcp_alias.to_string(), assigned_port),
+                    );
                     if is_alias(address) {
                         info!(
                             "Tunneling TCP port {} for alias {} ({})",
@@ -718,11 +725,11 @@ impl Handler for ServerHandler {
                 }
             }
             _ => {
-                if let Some(assigned_port) = user_data
+                if let Some(assigned_alias) = user_data
                     .port_addressing
                     .remove(&(address.to_string(), port))
                 {
-                    let key: &dyn TcpAliasKey = &BorrowedTcpAlias(address, &assigned_port);
+                    let key: &dyn TcpAliasKey = assigned_alias.borrow();
                     self.server.tcp.remove(key, self.peer);
                     user_data.tcp_aliases.remove(key);
                     Ok(true)
@@ -757,6 +764,13 @@ impl Handler for ServerHandler {
                         self.auth_data = AuthenticatedData::Proxy;
                         *self.is_proxied.lock().await = true;
                     }
+                    let _ = handler.log_channel().send(
+                        format!(
+                            "New HTTP proxy from {}:{} => http://{}",
+                            originator_address, originator_port, host_to_connect
+                        )
+                        .into_bytes(),
+                    );
                     tokio::spawn(async move {
                         let mut stream = channel.into_stream();
                         let _ = copy_bidirectional(&mut stream, &mut io).await;
@@ -785,6 +799,13 @@ impl Handler for ServerHandler {
                         self.auth_data = AuthenticatedData::Proxy;
                         *self.is_proxied.lock().await = true;
                     }
+                    let _ = handler.log_channel().send(
+                        format!(
+                            "New SSH proxy from {}:{} => {}:{}",
+                            originator_address, originator_port, host_to_connect, port_to_connect
+                        )
+                        .into_bytes(),
+                    );
                     tokio::spawn(async move {
                         let mut stream = channel.into_stream();
                         let _ = copy_bidirectional(&mut stream, &mut io).await;
@@ -816,6 +837,13 @@ impl Handler for ServerHandler {
                     self.auth_data = AuthenticatedData::Proxy;
                     *self.is_proxied.lock().await = true;
                 }
+                let _ = handler.log_channel().send(
+                    format!(
+                        "New TCP proxy from {}:{} => {}:{}",
+                        originator_address, originator_port, host_to_connect, port_to_connect
+                    )
+                    .into_bytes(),
+                );
                 tokio::spawn(async move {
                     let mut stream = channel.into_stream();
                     let _ = copy_bidirectional(&mut stream, &mut io).await;

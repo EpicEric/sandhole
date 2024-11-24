@@ -164,6 +164,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         config.listen_address.clone(),
         Arc::clone(&tcp_connections),
         config.tcp_connection_timeout,
+        config.disable_tcp_logs,
     ));
     tcp_connections.update_reactor(Some(Arc::clone(&tcp_handler)));
     let addressing = Arc::new(AddressDelegator::new(
@@ -208,6 +209,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     },
                     config.http_request_timeout,
                     config.tcp_connection_timeout,
+                    config.disable_http_logs,
                 )
             });
             let io = TokioIo::new(stream);
@@ -248,6 +250,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     },
                     config.http_request_timeout,
                     config.tcp_connection_timeout,
+                    config.disable_http_logs,
                 )
             });
             match LazyConfigAcceptor::new(Default::default(), stream).await {

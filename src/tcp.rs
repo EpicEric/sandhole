@@ -16,6 +16,7 @@ pub(crate) struct TcpHandler {
     sockets: DashMap<u16, DroppableHandle<()>>,
     conn_manager: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<Self>>>,
     tcp_connection_timeout: Option<Duration>,
+    disable_tcp_logs: bool,
 }
 
 struct DroppableHandle<T>(JoinHandle<T>);
@@ -31,12 +32,14 @@ impl TcpHandler {
         listen_address: String,
         conn_manager: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<Self>>>,
         tcp_connection_timeout: Option<Duration>,
+        disable_tcp_logs: bool,
     ) -> Self {
         TcpHandler {
             listen_address,
             sockets: DashMap::new(),
             conn_manager,
             tcp_connection_timeout,
+            disable_tcp_logs,
         }
     }
 }
@@ -57,6 +60,7 @@ impl PortHandler for Arc<TcpHandler> {
         let port = listener.local_addr().unwrap().port();
         let clone = Arc::clone(self);
         let tcp_connection_timeout = self.tcp_connection_timeout;
+        let disable_tcp_logs = self.disable_tcp_logs;
         let jh = DroppableHandle(tokio::spawn(async move {
             loop {
                 match listener.accept().await {
@@ -64,9 +68,24 @@ impl PortHandler for Arc<TcpHandler> {
                         let key: &dyn TcpAliasKey = &BorrowedTcpAlias("localhost", &port);
                         if let Some(handler) = clone.conn_manager.get(key) {
                             if let Ok(mut channel) = handler
-                                .tunneling_channel(&address.ip().to_string(), address.port(), None)
+                                .tunneling_channel(
+                                    &address.ip().to_canonical().to_string(),
+                                    address.port(),
+                                    None,
+                                )
                                 .await
                             {
+                                if !disable_tcp_logs {
+                                    let _ = handler.log_channel().send(
+                                        format!(
+                                            "New connection from {}:{} to TCP port {}",
+                                            address.ip().to_canonical().to_string(),
+                                            address.port(),
+                                            port
+                                        )
+                                        .into_bytes(),
+                                    );
+                                }
                                 match tcp_connection_timeout {
                                     Some(duration) => {
                                         let _ = timeout(duration, async {
