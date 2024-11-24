@@ -174,10 +174,16 @@ Options:
 
           [default: 5s]
 
-      --request-timeout <REQUEST_TIMEOUT>
+      --http-request-timeout <HTTP_REQUEST_TIMEOUT>
           Time until an outgoing HTTP request is automatically canceled
 
           [default: 10s]
+
+      --tcp-connection-timeout <TCP_CONNECTION_TIMEOUT>
+          How long until TCP connections (including Websockets) are
+          automatically garbage-collected.
+
+          By default, these connections are not terminated by Sandhole.
 
   -h, --help
           Print help (see a summary with '-h')

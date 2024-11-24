@@ -96,7 +96,8 @@ pub(crate) async fn proxy_handler<B, H, T, R>(
     conn_manager: Arc<ConnectionMap<String, Arc<H>, R>>,
     domain_redirect: Arc<DomainRedirect>,
     protocol: Protocol,
-    request_timeout: Duration,
+    http_request_timeout: Duration,
+    websocket_timeout: Option<Duration>,
 ) -> anyhow::Result<Response<AxumBody>>
 where
     H: ConnectionHandler<T>,
@@ -198,7 +199,7 @@ where
                     warn!("Connection failed: {:?}", err);
                 }
             });
-            let response = timeout(request_timeout, sender.send_request(request))
+            let response = timeout(http_request_timeout, sender.send_request(request))
                 .await
                 .map_err(|_| ServerError::RequestTimeout)??;
             let elapsed = timer.elapsed();
@@ -221,7 +222,7 @@ where
             });
             let request_type = request_upgrade.to_str()?.to_string();
             let upgraded_request = hyper::upgrade::on(&mut request);
-            let mut response = timeout(request_timeout, sender.send_request(request))
+            let mut response = timeout(http_request_timeout, sender.send_request(request))
                 .await
                 .map_err(|_| ServerError::RequestTimeout)??;
             let elapsed = timer.elapsed();
@@ -247,9 +248,25 @@ where
                             let mut upgraded_request =
                                 TokioIo::new(upgraded_request.await.unwrap());
                             let mut upgraded_response = TokioIo::new(upgraded_response);
-                            let _ =
-                                copy_bidirectional(&mut upgraded_response, &mut upgraded_request)
+                            match websocket_timeout {
+                                Some(duration) => {
+                                    let _ = timeout(duration, async {
+                                        copy_bidirectional(
+                                            &mut upgraded_response,
+                                            &mut upgraded_request,
+                                        )
+                                        .await
+                                    })
                                     .await;
+                                }
+                                None => {
+                                    let _ = copy_bidirectional(
+                                        &mut upgraded_response,
+                                        &mut upgraded_request,
+                                    )
+                                    .await;
+                                }
+                            }
                         });
                     }
                     Ok(response.into_response())
@@ -303,6 +320,7 @@ mod proxy_handler_tests {
             }),
             Protocol::Http { port: 80 },
             Duration::from_secs(5),
+            None,
         )
         .await;
         assert!(response.is_err());
@@ -333,6 +351,7 @@ mod proxy_handler_tests {
             }),
             Protocol::Http { port: 80 },
             Duration::from_secs(5),
+            None,
         )
         .await;
         assert!(response.is_ok());
@@ -365,6 +384,7 @@ mod proxy_handler_tests {
             }),
             Protocol::Http { port: 80 },
             Duration::from_secs(5),
+            None,
         )
         .await;
         assert!(response.is_ok());
@@ -411,6 +431,7 @@ mod proxy_handler_tests {
             }),
             Protocol::TlsRedirect { from: 80, to: 443 },
             Duration::from_secs(5),
+            None,
         )
         .await;
         assert!(response.is_ok());
@@ -457,6 +478,7 @@ mod proxy_handler_tests {
             }),
             Protocol::TlsRedirect { from: 80, to: 8443 },
             Duration::from_secs(5),
+            None,
         )
         .await;
         assert!(response.is_ok());
@@ -532,6 +554,7 @@ mod proxy_handler_tests {
             }),
             Protocol::Https { port: 443 },
             Duration::from_secs(5),
+            None,
         )
         .await;
         assert!(!logging_rx.is_empty());
@@ -608,6 +631,7 @@ mod proxy_handler_tests {
             }),
             Protocol::Https { port: 443 },
             Duration::from_secs(5),
+            None,
         )
         .await;
         assert!(!logging_rx.is_empty());
@@ -678,6 +702,7 @@ mod proxy_handler_tests {
                 }),
                 Protocol::Https { port: 443 },
                 Duration::from_secs(5),
+                None,
             )
         });
         let jh2 = tokio::spawn(async move {

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use crate::{
     connections::{ConnectionMap, ConnectionMapReactor},
@@ -9,12 +9,13 @@ use crate::{
 use async_trait::async_trait;
 use dashmap::DashMap;
 use log::error;
-use tokio::{io::copy_bidirectional, net::TcpListener, task::JoinHandle};
+use tokio::{io::copy_bidirectional, net::TcpListener, task::JoinHandle, time::timeout};
 
 pub(crate) struct TcpHandler {
     listen_address: String,
     sockets: DashMap<u16, DroppableHandle<()>>,
     conn_manager: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<Self>>>,
+    tcp_connection_timeout: Option<Duration>,
 }
 
 struct DroppableHandle<T>(JoinHandle<T>);
@@ -29,11 +30,13 @@ impl TcpHandler {
     pub(crate) fn new(
         listen_address: String,
         conn_manager: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<Self>>>,
+        tcp_connection_timeout: Option<Duration>,
     ) -> Self {
         TcpHandler {
             listen_address,
-            conn_manager,
             sockets: DashMap::new(),
+            conn_manager,
+            tcp_connection_timeout,
         }
     }
 }
@@ -53,6 +56,7 @@ impl PortHandler for Arc<TcpHandler> {
         };
         let port = listener.local_addr().unwrap().port();
         let clone = Arc::clone(self);
+        let tcp_connection_timeout = self.tcp_connection_timeout;
         let jh = DroppableHandle(tokio::spawn(async move {
             loop {
                 match listener.accept().await {
@@ -63,7 +67,17 @@ impl PortHandler for Arc<TcpHandler> {
                                 .tunneling_channel(&address.ip().to_string(), address.port(), None)
                                 .await
                             {
-                                let _ = copy_bidirectional(&mut stream, &mut channel).await;
+                                match tcp_connection_timeout {
+                                    Some(duration) => {
+                                        let _ = timeout(duration, async {
+                                            copy_bidirectional(&mut stream, &mut channel).await
+                                        })
+                                        .await;
+                                    }
+                                    None => {
+                                        let _ = copy_bidirectional(&mut stream, &mut channel).await;
+                                    }
+                                }
                             }
                         }
                     }

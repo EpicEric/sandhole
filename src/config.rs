@@ -49,5 +49,6 @@ pub struct ApplicationConfig {
     pub random_subdomain_seed: Option<RandomSubdomainSeed>,
     pub idle_connection_timeout: Duration,
     pub authentication_request_timeout: Duration,
-    pub request_timeout: Duration,
+    pub http_request_timeout: Duration,
+    pub tcp_connection_timeout: Option<Duration>,
 }

@@ -208,7 +208,13 @@ struct Args {
 
     /// Time until an outgoing HTTP request is automatically canceled.
     #[arg(long, default_value = "10s")]
-    request_timeout: Duration,
+    http_request_timeout: Duration,
+
+    /// How long until TCP connections (including Websockets) are automatically garbage-collected.
+    ///
+    /// By default, these connections are not terminated by Sandhole.
+    #[arg(long)]
+    tcp_connection_timeout: Option<Duration>,
 }
 
 #[tokio::main]
@@ -240,7 +246,8 @@ async fn main() -> anyhow::Result<()> {
         random_subdomain_seed: args.random_subdomain_seed.map(Into::into),
         idle_connection_timeout: args.idle_connection_timeout.into(),
         authentication_request_timeout: args.authentication_request_timeout.into(),
-        request_timeout: args.request_timeout.into(),
+        http_request_timeout: args.http_request_timeout.into(),
+        tcp_connection_timeout: args.tcp_connection_timeout.map(Into::into),
     };
     entrypoint(config).await
 }

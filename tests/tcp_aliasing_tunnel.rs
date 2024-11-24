@@ -44,7 +44,8 @@ async fn tcp_allow_requested_ports() {
         txt_record_prefix: "_sandhole".into(),
         idle_connection_timeout: Duration::from_secs(1),
         authentication_request_timeout: Duration::from_secs(5),
-        request_timeout: Duration::from_secs(5),
+        http_request_timeout: Duration::from_secs(5),
+        tcp_connection_timeout: None,
     };
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {

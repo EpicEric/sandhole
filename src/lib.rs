@@ -163,6 +163,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let tcp_handler: Arc<TcpHandler> = Arc::new(TcpHandler::new(
         config.listen_address.clone(),
         Arc::clone(&tcp_connections),
+        config.tcp_connection_timeout,
     ));
     tcp_connections.update_reactor(Some(Arc::clone(&tcp_handler)));
     let addressing = Arc::new(AddressDelegator::new(
@@ -205,7 +206,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                             port: config.http_port,
                         }
                     },
-                    config.request_timeout,
+                    config.http_request_timeout,
+                    config.tcp_connection_timeout,
                 )
             });
             let io = TokioIo::new(stream);
@@ -244,7 +246,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     Protocol::Https {
                         port: config.https_port,
                     },
-                    config.request_timeout,
+                    config.http_request_timeout,
+                    config.tcp_connection_timeout,
                 )
             });
             match LazyConfigAcceptor::new(Default::default(), stream).await {
