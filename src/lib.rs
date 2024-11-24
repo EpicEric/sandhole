@@ -154,9 +154,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .await
         .with_context(|| "Error setting up certificates watcher")?,
     );
-    let http_connections = Arc::new(ConnectionMap::new(Some(Arc::clone(&certificates))));
-    let ssh_connections = Arc::new(ConnectionMap::new(None));
-    let tcp_connections = Arc::new(ConnectionMap::new(None));
+    let http_connections = Arc::new(ConnectionMap::new(
+        config.load_balancing,
+        Some(Arc::clone(&certificates)),
+    ));
+    let ssh_connections = Arc::new(ConnectionMap::new(config.load_balancing, None));
+    let tcp_connections = Arc::new(ConnectionMap::new(config.load_balancing, None));
     let tcp_handler: Arc<TcpHandler> = Arc::new(TcpHandler::new(
         config.listen_address.clone(),
         Arc::clone(&tcp_connections),

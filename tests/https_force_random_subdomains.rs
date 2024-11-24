@@ -18,7 +18,7 @@ use rustls::{
     RootCertStore,
 };
 use sandhole::{
-    config::{ApplicationConfig, BindHostnames},
+    config::{ApplicationConfig, BindHostnames, LoadBalancing},
     entrypoint,
 };
 use tokio::{
@@ -50,6 +50,7 @@ async fn https_force_random_subdomains() {
         acme_cache_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache").into(),
         acme_use_staging: true,
         bind_hostnames: BindHostnames::None,
+        load_balancing: LoadBalancing::Allow,
         allow_provided_subdomains: false,
         allow_requested_ports: false,
         random_subdomain_seed: None,

@@ -16,6 +16,13 @@ pub enum BindHostnames {
     None,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LoadBalancing {
+    Allow,
+    Replace,
+    Deny,
+}
+
 #[derive(Debug)]
 pub struct ApplicationConfig {
     pub domain: String,
@@ -35,6 +42,7 @@ pub struct ApplicationConfig {
     pub acme_use_staging: bool,
     pub password_authentication_url: Option<String>,
     pub bind_hostnames: BindHostnames,
+    pub load_balancing: LoadBalancing,
     pub txt_record_prefix: String,
     pub allow_provided_subdomains: bool,
     pub allow_requested_ports: bool,

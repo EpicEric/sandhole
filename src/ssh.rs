@@ -455,16 +455,32 @@ impl Handler for ServerHandler {
                     );
                     return Ok(false);
                 }
-                user_data.ssh_hosts.insert(assigned_host.clone());
-                user_data
-                    .host_addressing
-                    .insert((address.to_string(), *port), assigned_host.clone());
-                info!("Serving SSH for {} ({})", &assigned_host, self.peer);
-                let _ = self
-                    .tx
-                    .send(
+                if self
+                    .server
+                    .ssh
+                    .insert(
+                        assigned_host.clone(),
+                        self.peer,
+                        Arc::new(SshTunnelHandler::new(
+                            Arc::clone(&user_data.allow_fingerprint),
+                            handle,
+                            self.tx.clone(),
+                            self.peer,
+                            address.to_string(),
+                            *port,
+                        )),
+                    )
+                    .is_ok()
+                {
+                    user_data.ssh_hosts.insert(assigned_host.clone());
+                    user_data
+                        .host_addressing
+                        .insert((address.to_string(), *port), assigned_host.clone());
+                    info!("Serving SSH for {} ({})", &assigned_host, self.peer);
+                    let _ = self.tx.send(
                         format!(
-                            "Serving SSH on {}:{}\r\n\x1b[2mhint: connect with ssh -J {}{} {}{}\x1b[0m\r\n",
+                            "Serving SSH on {}:{}\r\n\
+                                \x1b[2mhint: connect with ssh -J {}{} {}{}\x1b[0m\r\n",
                             &assigned_host,
                             self.server.ssh_port,
                             self.server.domain,
@@ -482,19 +498,18 @@ impl Handler for ServerHandler {
                         )
                         .into_bytes(),
                     );
-                self.server.ssh.insert(
-                    assigned_host.clone(),
-                    self.peer,
-                    Arc::new(SshTunnelHandler::new(
-                        Arc::clone(&user_data.allow_fingerprint),
-                        handle,
-                        self.tx.clone(),
-                        self.peer,
-                        address.to_string(),
-                        *port,
-                    )),
-                );
-                Ok(true)
+                    Ok(true)
+                } else {
+                    info!("Rejecting SSH for {} ({})", &assigned_host, self.peer);
+                    let _ = self.tx.send(
+                        format!(
+                            "Cannot listen on SSH {}:{} (already bound by another service)",
+                            &assigned_host, self.server.ssh_port,
+                        )
+                        .into_bytes(),
+                    );
+                    Ok(false)
+                }
             }
             80 | 443 => {
                 // Assign HTTP host through config
@@ -503,46 +518,66 @@ impl Handler for ServerHandler {
                     .address_delegator
                     .get_address(address, &self.user, &self.key_fingerprint, &self.peer)
                     .await;
-                user_data.http_hosts.insert(assigned_host.clone());
-                user_data
-                    .host_addressing
-                    .insert((address.to_string(), *port), assigned_host.clone());
-                info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
-                let _ = self.tx.send(
-                    format!(
-                        "Serving HTTP on http://{}{}\r\n",
-                        &assigned_host,
-                        match self.server.http_port {
-                            80 => "".into(),
-                            port => format!(":{}", port),
-                        }
-                    )
-                    .into_bytes(),
-                );
-                let _ = self.tx.send(
-                    format!(
-                        "Serving HTTPS on https://{}{}\r\n",
-                        &assigned_host,
-                        match self.server.https_port {
-                            443 => "".into(),
-                            port => format!(":{}", port),
-                        }
-                    )
-                    .into_bytes(),
-                );
-                self.server.http.insert(
-                    assigned_host.clone(),
-                    self.peer,
-                    Arc::new(SshTunnelHandler::new(
-                        Arc::clone(&user_data.allow_fingerprint),
-                        handle,
-                        self.tx.clone(),
+                if self
+                    .server
+                    .http
+                    .insert(
+                        assigned_host.clone(),
                         self.peer,
-                        address.to_string(),
-                        *port,
-                    )),
-                );
-                Ok(true)
+                        Arc::new(SshTunnelHandler::new(
+                            Arc::clone(&user_data.allow_fingerprint),
+                            handle,
+                            self.tx.clone(),
+                            self.peer,
+                            address.to_string(),
+                            *port,
+                        )),
+                    )
+                    .is_ok()
+                {
+                    user_data.http_hosts.insert(assigned_host.clone());
+                    user_data
+                        .host_addressing
+                        .insert((address.to_string(), *port), assigned_host.clone());
+                    info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
+                    let _ = self.tx.send(
+                        format!(
+                            "Serving HTTP on http://{}{}\r\n",
+                            &assigned_host,
+                            match self.server.http_port {
+                                80 => "".into(),
+                                port => format!(":{}", port),
+                            }
+                        )
+                        .into_bytes(),
+                    );
+                    let _ = self.tx.send(
+                        format!(
+                            "Serving HTTPS on https://{}{}\r\n",
+                            &assigned_host,
+                            match self.server.https_port {
+                                443 => "".into(),
+                                port => format!(":{}", port),
+                            }
+                        )
+                        .into_bytes(),
+                    );
+                    Ok(true)
+                } else {
+                    info!("Rejecting HTTP for {} ({})", &assigned_host, self.peer);
+                    let _ = self.tx.send(
+                        format!(
+                            "Cannot listen on HTTP on http://{}{} (already bound by another service)",
+                            &assigned_host,
+                            match self.server.http_port {
+                                80 => "".into(),
+                                port => format!(":{}", port),
+                            }
+                        )
+                        .into_bytes(),
+                    );
+                    Ok(false)
+                }
             }
             // Handle TCP
             1..=1024 if !is_alias(address) => {
@@ -562,50 +597,83 @@ impl Handler for ServerHandler {
                 } else {
                     *port as u16
                 };
-                user_data
-                    .tcp_aliases
-                    .insert(TcpAlias(address.to_string(), assigned_port));
-                user_data
-                    .port_addressing
-                    .insert((address.to_string(), *port), assigned_port);
-                if is_alias(address) {
-                    info!(
-                        "Tunneling TCP port {} for alias {} ({})",
-                        &assigned_port, address, self.peer
-                    );
-                    let _ = self.tx.send(
-                        format!(
-                            "Serving TCP port on {}:{}\r\n",
-                            self.server.domain, &assigned_port,
-                        )
-                        .into_bytes(),
-                    );
-                } else {
-                    info!(
-                        "Serving TCP for localhost:{} ({})",
-                        &assigned_port, self.peer
-                    );
-                    let _ = self.tx.send(
-                        format!(
-                            "Serving TCP port on {}:{}\r\n",
-                            self.server.domain, &assigned_port,
-                        )
-                        .into_bytes(),
-                    );
-                }
-                self.server.tcp.insert(
-                    TcpAlias(address.to_string(), assigned_port),
-                    self.peer,
-                    Arc::new(SshTunnelHandler::new(
-                        Arc::clone(&user_data.allow_fingerprint),
-                        handle,
-                        self.tx.clone(),
+                if self
+                    .server
+                    .tcp
+                    .insert(
+                        TcpAlias(address.to_string(), assigned_port),
                         self.peer,
-                        address.to_string(),
-                        *port,
-                    )),
-                );
-                Ok(true)
+                        Arc::new(SshTunnelHandler::new(
+                            Arc::clone(&user_data.allow_fingerprint),
+                            handle,
+                            self.tx.clone(),
+                            self.peer,
+                            address.to_string(),
+                            *port,
+                        )),
+                    )
+                    .is_ok()
+                {
+                    user_data
+                        .tcp_aliases
+                        .insert(TcpAlias(address.to_string(), assigned_port));
+                    user_data
+                        .port_addressing
+                        .insert((address.to_string(), *port), assigned_port);
+                    if is_alias(address) {
+                        info!(
+                            "Tunneling TCP port {} for alias {} ({})",
+                            &assigned_port, address, self.peer
+                        );
+                        let _ = self.tx.send(
+                            format!(
+                                "Serving TCP port {} for alias {}\r\n",
+                                &assigned_port, address,
+                            )
+                            .into_bytes(),
+                        );
+                    } else {
+                        info!(
+                            "Serving TCP for localhost:{} ({})",
+                            &assigned_port, self.peer
+                        );
+                        let _ = self.tx.send(
+                            format!(
+                                "Serving TCP port on {}:{}\r\n",
+                                self.server.domain, &assigned_port,
+                            )
+                            .into_bytes(),
+                        );
+                    }
+                    Ok(true)
+                } else {
+                    if is_alias(address) {
+                        info!(
+                            "Rejecting TCP port {} for alias {} ({})",
+                            &assigned_port, address, self.peer
+                        );
+                        let _ = self.tx.send(
+                            format!(
+                                "Cannot listen on TCP port {} for alias {} (already bound by another service)\r\n",
+                                &assigned_port, address,
+                            )
+                            .into_bytes(),
+                        );
+                    } else {
+                        info!(
+                            "Rejecting TCP for localhost:{} ({})",
+                            &assigned_port, self.peer
+                        );
+                        let _ = self.tx.send(
+                            format!(
+                                "Cannot listen on TCP port {}:{} (already bound by another service)\r\n",
+                                self.server.domain, &assigned_port,
+                            )
+                            .into_bytes(),
+                        );
+                    }
+                    Ok(false)
+                }
             }
         }
     }

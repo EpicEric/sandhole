@@ -18,13 +18,13 @@ Options:
 
       --user-keys-directory <USER_KEYS_DIRECTORY>
           Directory containing public keys of authorized users. Each file must
-          contain exactly one key
+          contain at least one key
 
           [default: ./deploy/user_keys/]
 
       --admin-keys-directory <ADMIN_KEYS_DIRECTORY>
           Directory containing public keys of admin users. Each file must
-          contain exactly one key
+          contain at least one key
 
           [default: ./deploy/admin_keys/]
 
@@ -81,8 +81,8 @@ Options:
           Contact e-mail to use with Let's Encrypt. If set, enables ACME for
           HTTPS certificates.
 
-          By providing your e-mail, you agree to Let's Encrypt's Terms of
-          Service.
+          By providing your e-mail, you agree to Let's Encrypt Subscriber
+          Agreement
 
       --acme-use-staging
           Controls whether to use the staging directory for Let's Encrypt
@@ -111,6 +111,20 @@ Options:
           - txt:   Allow any hostnames with a TXT record containing a
                    fingerprint, including the main domain
           - none:  Don't allow user-provided hostnames, enforce subdomains
+
+      --load-balancing <LOAD_BALANCING>
+          Strategy for load-balancing when multiple services request the same
+          hostname/port.
+
+          By default, traffic towards matching hostnames/ports will be
+          load-balanced.
+
+          [default: allow]
+
+          Possible values:
+          - allow:   Load-balance with all available handlers
+          - replace: When adding a new handler, replace the existing one
+          - deny:    Deny the new handler if there's an existing one
 
       --txt-record-prefix <TXT_RECORD_PREFIX>
           Prefix for TXT DNS records containing key fingerprints, for

@@ -7,7 +7,7 @@ use russh::{
 };
 use russh_keys::{key, load_secret_key};
 use sandhole::{
-    config::{ApplicationConfig, BindHostnames},
+    config::{ApplicationConfig, BindHostnames, LoadBalancing},
     entrypoint,
 };
 use tokio::{
@@ -42,6 +42,7 @@ async fn require_allowed_fingerprints() {
         acme_cache_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache").into(),
         acme_use_staging: true,
         bind_hostnames: BindHostnames::None,
+        load_balancing: LoadBalancing::Allow,
         allow_provided_subdomains: false,
         allow_requested_ports: true,
         random_subdomain_seed: None,

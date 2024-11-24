@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use clap::{command, Parser, ValueEnum};
 use humantime::Duration;
 use sandhole::{
-    config::{ApplicationConfig, BindHostnames as BHConfig, RandomSubdomainSeed as RSSConfig},
+    config::{
+        ApplicationConfig, BindHostnames as BHConfig, LoadBalancing as LBConfig,
+        RandomSubdomainSeed as RSSConfig,
+    },
     entrypoint,
 };
 use webpki::types::DnsName;
@@ -54,6 +57,26 @@ impl From<BindHostnames> for BHConfig {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum LoadBalancing {
+    /// Load-balance with all available handlers.
+    Allow,
+    /// When adding a new handler, replace the existing one.
+    Replace,
+    /// Deny the new handler if there's an existing one
+    Deny,
+}
+
+impl From<LoadBalancing> for LBConfig {
+    fn from(value: LoadBalancing) -> Self {
+        match value {
+            LoadBalancing::Allow => LBConfig::Allow,
+            LoadBalancing::Replace => LBConfig::Replace,
+            LoadBalancing::Deny => LBConfig::Deny,
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -66,12 +89,12 @@ struct Args {
     domain_redirect: String,
 
     /// Directory containing public keys of authorized users.
-    /// Each file must contain exactly one key.
+    /// Each file must contain at least one key.
     #[arg(long, default_value_os = "./deploy/user_keys/")]
     user_keys_directory: PathBuf,
 
     /// Directory containing public keys of admin users.
-    /// Each file must contain exactly one key.
+    /// Each file must contain at least one key.
     #[arg(long, default_value_os = "./deploy/admin_keys/")]
     admin_keys_directory: PathBuf,
 
@@ -119,7 +142,7 @@ struct Args {
 
     /// Contact e-mail to use with Let's Encrypt. If set, enables ACME for HTTPS certificates.
     ///
-    /// By providing your e-mail, you agree to Let's Encrypt's Terms of Service.
+    /// By providing your e-mail, you agree to Let's Encrypt Subscriber Agreement.
     #[arg(long)]
     acme_contact_email: Option<String>,
 
@@ -142,6 +165,12 @@ struct Args {
     /// Beware that this can lead to domain takeovers if misused!
     #[arg(long, value_enum, default_value_t = BindHostnames::Txt)]
     bind_hostnames: BindHostnames,
+
+    /// Strategy for load-balancing when multiple services request the same hostname/port.
+    ///
+    /// By default, traffic towards matching hostnames/ports will be load-balanced.
+    #[arg(long, value_enum, default_value_t = LoadBalancing::Allow)]
+    load_balancing: LoadBalancing,
 
     /// Prefix for TXT DNS records containing key fingerprints, for authorization to bind under a specific domain.
     ///
@@ -204,6 +233,7 @@ async fn main() -> anyhow::Result<()> {
         acme_use_staging: args.acme_use_staging,
         password_authentication_url: args.password_authentication_url,
         bind_hostnames: args.bind_hostnames.into(),
+        load_balancing: args.load_balancing.into(),
         txt_record_prefix: args.txt_record_prefix,
         allow_provided_subdomains: args.allow_provided_subdomains,
         allow_requested_ports: args.allow_requested_ports,

@@ -272,7 +272,10 @@ mod proxy_handler_tests {
     use tokio_tungstenite::client_async;
     use tower::Service;
 
-    use crate::{connections::MockConnectionMapReactor, handler::MockConnectionHandler};
+    use crate::{
+        config::LoadBalancing, connections::MockConnectionMapReactor,
+        handler::MockConnectionHandler,
+    };
 
     use super::{proxy_handler, ConnectionMap, DomainRedirect, Protocol};
 
@@ -284,7 +287,7 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(None));
+        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
         let request = Request::builder()
             .method("GET")
             .uri("/index.html")
@@ -313,7 +316,7 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(None));
+        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
         let request = Request::builder()
             .method("GET")
             .uri("/index.html")
@@ -345,7 +348,7 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(None));
+        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
         let request = Request::builder()
             .method("GET")
             .uri("/index.html")
@@ -381,15 +384,17 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(None));
+        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel().never();
         mock.expect_tunneling_channel().never();
-        conn_manager.insert(
-            "with.handler".into(),
-            "127.0.0.1:12345".parse().unwrap(),
-            Arc::new(mock),
-        );
+        conn_manager
+            .insert(
+                "with.handler".into(),
+                "127.0.0.1:12345".parse().unwrap(),
+                Arc::new(mock),
+            )
+            .unwrap();
         let request = Request::builder()
             .method("POST")
             .uri("/api/endpoint")
@@ -425,15 +430,17 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(None));
+        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel().never();
         mock.expect_tunneling_channel().never();
-        conn_manager.insert(
-            "non.standard".into(),
-            "127.0.0.1:12345".parse().unwrap(),
-            Arc::new(mock),
-        );
+        conn_manager
+            .insert(
+                "non.standard".into(),
+                "127.0.0.1:12345".parse().unwrap(),
+                Arc::new(mock),
+            )
+            .unwrap();
         let request = Request::builder()
             .method("POST")
             .uri("/test")
@@ -469,7 +476,7 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(None));
+        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
         let (server, handler) = tokio::io::duplex(1024);
         let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let mut mock = MockConnectionHandler::new();
@@ -479,11 +486,13 @@ mod proxy_handler_tests {
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _, _| Ok(handler));
-        conn_manager.insert(
-            "with.handler".into(),
-            "127.0.0.1:12345".parse().unwrap(),
-            Arc::new(mock),
-        );
+        conn_manager
+            .insert(
+                "with.handler".into(),
+                "127.0.0.1:12345".parse().unwrap(),
+                Arc::new(mock),
+            )
+            .unwrap();
         let request = Request::builder()
             .method("POST")
             .uri("/api/endpoint")
@@ -543,7 +552,7 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(None));
+        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
         let (server, handler) = tokio::io::duplex(1024);
         let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let mut mock = MockConnectionHandler::new();
@@ -553,11 +562,13 @@ mod proxy_handler_tests {
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _, _| Ok(handler));
-        conn_manager.insert(
-            "root.domain".into(),
-            "127.0.0.1:12345".parse().unwrap(),
-            Arc::new(mock),
-        );
+        conn_manager
+            .insert(
+                "root.domain".into(),
+                "127.0.0.1:12345".parse().unwrap(),
+                Arc::new(mock),
+            )
+            .unwrap();
         let request = Request::builder()
             .method("POST")
             .uri("/test")
@@ -617,7 +628,7 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(None));
+        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
         let (server, handler) = tokio::io::duplex(1024);
         let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let mut mock = MockConnectionHandler::new();
@@ -627,11 +638,13 @@ mod proxy_handler_tests {
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _, _| Ok(handler));
-        conn_manager.insert(
-            "with.websocket".into(),
-            "127.0.0.1:12345".parse().unwrap(),
-            Arc::new(mock),
-        );
+        conn_manager
+            .insert(
+                "with.websocket".into(),
+                "127.0.0.1:12345".parse().unwrap(),
+                Arc::new(mock),
+            )
+            .unwrap();
         let (socket, stream) = tokio::io::duplex(1024);
         let router = axum::Router::new()
             .route(
