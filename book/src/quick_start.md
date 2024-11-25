@@ -2,7 +2,7 @@
 
 In order to run Sandhole, you'll need:
 
-- A server with public addresses.
+- A server with at least one public address.
 - A domain pointing to said server (in this example, `server.com`).
 
 Then, install the Sandhole binary in your server. Currently, the only ways to do so are [through Docker Compose](./docker_compose.md) or to compile it yourself.
@@ -23,6 +23,8 @@ cargo install --git https://github.com/EpicEric/sandhole
 # -- OR --
 git clone https://github.com/EpicEric/sandhole
 cargo install --path sandhole
+# -- OR --
+cargo install sandhole  # Installs from crates.io
 ```
 
 Once this is all done, you can start running Sandhole! Just make sure it points to your own domain:

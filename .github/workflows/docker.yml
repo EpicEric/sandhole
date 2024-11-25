@@ -18,7 +18,7 @@ jobs:
             ${{ vars.DOCKERHUB_USERNAME }}/sandhole
           tags: |
             type=ref,event=branch
-            type=sha
+            type=sha,prefix=,suffix=
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
       - name: Set up QEMU
@@ -33,6 +33,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
+          file: Dockerfile.ci
           push: true
           platforms: |
             linux/amd64

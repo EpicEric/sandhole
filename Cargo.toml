@@ -4,15 +4,17 @@ version = "0.1.0"
 edition = "2021"
 description = "Expose HTTP/SSH/TCP services through SSH port forwarding."
 repository = "https://github.com/EpicEric/sandhole"
+homepage = "https://epiceric.github.io/sandhole/"
 license = "MIT"
 authors = ["Eric Rodrigues Pires <eric@eric.dev.br>"]
 readme = "README.md"
+keywords = ["ssh", "proxy"]
 categories = ["network-programming", "web-programming", "authentication"]
 exclude = [
   ".github",
   "book",
   "docker-compose-example",
-  "tests",
+  "tests/data",
 ]
 
 [dependencies]
