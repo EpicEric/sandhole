@@ -11,12 +11,14 @@ RUN mkdir src \
   && cargo zigbuild --release --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl \
   && rm src/main.rs
 COPY src ./src
-RUN cargo zigbuild --release --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl \
-  && mkdir -p /app/release/linux \
-  && cp /app/target/x86_64-unknown-linux-musl/release/sandhole /app/release/linux/amd64 \
-  && cp /app/target/aarch64-unknown-linux-musl/release/sandhole /app/release/linux/arm64
+RUN cargo zigbuild --release --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
 
-FROM alpine:3.20
-ARG TARGETPLATFORM
-COPY --from=builder /app/release/${TARGETPLATFORM} /usr/local/bin/sandhole
+FROM --platform=$BUILDPLATFORM scratch AS binary
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/sandhole /sandhole-linux-amd64
+COPY --from=builder /app/target/aarch64-unknown-linux-musl/release/sandhole /sandhole-linux-arm64
+
+FROM alpine:3.20 AS runner
+ARG TARGETOS
+ARG TARGETARCH
+COPY --from=binary /sandhole-${TARGETOS}-${TARGETARCH} /usr/local/bin/sandhole
 ENTRYPOINT [ "sandhole" ]

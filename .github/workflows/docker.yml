@@ -1,15 +1,19 @@
-name: ci
+name: docker
 
 on:
   push:
     branches: ["main"]
     tags: ["v*.*.*"]
 
+permissions:
+  contents: write
+
 jobs:
-  docker:
-    environment: Docker Build
-    runs-on: ubuntu-22.04
+  build-docker:
+    name: Build Docker images
+    runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Collect Docker metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -18,7 +22,7 @@ jobs:
             ${{ vars.DOCKERHUB_USERNAME }}/sandhole
           tags: |
             type=ref,event=branch
-            type=sha,prefix=,suffix=
+            type=sha,prefix=,suffix=,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
       - name: Set up QEMU
@@ -40,3 +44,29 @@ jobs:
             linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      - name: Export binaries
+        uses: docker/build-push-action@v6
+        with:
+          file: Dockerfile.ci
+          target: binary
+          outputs: type=local,dest=out
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandhole-binaries
+          path: out/
+  create-release-draft:
+    name: Create release draft
+    if: github.ref_type == 'tag'
+    needs: build-docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sandhole-binaries
+          path: out/
+      - name: Create release draft with binary assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create ${{ github.ref_name }} ./out/* --draft

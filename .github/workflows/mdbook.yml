@@ -1,4 +1,4 @@
-name: mdBook
+name: mdbook
 
 on:
   push:
@@ -16,7 +16,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-mdbook:
+  build-book:
+    name: Build book
     runs-on: ubuntu-latest
     env:
       MDBOOK_VERSION: 0.4.42
