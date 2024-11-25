@@ -9,34 +9,39 @@ use dashmap::DashMap;
 use crate::connections::ConnectionMapReactor;
 
 struct Counter {
-    queue: VecDeque<(Instant, u64)>,
-    interval: Duration,
+    history: VecDeque<(Instant, u64)>,
     window: Duration,
-    total_value: u64,
+    period: f64,
+    count: u64,
 }
 
 impl Counter {
+    fn new(window: Duration, interval: Duration) -> Self {
+        Counter {
+            history: VecDeque::new(),
+            period: window.as_secs_f64() / interval.as_secs_f64(),
+            window,
+            count: 0,
+        }
+    }
+
     fn add(&mut self, value: u64) {
-        self.shrink();
-        self.queue.push_back((Instant::now(), value));
-        self.total_value += value;
+        self.count += value;
     }
 
     fn measure(&mut self) -> f64 {
-        self.shrink();
-        let period = self.window.as_secs_f64() / self.interval.as_secs_f64();
-        (self.total_value as f64) / period
-    }
-
-    fn shrink(&mut self) {
-        while let Some(element) = self.queue.pop_front() {
+        let delta = loop {
+            let Some(element) = self.history.front() else {
+                break self.count;
+            };
             if element.0.elapsed() < self.window {
-                self.queue.push_front(element);
-                break;
+                break element.1;
             } else {
-                self.total_value -= element.1;
+                self.history.pop_front();
             }
-        }
+        };
+        self.history.push_back((Instant::now(), self.count));
+        (self.count - delta) as f64 / self.period
     }
 }
 
@@ -54,12 +59,7 @@ impl Telemetry {
     pub(crate) fn add_http_request(&self, hostname: String) {
         self.http_requests_per_minute
             .entry(hostname)
-            .or_insert(Counter {
-                queue: VecDeque::new(),
-                interval: Duration::from_secs(60),
-                window: Duration::from_secs(120),
-                total_value: 0,
-            })
+            .or_insert_with(|| Counter::new(Duration::from_secs(120), Duration::from_secs(60)))
             .value_mut()
             .add(1);
     }

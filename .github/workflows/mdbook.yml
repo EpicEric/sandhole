@@ -16,8 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Build job
-  build:
+  build-mdbook:
     runs-on: ubuntu-latest
     env:
       MDBOOK_VERSION: 0.4.42

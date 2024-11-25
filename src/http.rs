@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 use std::{net::SocketAddr, sync::Arc};
 
@@ -104,26 +105,45 @@ pub(crate) struct DomainRedirect {
     pub(crate) to: String,
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(crate) struct ProxyData<H, T, R>
+where
+    H: ConnectionHandler<T>,
+    T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    R: ConnectionMapReactor<String> + Send + 'static,
+{
+    pub(crate) conn_manager: Arc<ConnectionMap<String, Arc<H>, R>>,
+    pub(crate) telemetry: Arc<Telemetry>,
+    pub(crate) domain_redirect: Arc<DomainRedirect>,
+    pub(crate) protocol: Protocol,
+    pub(crate) http_request_timeout: Duration,
+    pub(crate) websocket_timeout: Option<Duration>,
+    pub(crate) disable_http_logs: bool,
+    pub(crate) _phantom_data: PhantomData<T>,
+}
+
 pub(crate) async fn proxy_handler<B, H, T, R>(
     mut request: Request<B>,
     tcp_address: SocketAddr,
-    conn_manager: Arc<ConnectionMap<String, Arc<H>, R>>,
-    telemetry: Arc<Telemetry>,
-    domain_redirect: Arc<DomainRedirect>,
-    protocol: Protocol,
-    http_request_timeout: Duration,
-    websocket_timeout: Option<Duration>,
-    disable_http_logs: bool,
+    proxy_data: ProxyData<H, T, R>,
 ) -> anyhow::Result<Response<AxumBody>>
 where
     H: ConnectionHandler<T>,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    R: ConnectionMapReactor<String> + Send + 'static,
     B: Body + Send + 'static,
     <B as Body>::Data: Send + Sync + 'static,
     <B as Body>::Error: Error + Send + Sync + 'static,
-    R: ConnectionMapReactor<String> + Send + 'static,
 {
+    let ProxyData {
+        conn_manager,
+        telemetry,
+        domain_redirect,
+        protocol,
+        http_request_timeout,
+        websocket_timeout,
+        disable_http_logs,
+        ..
+    } = proxy_data;
     let timer = Instant::now();
     let host = request
         .headers()
@@ -318,14 +338,16 @@ mod proxy_handler_tests {
     use http_body_util::Empty;
     use hyper::{body::Incoming, service::service_fn, HeaderMap, Request, StatusCode};
     use hyper_util::rt::TokioIo;
-    use std::{sync::Arc, time::Duration};
+    use std::{marker::PhantomData, sync::Arc, time::Duration};
     use tokio::{io::DuplexStream, sync::mpsc};
     use tokio_tungstenite::client_async;
     use tower::Service;
 
     use crate::{
-        config::LoadBalancing, connections::MockConnectionMapReactor,
-        handler::MockConnectionHandler, http::Telemetry,
+        config::LoadBalancing,
+        connections::MockConnectionMapReactor,
+        handler::MockConnectionHandler,
+        http::{ProxyData, Telemetry},
     };
 
     use super::{proxy_handler, ConnectionMap, DomainRedirect, Protocol};
@@ -347,16 +369,19 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
-            Arc::clone(&conn_manager),
-            Arc::new(Telemetry::new()),
-            Arc::new(DomainRedirect {
-                from: "main.domain".into(),
-                to: "https://example.com".into(),
-            }),
-            Protocol::Http { port: 80 },
-            Duration::from_secs(5),
-            None,
-            false,
+            ProxyData {
+                conn_manager: Arc::clone(&conn_manager),
+                telemetry: Arc::new(Telemetry::new()),
+                domain_redirect: Arc::new(DomainRedirect {
+                    from: "main.domain".into(),
+                    to: "https://example.com".into(),
+                }),
+                protocol: Protocol::Http { port: 80 },
+                http_request_timeout: Duration::from_secs(5),
+                websocket_timeout: None,
+                disable_http_logs: false,
+                _phantom_data: PhantomData,
+            },
         )
         .await;
         assert!(response.is_err());
@@ -380,16 +405,19 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
-            Arc::clone(&conn_manager),
-            Arc::new(Telemetry::new()),
-            Arc::new(DomainRedirect {
-                from: "main.domain".into(),
-                to: "https://example.com".into(),
-            }),
-            Protocol::Http { port: 80 },
-            Duration::from_secs(5),
-            None,
-            false,
+            ProxyData {
+                conn_manager: Arc::clone(&conn_manager),
+                telemetry: Arc::new(Telemetry::new()),
+                domain_redirect: Arc::new(DomainRedirect {
+                    from: "main.domain".into(),
+                    to: "https://example.com".into(),
+                }),
+                protocol: Protocol::Http { port: 80 },
+                http_request_timeout: Duration::from_secs(5),
+                websocket_timeout: None,
+                disable_http_logs: false,
+                _phantom_data: PhantomData,
+            },
         )
         .await;
         assert!(response.is_ok());
@@ -415,16 +443,19 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
-            Arc::clone(&conn_manager),
-            Arc::new(Telemetry::new()),
-            Arc::new(DomainRedirect {
-                from: "main.domain".into(),
-                to: "https://example.com".into(),
-            }),
-            Protocol::Http { port: 80 },
-            Duration::from_secs(5),
-            None,
-            false,
+            ProxyData {
+                conn_manager: Arc::clone(&conn_manager),
+                telemetry: Arc::new(Telemetry::new()),
+                domain_redirect: Arc::new(DomainRedirect {
+                    from: "main.domain".into(),
+                    to: "https://example.com".into(),
+                }),
+                protocol: Protocol::Http { port: 80 },
+                http_request_timeout: Duration::from_secs(5),
+                websocket_timeout: None,
+                disable_http_logs: false,
+                _phantom_data: PhantomData,
+            },
         )
         .await;
         assert!(response.is_ok());
@@ -464,16 +495,19 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
-            Arc::clone(&conn_manager),
-            Arc::new(Telemetry::new()),
-            Arc::new(DomainRedirect {
-                from: "main.domain".into(),
-                to: "https://example.com".into(),
-            }),
-            Protocol::TlsRedirect { from: 80, to: 443 },
-            Duration::from_secs(5),
-            None,
-            false,
+            ProxyData {
+                conn_manager: Arc::clone(&conn_manager),
+                telemetry: Arc::new(Telemetry::new()),
+                domain_redirect: Arc::new(DomainRedirect {
+                    from: "main.domain".into(),
+                    to: "https://example.com".into(),
+                }),
+                protocol: Protocol::TlsRedirect { from: 80, to: 443 },
+                http_request_timeout: Duration::from_secs(5),
+                websocket_timeout: None,
+                disable_http_logs: false,
+                _phantom_data: PhantomData,
+            },
         )
         .await;
         assert!(response.is_ok());
@@ -513,16 +547,19 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
-            Arc::clone(&conn_manager),
-            Arc::new(Telemetry::new()),
-            Arc::new(DomainRedirect {
-                from: "main.domain".into(),
-                to: "https://example.com".into(),
-            }),
-            Protocol::TlsRedirect { from: 80, to: 8443 },
-            Duration::from_secs(5),
-            None,
-            false,
+            ProxyData {
+                conn_manager: Arc::clone(&conn_manager),
+                telemetry: Arc::new(Telemetry::new()),
+                domain_redirect: Arc::new(DomainRedirect {
+                    from: "main.domain".into(),
+                    to: "https://example.com".into(),
+                }),
+                protocol: Protocol::TlsRedirect { from: 80, to: 8443 },
+                http_request_timeout: Duration::from_secs(5),
+                websocket_timeout: None,
+                disable_http_logs: false,
+                _phantom_data: PhantomData,
+            },
         )
         .await;
         assert!(response.is_ok());
@@ -591,16 +628,19 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
-            Arc::clone(&conn_manager),
-            Arc::new(Telemetry::new()),
-            Arc::new(DomainRedirect {
-                from: "main.domain".into(),
-                to: "https://example.com".into(),
-            }),
-            Protocol::Https { port: 443 },
-            Duration::from_secs(5),
-            None,
-            false,
+            ProxyData {
+                conn_manager: Arc::clone(&conn_manager),
+                telemetry: Arc::new(Telemetry::new()),
+                domain_redirect: Arc::new(DomainRedirect {
+                    from: "main.domain".into(),
+                    to: "https://example.com".into(),
+                }),
+                protocol: Protocol::Https { port: 443 },
+                http_request_timeout: Duration::from_secs(5),
+                websocket_timeout: None,
+                disable_http_logs: false,
+                _phantom_data: PhantomData,
+            },
         )
         .await;
         assert!(!logging_rx.is_empty());
@@ -670,16 +710,19 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "192.168.0.1:12345".parse().unwrap(),
-            Arc::clone(&conn_manager),
-            Arc::new(Telemetry::new()),
-            Arc::new(DomainRedirect {
-                from: "root.domain".into(),
-                to: "https://this.is.ignored".into(),
-            }),
-            Protocol::Https { port: 443 },
-            Duration::from_secs(5),
-            None,
-            false,
+            ProxyData {
+                conn_manager: Arc::clone(&conn_manager),
+                telemetry: Arc::new(Telemetry::new()),
+                domain_redirect: Arc::new(DomainRedirect {
+                    from: "root.domain".into(),
+                    to: "https://this.is.ignored".into(),
+                }),
+                protocol: Protocol::Https { port: 443 },
+                http_request_timeout: Duration::from_secs(5),
+                websocket_timeout: None,
+                disable_http_logs: false,
+                _phantom_data: PhantomData,
+            },
         )
         .await;
         assert!(!logging_rx.is_empty());
@@ -743,16 +786,19 @@ mod proxy_handler_tests {
             proxy_handler(
                 request,
                 "127.0.0.1:12345".parse().unwrap(),
-                Arc::clone(&conn_manager),
-                Arc::new(Telemetry::new()),
-                Arc::new(DomainRedirect {
-                    from: "main.domain".into(),
-                    to: "https://example.com".into(),
-                }),
-                Protocol::Https { port: 443 },
-                Duration::from_secs(5),
-                None,
-                false,
+                ProxyData {
+                    conn_manager: Arc::clone(&conn_manager),
+                    telemetry: Arc::new(Telemetry::new()),
+                    domain_redirect: Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }),
+                    protocol: Protocol::Https { port: 443 },
+                    http_request_timeout: Duration::from_secs(5),
+                    websocket_timeout: None,
+                    disable_http_logs: false,
+                    _phantom_data: PhantomData,
+                },
             )
         });
         let jh2 = tokio::spawn(async move {

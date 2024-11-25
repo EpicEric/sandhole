@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    marker::PhantomData,
     net::SocketAddr,
     sync::{Arc, RwLock},
     time::Duration,
@@ -7,7 +8,7 @@ use std::{
 
 use anyhow::Context;
 use connections::ConnectionMapReactor;
-use http::DomainRedirect;
+use http::{DomainRedirect, ProxyData};
 use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
 use hyper_util::rt::TokioIo;
 use log::{info, warn};
@@ -258,22 +259,25 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 proxy_handler(
                     req,
                     address,
-                    Arc::clone(&http_map),
-                    Arc::clone(&telemetry),
-                    Arc::clone(&domain_redirect),
-                    if config.force_https {
-                        Protocol::TlsRedirect {
-                            from: config.http_port,
-                            to: config.https_port,
-                        }
-                    } else {
-                        Protocol::Http {
-                            port: config.http_port,
-                        }
+                    ProxyData {
+                        conn_manager: Arc::clone(&http_map),
+                        telemetry: Arc::clone(&telemetry),
+                        domain_redirect: Arc::clone(&domain_redirect),
+                        protocol: if config.force_https {
+                            Protocol::TlsRedirect {
+                                from: config.http_port,
+                                to: config.https_port,
+                            }
+                        } else {
+                            Protocol::Http {
+                                port: config.http_port,
+                            }
+                        },
+                        http_request_timeout: config.http_request_timeout,
+                        websocket_timeout: config.tcp_connection_timeout,
+                        disable_http_logs: config.disable_http_logs,
+                        _phantom_data: PhantomData,
                     },
-                    config.http_request_timeout,
-                    config.tcp_connection_timeout,
-                    config.disable_http_logs,
                 )
             });
             let io = TokioIo::new(stream);
@@ -309,15 +313,18 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 proxy_handler(
                     req,
                     address,
-                    Arc::clone(&http_map),
-                    Arc::clone(&telemetry),
-                    Arc::clone(&domain_redirect),
-                    Protocol::Https {
-                        port: config.https_port,
+                    ProxyData {
+                        conn_manager: Arc::clone(&http_map),
+                        telemetry: Arc::clone(&telemetry),
+                        domain_redirect: Arc::clone(&domain_redirect),
+                        protocol: Protocol::Https {
+                            port: config.https_port,
+                        },
+                        http_request_timeout: config.http_request_timeout,
+                        websocket_timeout: config.tcp_connection_timeout,
+                        disable_http_logs: config.disable_http_logs,
+                        _phantom_data: PhantomData,
                     },
-                    config.http_request_timeout,
-                    config.tcp_connection_timeout,
-                    config.disable_http_logs,
                 )
             });
             match LazyConfigAcceptor::new(Default::default(), stream).await {
