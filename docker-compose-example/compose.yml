@@ -1,0 +1,33 @@
+services:
+  letsencrypt:
+    image: docker.io/adferrand/dnsrobocert:3.25.0
+    container_name: sandhole_dnsrobocert
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./letsencrypt:/etc/letsencrypt
+      - ./le-config.yml:/etc/dnsrobocert/config.yml
+    restart: unless-stopped
+
+  sandhole:
+    image: docker.io/epiceric/sandhole:latest
+    container_name: sandhole
+    depends_on:
+      - letsencrypt
+    volumes:
+      - ./letsencrypt:/letsencrypt
+      - ./deploy:/deploy
+    # See https://epiceric.github.io/sandhole/cli.html
+    command: |
+      --domain=server.com
+      --user-keys-directory=/deploy/user_keys/
+      --admin-keys-directory=/deploy/admin_keys/
+      --certificates-directory=/letsencrypt/live/
+      --acme-cache-directory=/deploy/acme_cache/
+      --private-key-file=/deploy/server_keys/ssh
+      --ssh-port=2222
+      --http-port=80
+      --https-port=443
+      --force-https
+      --acme-contact-email=admin@server.com
+    network_mode: host
+    restart: unless-stopped

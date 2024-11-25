@@ -44,3 +44,15 @@ Then, add the following entries to your DNS (assuming that your domain is `my.do
 This instructs your DNS to redirect requests to Sandhole, and tells Sandhole to authorize your SSH key for the given domain, respectively.
 
 If you need to use multiple keys for the same domain, simply add a TXT record for each one.
+
+### HTTPS support
+
+If your administrator has configured [ACME support](./tls_support.md#acme-support), you don't need any extra steps. HTTPS will be automatically available for you.
+
+However, if you require DNS challenges for your domain's certification for any reason, and your administrator is running [dnsrobocert](./tls_support.md), you can simply set another DNS entry:
+
+| Type  | Domain                          | Data                                       |
+| ----- | ------------------------------- | ------------------------------------------ |
+| CNAME | `_acme-challenge.my.domain.net` | `_acme-challenge.my.domain.net.server.com` |
+
+This lets dnsrobocert manage the ACME challenge for you.

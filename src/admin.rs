@@ -255,7 +255,7 @@ impl AdminInterface {
             buf: Vec::new(),
         });
         let options = TerminalOptions {
-            viewport: Viewport::Fullscreen,
+            viewport: Viewport::Fixed(Rect::new(0, 0, 120, 60)),
         };
         let (change_notifier, mut subscriber) = watch::channel(());
         let interface = Arc::new(Mutex::new(AdminTerminal {

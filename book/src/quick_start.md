@@ -5,7 +5,7 @@ In order to run Sandhole, you'll need:
 - A server with public addresses.
 - A domain pointing to said server (in this example, `server.com`).
 
-Then, install the Sandhole binary in your server. Currently, the only way to do so is to compile it yourself.
+Then, install the Sandhole binary in your server. Currently, the only ways to do so are [through Docker Compose](./docker_compose.md) or to compile it yourself.
 
 If you're compiling from a separate workstation, grab the source files, build the binary, and copy it over:
 

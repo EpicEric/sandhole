@@ -81,7 +81,7 @@ Options:
           Contact e-mail to use with Let's Encrypt. If set, enables ACME for
           HTTPS certificates.
 
-          By providing your e-mail, you agree to Let's Encrypt Subscriber
+          By providing your e-mail, you agree to the Let's Encrypt Subscriber
           Agreement
 
       --acme-use-staging

@@ -1,0 +1,13 @@
+acme:
+  email_account: admin@server.com
+certificates:
+  - domains:
+      - server.com
+      - "*.server.com"
+    name: server.com
+    profile: hetzner
+profiles:
+  - name: hetzner
+    provider: hetzner
+    provider_options:
+      auth_token: "" # Add PAT for Hetzner DNS

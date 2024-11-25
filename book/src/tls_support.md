@@ -2,7 +2,7 @@
 
 Sandhole supports TLS signing out of the box, including ACME challenges via TLS-ALPN-01 for custom domains.
 
-However, especially for your main domain, it's recommended that you set up [dnsrobocert](https://github.com/adferrand/dnsrobocert) to handle the wildcard certification via DNS. Sandhole already matches this tool's output directly. Please see its documentation to set it up yourself.
+However, especially for your main domain, it's recommended that you set up a tool like [dnsrobocert](https://github.com/adferrand/dnsrobocert) to handle the wildcard certification via DNS. Sandhole already matches dnsrobocert's output directly. Please see its documentation to set it up yourself.
 
 Assuming that the output of dnsrobocert is `./letsencrypt`, Sandhole can then read the certificates via:
 

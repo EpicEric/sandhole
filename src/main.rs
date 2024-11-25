@@ -150,7 +150,7 @@ struct Args {
 
     /// Contact e-mail to use with Let's Encrypt. If set, enables ACME for HTTPS certificates.
     ///
-    /// By providing your e-mail, you agree to Let's Encrypt Subscriber Agreement.
+    /// By providing your e-mail, you agree to the Let's Encrypt Subscriber Agreement.
     #[arg(long)]
     acme_contact_email: Option<String>,
 
