@@ -11,5 +11,3 @@ ssh -t server.com -p 2222 admin
 where `server.com` is your hostname and `2222` is Sandhole's SSH port.
 
 ![A terminal screenshot showing the "Sandhole admin" interface, displaying the HTTP services currently running.](./admin_interface.png)
-
-Perhaps, in the future, there'll be more interesting uses for the admin interface...

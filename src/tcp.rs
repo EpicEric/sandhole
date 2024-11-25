@@ -79,7 +79,7 @@ impl PortHandler for Arc<TcpHandler> {
                                     let _ = handler.log_channel().send(
                                         format!(
                                             "New connection from {}:{} to TCP port {}",
-                                            address.ip().to_canonical().to_string(),
+                                            address.ip().to_canonical(),
                                             address.port(),
                                             port
                                         )

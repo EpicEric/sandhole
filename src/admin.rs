@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use log::debug;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Margin, Rect},
@@ -13,7 +12,10 @@ use ratatui::{
     style::{Style, Stylize},
     symbols::border,
     text::{Line, Text},
-    widgets::{Block, Paragraph, Row, StatefulWidget, Table, TableState, Tabs, Widget},
+    widgets::{
+        Block, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
+        Table, TableState, Tabs, Widget,
+    },
     Terminal, TerminalOptions, Viewport,
 };
 use tokio::{
@@ -80,6 +82,7 @@ struct AdminState {
     is_pty: bool,
     tab: Tab,
     table_state: TableState,
+    scroll_state: ScrollbarState,
 }
 
 impl AdminState {
@@ -127,19 +130,25 @@ impl AdminState {
         match self.tab {
             Tab::Http => {
                 let data = self.server.http_data.read().unwrap().clone();
+                self.scroll_state = self.scroll_state.content_length(data.len());
                 let rows = data.into_iter().map(|(k, v)| {
-                    let len = v.len() as u16;
+                    let len = v.0.len() as u16;
                     Row::new(vec![
                         k,
-                        v.into_iter()
+                        v.0.into_iter()
                             .map(|addr| addr.to_string())
                             .collect::<Vec<_>>()
                             .join("\n"),
+                        v.1.to_string(),
                     ])
                     .height(len)
                 });
-                let constraints = [Constraint::Fill(2), Constraint::Fill(5)];
-                let header = Row::new(["Host", "Peer(s)"]);
+                let constraints = [
+                    Constraint::Min(25),
+                    Constraint::Length(47),
+                    Constraint::Min(7),
+                ];
+                let header = Row::new(["Host", "Peer(s)", "Req/min"]);
                 let title =
                     Block::new().title(Line::from("HTTP services".blue().bold()).centered());
                 let table = Table::new(rows, constraints)
@@ -148,9 +157,16 @@ impl AdminState {
                     .block(title)
                     .row_highlight_style(Style::new().blue().reversed());
                 StatefulWidget::render(table, area, buf, &mut self.table_state);
+                StatefulWidget::render(
+                    Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+                    area.inner(Margin::new(1, 1)),
+                    buf,
+                    &mut self.scroll_state,
+                );
             }
             Tab::Ssh => {
                 let data = self.server.ssh_data.read().unwrap().clone();
+                self.scroll_state = self.scroll_state.content_length(data.len());
                 let rows = data.into_iter().map(|(k, v)| {
                     let len = v.len() as u16;
                     Row::new(vec![
@@ -162,7 +178,7 @@ impl AdminState {
                     ])
                     .height(len)
                 });
-                let constraints = [Constraint::Fill(2), Constraint::Fill(5)];
+                let constraints = [Constraint::Min(25), Constraint::Length(47)];
                 let header = Row::new(["Host", "Peer(s)"]);
                 let title =
                     Block::new().title(Line::from("SSH services".yellow().bold()).centered());
@@ -172,9 +188,16 @@ impl AdminState {
                     .block(title)
                     .row_highlight_style(Style::new().yellow().reversed());
                 StatefulWidget::render(table, area, buf, &mut self.table_state);
+                StatefulWidget::render(
+                    Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+                    area.inner(Margin::new(1, 1)),
+                    buf,
+                    &mut self.scroll_state,
+                );
             }
             Tab::Tcp => {
                 let data = self.server.tcp_data.read().unwrap().clone();
+                self.scroll_state = self.scroll_state.content_length(data.len());
                 let rows = data.into_iter().map(|(k, v)| {
                     let len = v.len() as u16;
                     Row::new(vec![
@@ -188,9 +211,9 @@ impl AdminState {
                     .height(len)
                 });
                 let constraints = [
-                    Constraint::Fill(2),
+                    Constraint::Min(25),
                     Constraint::Length(5),
-                    Constraint::Fill(5),
+                    Constraint::Length(47),
                 ];
                 let header = Row::new(["Alias", "Port", "Peer(s)"]);
                 let title =
@@ -201,6 +224,12 @@ impl AdminState {
                     .block(title)
                     .row_highlight_style(Style::new().green().reversed());
                 StatefulWidget::render(table, area, buf, &mut self.table_state);
+                StatefulWidget::render(
+                    Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+                    area.inner(Margin::new(1, 1)),
+                    buf,
+                    &mut self.scroll_state,
+                );
             }
         }
     }
@@ -236,11 +265,11 @@ impl AdminInterface {
                 tab: Tab::Http,
                 is_pty: false,
                 table_state: Default::default(),
+                scroll_state: Default::default(),
             },
         }));
         let interface_clone = Arc::clone(&interface);
         let jh = tokio::spawn(async move {
-            let interface = interface;
             loop {
                 {
                     let mut interface = interface.lock().unwrap();
@@ -251,9 +280,9 @@ impl AdminInterface {
                     terminal
                         .draw(|frame| {
                             state.render(frame.area(), frame.buffer_mut());
+                            frame.set_cursor_position((0, 0));
                         })
                         .unwrap();
-                    terminal.show_cursor().unwrap();
                     drop(interface);
                 }
                 tokio::select! {
@@ -270,7 +299,6 @@ impl AdminInterface {
     }
 
     pub(crate) fn resize(&mut self, width: u16, height: u16) -> anyhow::Result<()> {
-        debug!("resize");
         let rect = ratatui::prelude::Rect {
             x: 0,
             y: 0,
@@ -288,7 +316,6 @@ impl AdminInterface {
     }
 
     pub(crate) fn next_tab(&mut self) {
-        debug!("next_tab");
         {
             let mut interface = self.interface.lock().unwrap();
             match interface.state.tab {
@@ -303,13 +330,13 @@ impl AdminInterface {
                 }
             }
             interface.state.table_state = Default::default();
+            interface.state.scroll_state = Default::default();
             drop(interface);
         }
         let _ = self.change_notifier.send(());
     }
 
     pub(crate) fn previous_tab(&mut self) {
-        debug!("previous_tab");
         {
             let mut interface = self.interface.lock().unwrap();
             match interface.state.tab {
@@ -324,6 +351,7 @@ impl AdminInterface {
                 }
             }
             interface.state.table_state = Default::default();
+            interface.state.scroll_state = Default::default();
             drop(interface);
         }
         let _ = self.change_notifier.send(());
@@ -333,6 +361,7 @@ impl AdminInterface {
         {
             let mut interface = self.interface.lock().unwrap();
             interface.state.table_state.select_next();
+            interface.state.scroll_state.next();
             drop(interface);
         }
         let _ = self.change_notifier.send(());
@@ -342,6 +371,25 @@ impl AdminInterface {
         {
             let mut interface = self.interface.lock().unwrap();
             interface.state.table_state.select_previous();
+            interface.state.scroll_state.prev();
+            drop(interface);
+        }
+        let _ = self.change_notifier.send(());
+    }
+
+    pub(crate) fn move_left(&mut self) {
+        {
+            let mut interface = self.interface.lock().unwrap();
+            interface.state.table_state.select_previous_column();
+            drop(interface);
+        }
+        let _ = self.change_notifier.send(());
+    }
+
+    pub(crate) fn move_right(&mut self) {
+        {
+            let mut interface = self.interface.lock().unwrap();
+            interface.state.table_state.select_next_column();
             drop(interface);
         }
         let _ = self.change_notifier.send(());

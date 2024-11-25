@@ -32,7 +32,7 @@ use tokio::{
 
 #[derive(Clone)]
 pub(crate) struct SshTunnelHandler {
-    allow_fingerprint: Arc<RwLock<Box<dyn Fn(Option<String>) -> bool + Send + Sync>>>,
+    allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
     handle: russh::server::Handle,
     tx: mpsc::UnboundedSender<Vec<u8>>,
     peer: SocketAddr,
@@ -42,7 +42,7 @@ pub(crate) struct SshTunnelHandler {
 
 impl SshTunnelHandler {
     pub(crate) fn new(
-        allow_fingerprint: Arc<RwLock<Box<dyn Fn(Option<String>) -> bool + Send + Sync>>>,
+        allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
         handle: russh::server::Handle,
         tx: mpsc::UnboundedSender<Vec<u8>>,
         peer: SocketAddr,
@@ -71,7 +71,6 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
         port: u16,
         fingerprint: Option<String>,
     ) -> anyhow::Result<ChannelStream<Msg>> {
-        // TO-DO: Check reference for allowed fingerprints (maybe with a closure)
         if !(self.allow_fingerprint.read().await)(fingerprint.clone()) {
             Err(ServerError::FingerprintDenied)?
         }
@@ -84,8 +83,10 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
     }
 }
 
+type FingerprintFn = dyn Fn(Option<String>) -> bool + Send + Sync;
+
 struct UserData {
-    allow_fingerprint: Arc<RwLock<Box<dyn Fn(Option<String>) -> bool + Send + Sync>>>,
+    allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
     col_width: Option<u32>,
     row_height: Option<u32>,
     ssh_hosts: HashSet<String>,
@@ -179,6 +180,9 @@ impl Server for Arc<SandholeServer> {
         peer_address: Option<SocketAddr>,
         cancelation_tx: oneshot::Sender<()>,
     ) -> ServerHandler {
+        if let Some(peer) = &peer_address {
+            info!("{} connected", peer);
+        }
         let (tx, rx) = mpsc::unbounded_channel();
         let peer_address = peer_address.unwrap();
         ServerHandler {
@@ -295,7 +299,6 @@ impl Handler for ServerHandler {
     ) -> Result<(), Self::Error> {
         // Sending Ctrl+C ends the session and disconnects the client
         if data == [3] {
-            // self.tx.send(b"\x1b[?25h".to_vec()).unwrap();
             session.disconnect(Disconnect::ByApplication, "", "English");
             return Ok(());
         }
@@ -311,9 +314,13 @@ impl Handler for ServerHandler {
                         // Shift+Tab
                         b"\x1b[Z" => admin_interface.previous_tab(),
                         // Up
-                        b"\x1b[A" => admin_interface.move_up(),
+                        b"\x1b[A" | b"k" => admin_interface.move_up(),
                         // Down
-                        b"\x1b[B" => admin_interface.move_down(),
+                        b"\x1b[B" | b"j" => admin_interface.move_down(),
+                        // Left
+                        b"\x1b[D" | b"h" => admin_interface.move_left(),
+                        // Right
+                        b"\x1b[C" | b"l" => admin_interface.move_right(),
                         _ => (),
                     }
                 }

@@ -4,6 +4,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use crate::connections::ConnectionMapReactor;
 use crate::handler::ConnectionHandler;
+use crate::telemetry::Telemetry;
 
 use super::{connections::ConnectionMap, error::ServerError};
 use axum::{
@@ -28,16 +29,24 @@ const X_FORWARDED_HOST: &str = "X-Forwarded-Host";
 const X_FORWARDED_PROTO: &str = "X-Forwarded-Proto";
 const X_FORWARDED_PORT: &str = "X-Forwarded-Port";
 
-fn http_log(
-    ip: &str,
+struct HttpLog<'a> {
+    ip: &'a str,
     status: u16,
-    method: &str,
-    host: &str,
-    uri: &str,
+    method: &'a str,
+    host: &'a str,
+    uri: &'a str,
     elapsed_time: Duration,
-    tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
-    disable_http_logs: bool,
-) {
+}
+
+fn http_log(data: HttpLog, tx: Option<mpsc::UnboundedSender<Vec<u8>>>, disable_http_logs: bool) {
+    let HttpLog {
+        ip,
+        status,
+        method,
+        host,
+        uri,
+        elapsed_time,
+    } = data;
     let status_escape_color = match status {
         100..=199 => "37m",
         200..=299 => "34m",
@@ -59,7 +68,7 @@ fn http_log(
         _ => "44m",
     };
     let line = format!(
-        " \x1b[2m{:19}\x1b[22m \x1b[{}[{:3}] \x1b[0;1;{}{:^7}\x1b[0m {} => {} \x1b[2m({}) {}\x1b[0m\r\n",
+        " \x1b[2m{:19}\x1b[22m \x1b[{}[{:3}] \x1b[0;1;30;{}{:^7}\x1b[0m {} => {} \x1b[2m({}) {}\x1b[0m\r\n",
         chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
         status_escape_color,
         status,
@@ -95,10 +104,12 @@ pub(crate) struct DomainRedirect {
     pub(crate) to: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn proxy_handler<B, H, T, R>(
     mut request: Request<B>,
     tcp_address: SocketAddr,
     conn_manager: Arc<ConnectionMap<String, Arc<H>, R>>,
+    telemetry: Arc<Telemetry>,
     domain_redirect: Arc<DomainRedirect>,
     protocol: Protocol,
     http_request_timeout: Duration,
@@ -126,14 +137,16 @@ where
     let ip = tcp_address.ip().to_canonical().to_string();
     let Some(handler) = conn_manager.get(&host) else {
         if domain_redirect.from == host {
-            let elapsed = timer.elapsed();
+            let elapsed_time = timer.elapsed();
             http_log(
-                &ip,
-                StatusCode::SEE_OTHER.as_u16(),
-                request.method().as_str(),
-                &host,
-                request.uri().path(),
-                elapsed,
+                HttpLog {
+                    ip: &ip,
+                    status: StatusCode::SEE_OTHER.as_u16(),
+                    method: request.method().as_str(),
+                    host: &host,
+                    uri: request.uri().path(),
+                    elapsed_time,
+                },
                 None,
                 disable_http_logs,
             );
@@ -142,7 +155,7 @@ where
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
     if let Protocol::TlsRedirect { to: to_port, .. } = protocol {
-        let elapsed = timer.elapsed();
+        let elapsed_time = timer.elapsed();
         let response = Redirect::permanent(
             format!(
                 "https://{}{}{}",
@@ -162,12 +175,14 @@ where
         )
         .into_response();
         http_log(
-            &ip,
-            response.status().as_u16(),
-            request.method().as_str(),
-            &host,
-            request.uri().path(),
-            elapsed,
+            HttpLog {
+                ip: &ip,
+                status: response.status().as_u16(),
+                method: request.method().as_str(),
+                host: &host,
+                uri: request.uri().path(),
+                elapsed_time,
+            },
             None,
             disable_http_logs,
         );
@@ -190,6 +205,7 @@ where
     request
         .headers_mut()
         .insert(X_FORWARDED_PORT, port.parse().unwrap());
+    telemetry.add_http_request(host.clone());
 
     let Ok(io) = handler
         .tunneling_channel(&ip, tcp_address.port(), None)
@@ -212,14 +228,16 @@ where
             let response = timeout(http_request_timeout, sender.send_request(request))
                 .await
                 .map_err(|_| ServerError::RequestTimeout)??;
-            let elapsed = timer.elapsed();
+            let elapsed_time = timer.elapsed();
             http_log(
-                &ip,
-                response.status().as_u16(),
-                &method,
-                &host,
-                &uri,
-                elapsed,
+                HttpLog {
+                    ip: &ip,
+                    status: response.status().as_u16(),
+                    method: &method,
+                    host: &host,
+                    uri: &uri,
+                    elapsed_time,
+                },
                 Some(tx),
                 disable_http_logs,
             );
@@ -237,14 +255,16 @@ where
             let mut response = timeout(http_request_timeout, sender.send_request(request))
                 .await
                 .map_err(|_| ServerError::RequestTimeout)??;
-            let elapsed = timer.elapsed();
+            let elapsed_time = timer.elapsed();
             http_log(
-                &ip,
-                response.status().as_u16(),
-                &method,
-                &host,
-                &uri,
-                elapsed,
+                HttpLog {
+                    ip: &ip,
+                    status: response.status().as_u16(),
+                    method: &method,
+                    host: &host,
+                    uri: &uri,
+                    elapsed_time,
+                },
                 Some(tx),
                 disable_http_logs,
             );
@@ -305,7 +325,7 @@ mod proxy_handler_tests {
 
     use crate::{
         config::LoadBalancing, connections::MockConnectionMapReactor,
-        handler::MockConnectionHandler,
+        handler::MockConnectionHandler, http::Telemetry,
     };
 
     use super::{proxy_handler, ConnectionMap, DomainRedirect, Protocol};
@@ -328,6 +348,7 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
+            Arc::new(Telemetry::new()),
             Arc::new(DomainRedirect {
                 from: "main.domain".into(),
                 to: "https://example.com".into(),
@@ -360,6 +381,7 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
+            Arc::new(Telemetry::new()),
             Arc::new(DomainRedirect {
                 from: "main.domain".into(),
                 to: "https://example.com".into(),
@@ -394,6 +416,7 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
+            Arc::new(Telemetry::new()),
             Arc::new(DomainRedirect {
                 from: "main.domain".into(),
                 to: "https://example.com".into(),
@@ -442,6 +465,7 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
+            Arc::new(Telemetry::new()),
             Arc::new(DomainRedirect {
                 from: "main.domain".into(),
                 to: "https://example.com".into(),
@@ -490,6 +514,7 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
+            Arc::new(Telemetry::new()),
             Arc::new(DomainRedirect {
                 from: "main.domain".into(),
                 to: "https://example.com".into(),
@@ -567,6 +592,7 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
+            Arc::new(Telemetry::new()),
             Arc::new(DomainRedirect {
                 from: "main.domain".into(),
                 to: "https://example.com".into(),
@@ -645,6 +671,7 @@ mod proxy_handler_tests {
             request,
             "192.168.0.1:12345".parse().unwrap(),
             Arc::clone(&conn_manager),
+            Arc::new(Telemetry::new()),
             Arc::new(DomainRedirect {
                 from: "root.domain".into(),
                 to: "https://this.is.ignored".into(),
@@ -717,6 +744,7 @@ mod proxy_handler_tests {
                 request,
                 "127.0.0.1:12345".parse().unwrap(),
                 Arc::clone(&conn_manager),
+                Arc::new(Telemetry::new()),
                 Arc::new(DomainRedirect {
                     from: "main.domain".into(),
                     to: "https://example.com".into(),

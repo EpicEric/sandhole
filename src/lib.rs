@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
+use connections::ConnectionMapReactor;
 use http::DomainRedirect;
 use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
 use hyper_util::rt::TokioIo;
@@ -18,6 +19,7 @@ use rustls::ServerConfig;
 use rustls_acme::is_tls_alpn_challenge;
 use tcp::TcpHandler;
 use tcp_alias::TcpAlias;
+use telemetry::Telemetry;
 use tokio::{fs, io::AsyncWriteExt, net::TcpListener, sync::oneshot, time::sleep};
 use tokio_rustls::LazyConfigAcceptor;
 
@@ -48,17 +50,30 @@ mod login;
 mod ssh;
 mod tcp;
 mod tcp_alias;
+mod telemetry;
 
-type DataTable<T> = RwLock<BTreeMap<T, BTreeSet<SocketAddr>>>;
+type DataTable<K, V> = RwLock<BTreeMap<K, V>>;
+
+struct HttpReactor {
+    certificates: Arc<CertificateResolver>,
+    telemetry: Arc<Telemetry>,
+}
+
+impl ConnectionMapReactor<String> for HttpReactor {
+    fn call(&self, identifiers: Vec<String>) {
+        self.certificates.call(identifiers.clone());
+        self.telemetry.call(identifiers);
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct SandholeServer {
-    pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, Arc<CertificateResolver>>>,
+    pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
     pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>>>,
     pub(crate) tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
-    pub(crate) http_data: Arc<DataTable<String>>,
-    pub(crate) ssh_data: Arc<DataTable<String>>,
-    pub(crate) tcp_data: Arc<DataTable<TcpAlias>>,
+    pub(crate) http_data: Arc<DataTable<String, (BTreeSet<SocketAddr>, f64)>>,
+    pub(crate) ssh_data: Arc<DataTable<String, BTreeSet<SocketAddr>>>,
+    pub(crate) tcp_data: Arc<DataTable<TcpAlias, BTreeSet<SocketAddr>>>,
     pub(crate) fingerprints_validator: Arc<FingerprintsValidator>,
     pub(crate) api_login: Arc<Option<ApiLogin>>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
@@ -155,9 +170,13 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .await
         .with_context(|| "Error setting up certificates watcher")?,
     );
+    let telemetry = Arc::new(Telemetry::new());
     let http_connections = Arc::new(ConnectionMap::new(
         config.load_balancing,
-        Some(Arc::clone(&certificates)),
+        Some(HttpReactor {
+            certificates: Arc::clone(&certificates),
+            telemetry: Arc::clone(&telemetry),
+        }),
     ));
     let ssh_connections = Arc::new(ConnectionMap::new(config.load_balancing, None));
     let tcp_connections = Arc::new(ConnectionMap::new(config.load_balancing, None));
@@ -181,15 +200,58 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         to: config.domain_redirect,
     });
 
+    // Telemetry
+    let http_data = Arc::new(RwLock::default());
+    let data_clone = Arc::clone(&http_data);
+    let connections_clone = Arc::clone(&http_connections);
+    let telemetry_clone = Arc::clone(&telemetry);
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_millis(3_000)).await;
+            let data = connections_clone.data();
+            let telemetry = telemetry_clone.get_http_requests_per_minute();
+            let data = data
+                .into_iter()
+                .map(|(hostname, addresses)| {
+                    let requests_per_minute = *telemetry.get(&hostname).unwrap_or(&0f64);
+                    (hostname, (addresses, requests_per_minute))
+                })
+                .collect();
+            *data_clone.write().unwrap() = data;
+        }
+    });
+    let ssh_data = Arc::new(RwLock::default());
+    let data_clone = Arc::clone(&ssh_data);
+    let connections_clone = Arc::clone(&ssh_connections);
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_millis(3_000)).await;
+            let data = connections_clone.data();
+            *data_clone.write().unwrap() = data;
+        }
+    });
+    let tcp_data = Arc::new(RwLock::default());
+    let data_clone = Arc::clone(&tcp_data);
+    let connections_clone = Arc::clone(&tcp_connections);
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_millis(3_000)).await;
+            let data = connections_clone.data();
+            *data_clone.write().unwrap() = data;
+        }
+    });
+
     // HTTP handlers
     let http_listener = TcpListener::bind((config.listen_address.clone(), config.http_port))
         .await
         .with_context(|| "Error listening to HTTP port and address")?;
     let http_map = Arc::clone(&http_connections);
     let redirect = Arc::clone(&domain_redirect);
+    let telemetry_http = Arc::clone(&telemetry);
     tokio::spawn(async move {
         loop {
             let http_map = Arc::clone(&http_map);
+            let telemetry = Arc::clone(&telemetry_http);
             let domain_redirect = Arc::clone(&redirect);
             let (stream, address) = http_listener.accept().await.unwrap();
             let service = service_fn(move |req: Request<Incoming>| {
@@ -197,6 +259,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     req,
                     address,
                     Arc::clone(&http_map),
+                    Arc::clone(&telemetry),
                     Arc::clone(&domain_redirect),
                     if config.force_https {
                         Protocol::TlsRedirect {
@@ -234,9 +297,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             .with_cert_resolver(certificates),
     );
     let http_map = Arc::clone(&http_connections);
+    let telemetry_http = Arc::clone(&telemetry);
     tokio::spawn(async move {
         loop {
             let http_map = Arc::clone(&http_map);
+            let telemetry = Arc::clone(&telemetry_http);
             let domain_redirect = Arc::clone(&domain_redirect);
             let server_config = Arc::clone(&tls_server_config);
             let (stream, address) = https_listener.accept().await.unwrap();
@@ -245,6 +310,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     req,
                     address,
                     Arc::clone(&http_map),
+                    Arc::clone(&telemetry),
                     Arc::clone(&domain_redirect),
                     Protocol::Https {
                         port: config.https_port,
@@ -286,38 +352,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     continue;
                 }
             }
-        }
-    });
-
-    // Telemetry
-    let http_data = Arc::new(RwLock::default());
-    let data_clone = Arc::clone(&http_data);
-    let connections_clone = Arc::clone(&http_connections);
-    tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_millis(3_000)).await;
-            let data = connections_clone.data();
-            *data_clone.write().unwrap() = data;
-        }
-    });
-    let ssh_data = Arc::new(RwLock::default());
-    let data_clone = Arc::clone(&ssh_data);
-    let connections_clone = Arc::clone(&ssh_connections);
-    tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_millis(3_000)).await;
-            let data = connections_clone.data();
-            *data_clone.write().unwrap() = data;
-        }
-    });
-    let tcp_data = Arc::new(RwLock::default());
-    let data_clone = Arc::clone(&tcp_data);
-    let connections_clone = Arc::clone(&tcp_connections);
-    tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_millis(3_000)).await;
-            let data = connections_clone.data();
-            *data_clone.write().unwrap() = data;
         }
     });
 
