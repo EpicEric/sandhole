@@ -35,6 +35,7 @@ hyper-util = { version = "0.1", features = ["full"] }
 itertools = "0.13.0"
 log = "0.4.22"
 notify = "7.0.0"
+openssl = { version = "0.10.68", features = ["vendored"] }
 pretty-duration = "0.1.1"
 rand = "0.8.5"
 rand_chacha = "0.3.1"
