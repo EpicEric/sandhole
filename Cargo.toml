@@ -1,6 +1,6 @@
 [package]
 name = "sandhole"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Expose HTTP/SSH/TCP services through SSH port forwarding."
 repository = "https://github.com/EpicEric/sandhole"

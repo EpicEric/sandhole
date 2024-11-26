@@ -15,7 +15,7 @@ jobs:
   build-docker-images:
     name: Build Docker images
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' }} || ${{ github.ref_type == 'tag' }}
     steps:
       - uses: actions/checkout@v4
       - name: Collect Docker metadata
