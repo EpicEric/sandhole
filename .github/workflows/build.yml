@@ -1,4 +1,4 @@
-name: docker
+name: Build
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  build-docker:
+  build-docker-images:
     name: Build Docker images
     runs-on: ubuntu-latest
     steps:
@@ -58,7 +58,7 @@ jobs:
   create-release-draft:
     name: Create release draft
     if: github.ref_type == 'tag'
-    needs: build-docker
+    needs: build-docker-images
     runs-on: ubuntu-latest
     steps:
       - name: Download artifact

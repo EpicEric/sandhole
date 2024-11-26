@@ -1,5 +1,8 @@
 # sandhole
 
+[![crates.io version](https://img.shields.io/crates/v/sandhole)](https://crates.io/crates/sandhole)
+[![GitHub license](https://img.shields.io/github/license/epiceric/sandhole)](https://github.com/EpicEric/sandhole/blob/main/LICENSE)
+
 Expose HTTP/SSH/TCP services through SSH port forwarding.
 
 [Check out the Sandhole book.](https://epiceric.github.io/sandhole/)

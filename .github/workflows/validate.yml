@@ -1,0 +1,37 @@
+name: Validate
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rustfmt:
+    name: Check rustfmt formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run rustfmt
+        run: |
+          rustup component add rustfmt
+          cargo fmt --check
+  clippy:
+    name: Check Clippy lints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Clippy
+        run: |
+          rustup component add clippy
+          cargo clippy -- -D warnings
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: |
+          cargo test --verbose
