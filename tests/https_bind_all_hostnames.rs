@@ -29,7 +29,7 @@ use tokio_rustls::TlsConnector;
 use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn https_force_random_subdomains() {
+async fn https_bind_all_hostnames() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),

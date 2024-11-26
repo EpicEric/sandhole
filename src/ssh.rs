@@ -65,7 +65,17 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
     fn log_channel(&self) -> mpsc::UnboundedSender<Vec<u8>> {
         self.tx.clone()
     }
-    async fn tunneling_channel(
+
+    async fn tunneling_channel(&self, ip: &str, port: u16) -> anyhow::Result<ChannelStream<Msg>> {
+        let channel = self
+            .handle
+            .channel_open_forwarded_tcpip(self.address.clone(), self.port, ip, port.into())
+            .await?
+            .into_stream();
+        Ok(channel)
+    }
+
+    async fn aliasing_channel(
         &self,
         ip: &str,
         port: u16,
@@ -762,7 +772,7 @@ impl Handler for ServerHandler {
         if port_to_connect == self.server.http_port || port_to_connect == self.server.https_port {
             if let Some(handler) = self.server.http.get(host_to_connect) {
                 if let Ok(mut io) = handler
-                    .tunneling_channel(
+                    .aliasing_channel(
                         originator_address,
                         originator_port as u16,
                         self.key_fingerprint.clone(),
@@ -797,7 +807,7 @@ impl Handler for ServerHandler {
         } else if port_to_connect == self.server.ssh_port {
             if let Some(handler) = self.server.ssh.get(host_to_connect) {
                 if let Ok(mut io) = handler
-                    .tunneling_channel(
+                    .aliasing_channel(
                         originator_address,
                         originator_port as u16,
                         self.key_fingerprint.clone(),
@@ -835,7 +845,7 @@ impl Handler for ServerHandler {
             .get(&BorrowedTcpAlias(host_to_connect, &port_to_connect) as &dyn TcpAliasKey)
         {
             if let Ok(mut io) = handler
-                .tunneling_channel(
+                .aliasing_channel(
                     originator_address,
                     originator_port as u16,
                     self.key_fingerprint.clone(),

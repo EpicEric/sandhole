@@ -71,7 +71,6 @@ impl PortHandler for Arc<TcpHandler> {
                                 .tunneling_channel(
                                     &address.ip().to_canonical().to_string(),
                                     address.port(),
-                                    None,
                                 )
                                 .await
                             {

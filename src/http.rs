@@ -227,10 +227,7 @@ where
         .insert(X_FORWARDED_PORT, port.parse().unwrap());
     telemetry.add_http_request(host.clone());
 
-    let Ok(io) = handler
-        .tunneling_channel(&ip, tcp_address.port(), None)
-        .await
-    else {
+    let Ok(io) = handler.tunneling_channel(&ip, tcp_address.port()).await else {
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
     let tx = handler.log_channel();
@@ -588,7 +585,7 @@ mod proxy_handler_tests {
             .return_once(move || logging_tx);
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _, _| Ok(handler));
+            .return_once(move |_, _| Ok(handler));
         conn_manager
             .insert(
                 "with.handler".into(),
@@ -670,7 +667,7 @@ mod proxy_handler_tests {
             .return_once(move || logging_tx);
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _, _| Ok(handler));
+            .return_once(move |_, _| Ok(handler));
         conn_manager
             .insert(
                 "root.domain".into(),
@@ -752,7 +749,7 @@ mod proxy_handler_tests {
             .return_once(move || logging_tx);
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _, _| Ok(handler));
+            .return_once(move |_, _| Ok(handler));
         conn_manager
             .insert(
                 "with.websocket".into(),

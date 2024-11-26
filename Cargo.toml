@@ -28,6 +28,7 @@ crossterm = "0.28.1"
 dashmap = "6.1.0"
 env_logger = "0.11.5"
 hickory-resolver = "0.24.1"
+http = "1.1.0"
 http-body-util = "0.1.2"
 humantime = "2.1.0"
 hyper = { version = "1.5.0", features = ["full"] }
@@ -41,11 +42,11 @@ rand = "0.8.5"
 rand_chacha = "0.3.1"
 rand_seeder = "0.3.0"
 ratatui = "0.29.0"
-reqwest = { version = "0.12.9", features = ["rustls-tls-native-roots"] }
 russh = "0.46.0"
 russh-keys = "0.46.0"
 rustls = "0.23.16"
 rustls-acme = "0.12.1"
+rustls-platform-verifier = "0.4.0"
 rustls-webpki = "0.102.8"
 serde = "1.0.215"
 serde_json = "1.0.133"
@@ -57,7 +58,7 @@ tokio-stream = "0.1.16"
 trie-rs = "0.4.2"
 
 [dev-dependencies]
-axum = { version = "0.7.7", features = ["ws"] }
+axum = { version = "0.7.7", features = ["macros", "ws"] }
 futures-util = "0.3.31"
 mockall = "0.13.0"
 regex = "1.11.1"

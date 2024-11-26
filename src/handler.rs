@@ -7,7 +7,10 @@ use tokio::sync::mpsc;
 #[async_trait]
 pub(crate) trait ConnectionHandler<T: Sync> {
     fn log_channel(&self) -> mpsc::UnboundedSender<Vec<u8>>;
-    async fn tunneling_channel(
+
+    async fn tunneling_channel(&self, ip: &str, port: u16) -> anyhow::Result<T>;
+
+    async fn aliasing_channel(
         &self,
         ip: &str,
         port: u16,

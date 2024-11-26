@@ -1,7 +1,8 @@
 # sandhole
 
+[![GitHub Actions workflow status](https://img.shields.io/github/actions/workflow/status/EpicEric/sandhole/validate.yml?label=tests)](https://github.com/EpicEric/sandhole/actions/workflows/validate.yml)
 [![crates.io version](https://img.shields.io/crates/v/sandhole)](https://crates.io/crates/sandhole)
-[![GitHub license](https://img.shields.io/github/license/epiceric/sandhole)](https://github.com/EpicEric/sandhole/blob/main/LICENSE)
+[![GitHub license](https://img.shields.io/github/license/EpicEric/sandhole)](https://github.com/EpicEric/sandhole/blob/main/LICENSE)
 
 Expose HTTP/SSH/TCP services through SSH port forwarding.
 

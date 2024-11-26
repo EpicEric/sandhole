@@ -16,7 +16,7 @@ use tokio::{
 };
 
 #[tokio::test(flavor = "multi_thread")]
-async fn tcp_allow_requested_ports() {
+async fn tcp_aliasing_tunnel() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),
