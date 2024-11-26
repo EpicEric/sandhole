@@ -1,8 +1,11 @@
 name: Build
 
 on:
-  push:
+  workflow_run:
+    workflows: [Validate]
+    types: [completed]
     branches: ["main"]
+  push:
     tags: ["v*.*.*"]
 
 permissions:
@@ -12,6 +15,7 @@ jobs:
   build-docker-images:
     name: Build Docker images
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
       - name: Collect Docker metadata
@@ -69,4 +73,4 @@ jobs:
       - name: Create release draft with binary assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create ${{ github.ref_name }} ./out/* --draft
+        run: gh release create ${{ github.ref_name }} ./out/* --draft --verify-tag

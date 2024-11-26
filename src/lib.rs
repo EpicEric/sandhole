@@ -139,12 +139,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .await
         .with_context(|| "Error setting up public keys watcher")?,
     );
-    let api_login = Arc::new(
-        config
-            .password_authentication_url
-            .as_deref()
-            .map(ApiLogin::new),
-    );
+    let api_login = Arc::new(match config.password_authentication_url.as_deref() {
+        Some(url) => Some(ApiLogin::new(url)?),
+        None => None,
+    });
     let alpn_resolver: Box<dyn AlpnChallengeResolver> = match config.acme_contact_email {
         Some(contact) => {
             if config.https_port == 443 {

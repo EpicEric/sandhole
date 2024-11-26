@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::Context;
 use http::{
     header::{CONTENT_TYPE, HOST},
     uri::Scheme,
@@ -31,15 +32,23 @@ struct AuthenticationRequest<'a> {
 }
 
 impl ApiLogin {
-    pub(crate) fn new(endpoint: &str) -> Self {
-        let url: Uri = endpoint.parse().expect("Invalid endpoint for API login");
-        let scheme = url.scheme().expect("API login URL has no scheme").clone();
+    pub(crate) fn new(endpoint: &str) -> anyhow::Result<Self> {
+        let url: Uri = endpoint
+            .parse()
+            .with_context(|| "Invalid endpoint for API login")?;
+        let scheme = url
+            .scheme()
+            .with_context(|| "API login URL has no scheme")?
+            .clone();
         if scheme != Scheme::HTTP && scheme != Scheme::HTTPS {
             panic!("API login URL has unknown scheme (must be set to either http:// or https://)");
         }
-        let host = url.host().expect("API login URL has no host").to_string();
-        let server_name =
-            ServerName::try_from(host.clone()).expect("Invalid server name for API login URL");
+        let host = url
+            .host()
+            .with_context(|| "API login URL has no host")?
+            .to_string();
+        let server_name = ServerName::try_from(host.clone())
+            .with_context(|| "Invalid server name for API login URL")?;
         let address = format!(
             "{}:{}",
             host,
@@ -53,14 +62,14 @@ impl ApiLogin {
                 }
             })
         );
-        ApiLogin {
+        Ok(ApiLogin {
             url,
             address,
             scheme,
             host,
             server_name,
             config: Arc::new(ClientConfig::with_platform_verifier()),
-        }
+        })
     }
 
     pub(crate) async fn authenticate(&self, user: &str, password: &str) -> bool {
@@ -163,8 +172,27 @@ mod api_login_tests {
         let app = Router::new().route("/authentication", post(endpoint));
         let listener = TcpListener::bind("127.0.0.1:28011").await.unwrap();
         let jh = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let api_login = ApiLogin::new("http://localhost:28011/authentication".into());
+        let api_login = ApiLogin::new("http://localhost:28011/authentication".into()).unwrap();
         assert!(api_login.authenticate("eric", "sandhole").await);
+        jh.abort();
+    }
+
+    #[tokio::test]
+    async fn doesnt_authenticate_on_unsuccessful_response() {
+        async fn endpoint(Json(payload): Json<serde_json::Value>) -> impl IntoResponse {
+            if payload.get("user").unwrap() == "eric"
+                && payload.get("password").unwrap() == "sandhole"
+            {
+                (StatusCode::FORBIDDEN, "Success but rejected")
+            } else {
+                (StatusCode::OK, "Failure but allowed")
+            }
+        }
+        let app = Router::new().route("/authentication", post(endpoint));
+        let listener = TcpListener::bind("127.0.0.1:28012").await.unwrap();
+        let jh = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let api_login = ApiLogin::new("http://localhost:28012/authentication".into()).unwrap();
+        assert!(!api_login.authenticate("eric", "sandhole").await);
         jh.abort();
     }
 }
