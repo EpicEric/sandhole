@@ -27,6 +27,7 @@ use russh_keys::key::PublicKey;
 use tokio::{
     io::{copy_bidirectional, AsyncWriteExt},
     sync::{mpsc, oneshot, Mutex, RwLock},
+    task::JoinHandle,
     time::{sleep, timeout},
 };
 
@@ -60,6 +61,19 @@ impl SshTunnelHandler {
     }
 }
 
+impl Drop for SshTunnelHandler {
+    fn drop(&mut self) {
+        let _ = self.tx.send(
+            format!(
+                "\x1b[1;33mWARNING:\x1b[0m The handler for {}:{} has been dropped. \
+                No new connections will be accepted.\r\n",
+                self.address, self.port
+            )
+            .into_bytes(),
+        );
+    }
+}
+
 #[async_trait]
 impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
     fn log_channel(&self) -> mpsc::UnboundedSender<Vec<u8>> {
@@ -75,13 +89,13 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
         Ok(channel)
     }
 
-    async fn aliasing_channel(
+    async fn aliasing_channel<'a>(
         &self,
         ip: &str,
         port: u16,
-        fingerprint: Option<String>,
+        fingerprint: Option<&'a str>,
     ) -> anyhow::Result<ChannelStream<Msg>> {
-        if !(self.allow_fingerprint.read().await)(fingerprint.clone()) {
+        if !(self.allow_fingerprint.read().await)(fingerprint) {
             Err(ServerError::FingerprintDenied)?
         }
         let channel = self
@@ -93,7 +107,7 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
     }
 }
 
-type FingerprintFn = dyn Fn(Option<String>) -> bool + Send + Sync;
+type FingerprintFn = dyn Fn(Option<&str>) -> bool + Send + Sync;
 
 struct UserData {
     allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
@@ -102,8 +116,8 @@ struct UserData {
     ssh_hosts: HashSet<String>,
     http_hosts: HashSet<String>,
     tcp_aliases: HashSet<TcpAlias>,
-    host_addressing: HashMap<(String, u32), String>,
-    port_addressing: HashMap<(String, u32), TcpAlias>,
+    host_addressing: HashMap<TcpAlias, String>,
+    port_addressing: HashMap<TcpAlias, TcpAlias>,
 }
 
 impl Default for UserData {
@@ -173,6 +187,7 @@ pub(crate) struct ServerHandler {
     auth_data: AuthenticatedData,
     tx: mpsc::UnboundedSender<Vec<u8>>,
     rx: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
+    open_session_jh: Option<JoinHandle<()>>,
     server: Arc<SandholeServer>,
 }
 
@@ -204,6 +219,7 @@ impl Server for Arc<SandholeServer> {
             auth_data: AuthenticatedData::None,
             tx,
             rx: Some(rx),
+            open_session_jh: None,
             server: Arc::clone(self),
         }
     }
@@ -225,13 +241,14 @@ impl Handler for ServerHandler {
             return Err(russh::Error::Disconnect);
         }
         let mut stream = channel.into_stream();
-        tokio::spawn(async move {
+        let jh = tokio::spawn(async move {
             while let Some(message) = rx.recv().await {
                 if stream.write_all(&message).await.is_err() {
                     break;
                 }
             }
         });
+        self.open_session_jh = Some(jh);
         Ok(true)
     }
 
@@ -268,7 +285,12 @@ impl Handler for ServerHandler {
         user: &str,
         public_key: &PublicKey,
     ) -> Result<Auth, Self::Error> {
-        let fingerprint = public_key.fingerprint();
+        let mut fingerprint = public_key.fingerprint();
+        let split = fingerprint
+            .rfind(':')
+            .map(|idx| idx + 1)
+            .unwrap_or_default();
+        fingerprint.replace_range(..split, "");
         self.user = Some(user.to_string());
         self.key_fingerprint = Some(fingerprint);
         let authentication = self
@@ -374,7 +396,7 @@ impl Handler for ServerHandler {
                     .filter_map(|key| key.split(':').last().map(|k| k.to_string()))
                     .collect();
                 *user_data.allow_fingerprint.write().await =
-                    Box::new(move |fingerprint| fingerprint.is_some_and(|fp| set.contains(&fp)))
+                    Box::new(move |fingerprint| fingerprint.is_some_and(|fp| set.contains(fp)))
             }
             (Some(command), _) => {
                 debug!(
@@ -445,6 +467,9 @@ impl Handler for ServerHandler {
         port: &mut u32,
         session: &mut Session,
     ) -> Result<bool, Self::Error> {
+        if *port > u16::MAX.into() {
+            return Err(russh::Error::Disconnect);
+        }
         // Only allow remote forwarding for authorized keys
         let user_data = match &mut self.auth_data {
             AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
@@ -492,10 +517,6 @@ impl Handler for ServerHandler {
                     )
                     .is_ok()
                 {
-                    user_data.ssh_hosts.insert(assigned_host.clone());
-                    user_data
-                        .host_addressing
-                        .insert((address.to_string(), *port), assigned_host.clone());
                     info!("Serving SSH for {} ({})", &assigned_host, self.peer);
                     let _ = self.tx.send(
                         format!(
@@ -518,6 +539,10 @@ impl Handler for ServerHandler {
                         )
                         .into_bytes(),
                     );
+                    user_data.ssh_hosts.insert(assigned_host.clone());
+                    user_data
+                        .host_addressing
+                        .insert(TcpAlias(address.to_string(), *port as u16), assigned_host);
                     Ok(true)
                 } else {
                     info!("Rejecting SSH for {} ({})", &assigned_host, self.peer);
@@ -555,10 +580,6 @@ impl Handler for ServerHandler {
                     )
                     .is_ok()
                 {
-                    user_data.http_hosts.insert(assigned_host.clone());
-                    user_data
-                        .host_addressing
-                        .insert((address.to_string(), *port), assigned_host.clone());
                     info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
                     let _ = self.tx.send(
                         format!(
@@ -582,6 +603,10 @@ impl Handler for ServerHandler {
                         )
                         .into_bytes(),
                     );
+                    user_data.http_hosts.insert(assigned_host.clone());
+                    user_data
+                        .host_addressing
+                        .insert(TcpAlias(address.to_string(), *port as u16), assigned_host);
                     Ok(true)
                 } else {
                     info!("Rejecting HTTP for {} ({})", &assigned_host, self.peer);
@@ -643,7 +668,7 @@ impl Handler for ServerHandler {
                         .tcp_aliases
                         .insert(TcpAlias(tcp_alias.to_string(), assigned_port));
                     user_data.port_addressing.insert(
-                        (address.to_string(), *port),
+                        TcpAlias(address.to_string(), *port as u16),
                         TcpAlias(tcp_alias.to_string(), assigned_port),
                     );
                     if is_alias(address) {
@@ -710,6 +735,9 @@ impl Handler for ServerHandler {
         port: u32,
         _session: &mut Session,
     ) -> Result<bool, Self::Error> {
+        if port > u16::MAX.into() {
+            return Err(russh::Error::Disconnect);
+        }
         let user_data = match &mut self.auth_data {
             AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
                 user_data
@@ -720,9 +748,10 @@ impl Handler for ServerHandler {
         };
         match port {
             22 => {
-                if let Some(assigned_host) = user_data
-                    .host_addressing
-                    .remove(&(address.to_string(), port))
+                if let Some(assigned_host) =
+                    user_data
+                        .host_addressing
+                        .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                 {
                     self.server.ssh.remove(&assigned_host, self.peer);
                     user_data.ssh_hosts.remove(&assigned_host);
@@ -732,9 +761,10 @@ impl Handler for ServerHandler {
                 }
             }
             80 | 443 => {
-                if let Some(assigned_host) = user_data
-                    .host_addressing
-                    .remove(&(address.to_string(), port))
+                if let Some(assigned_host) =
+                    user_data
+                        .host_addressing
+                        .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                 {
                     self.server.http.remove(&assigned_host, self.peer);
                     user_data.http_hosts.remove(&assigned_host);
@@ -744,9 +774,10 @@ impl Handler for ServerHandler {
                 }
             }
             _ => {
-                if let Some(assigned_alias) = user_data
-                    .port_addressing
-                    .remove(&(address.to_string(), port))
+                if let Some(assigned_alias) =
+                    user_data
+                        .port_addressing
+                        .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                 {
                     let key: &dyn TcpAliasKey = assigned_alias.borrow();
                     self.server.tcp.remove(key, self.peer);
@@ -768,6 +799,9 @@ impl Handler for ServerHandler {
         originator_port: u32,
         _session: &mut Session,
     ) -> Result<bool, Self::Error> {
+        if port_to_connect > u16::MAX.into() || originator_port > u16::MAX.into() {
+            return Err(russh::Error::Disconnect);
+        }
         let port_to_connect = port_to_connect as u16;
         if port_to_connect == self.server.http_port || port_to_connect == self.server.https_port {
             if let Some(handler) = self.server.http.get(host_to_connect) {
@@ -775,7 +809,7 @@ impl Handler for ServerHandler {
                     .aliasing_channel(
                         originator_address,
                         originator_port as u16,
-                        self.key_fingerprint.clone(),
+                        self.key_fingerprint.as_ref().map(String::as_ref),
                     )
                     .await
                 {
@@ -810,7 +844,7 @@ impl Handler for ServerHandler {
                     .aliasing_channel(
                         originator_address,
                         originator_port as u16,
-                        self.key_fingerprint.clone(),
+                        self.key_fingerprint.as_ref().map(String::as_ref),
                     )
                     .await
                 {
@@ -848,7 +882,7 @@ impl Handler for ServerHandler {
                 .aliasing_channel(
                     originator_address,
                     originator_port as u16,
-                    self.key_fingerprint.clone(),
+                    self.key_fingerprint.as_ref().map(String::as_ref),
                 )
                 .await
             {
@@ -887,6 +921,7 @@ impl Handler for ServerHandler {
 
 impl Drop for ServerHandler {
     fn drop(&mut self) {
+        self.open_session_jh.take().map(|jh| jh.abort());
         match &mut self.auth_data {
             AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
                 for host in user_data.ssh_hosts.iter() {

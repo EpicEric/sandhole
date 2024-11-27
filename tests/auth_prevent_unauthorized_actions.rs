@@ -21,7 +21,7 @@ use tokio::{
 ///
 /// This test ensures that any other actions result in an error with a disconnect.
 #[tokio::test(flavor = "multi_thread")]
-async fn prevent_unauthorized_actions() {
+async fn auth_prevent_unauthorized_actions() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),

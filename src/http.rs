@@ -49,27 +49,27 @@ fn http_log(data: HttpLog, tx: Option<mpsc::UnboundedSender<Vec<u8>>>, disable_h
         elapsed_time,
     } = data;
     let status_escape_color = match status {
-        100..=199 => "37m",
-        200..=299 => "34m",
-        300..=399 => "32m",
-        400..=499 => "33m",
-        500..=599 => "31m",
+        100..=199 => "37",
+        200..=299 => "34",
+        300..=399 => "32",
+        400..=499 => "33",
+        500..=599 => "31",
         _ => unreachable!(),
     };
     let method_escape_color = match method {
-        "POST" => "42m",
-        "PUT" => "43m",
-        "DELETE" => "41m",
-        "HEAD" => "46m",
-        "OPTIONS" => "45m",
-        "CONNECT" => "45m",
-        "PATCH" => "43m",
-        "TRACE" => "45m",
+        "POST" => "42",
+        "PUT" => "43",
+        "DELETE" => "41",
+        "HEAD" => "46",
+        "OPTIONS" => "45",
+        "CONNECT" => "45",
+        "PATCH" => "43",
+        "TRACE" => "45",
         // GET or other
-        _ => "44m",
+        _ => "44",
     };
     let line = format!(
-        " \x1b[2m{:19}\x1b[22m \x1b[{}[{:3}] \x1b[0;1;30;{}{:^7}\x1b[0m {} => {} \x1b[2m({}) {}\x1b[0m\r\n",
+        " \x1b[2m{:19}\x1b[22m \x1b[{}m[{:3}] \x1b[0;1;30;{}m{:^7}\x1b[0m {} => {} \x1b[2m({}) {}\x1b[0m\r\n",
         chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
         status_escape_color,
         status,

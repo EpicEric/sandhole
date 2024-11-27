@@ -1,10 +1,12 @@
 use std::{
     io,
+    net::SocketAddr,
     ops::DerefMut,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
+use itertools::Itertools;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Margin, Rect},
@@ -24,7 +26,7 @@ use tokio::{
     time::sleep,
 };
 
-use crate::SandholeServer;
+use crate::{tcp_alias::TcpAlias, SandholeServer};
 
 struct BufferedSender {
     tx: UnboundedSender<Vec<u8>>,
@@ -75,6 +77,14 @@ impl Tab {
             Tab::Tcp => 2,
         }
     }
+
+    fn style(&self) -> Style {
+        match self {
+            Tab::Http => Style::new().blue(),
+            Tab::Ssh => Style::new().yellow(),
+            Tab::Tcp => Style::new().green(),
+        }
+    }
 }
 
 struct AdminState {
@@ -83,6 +93,15 @@ struct AdminState {
     tab: Tab,
     table_state: TableState,
     scroll_state: ScrollbarState,
+}
+
+fn to_socket_addr_string(addr: SocketAddr) -> String {
+    let ip = addr.ip();
+    if ip.is_ipv4() {
+        format!("{}:{}", ip.to_canonical(), addr.port())
+    } else {
+        addr.to_string()
+    }
 }
 
 impl AdminState {
@@ -105,11 +124,7 @@ impl AdminState {
                     .areas(area.inner(Margin::new(2, 2)));
             Tab::render(tabs_area, buf, self.tab.index());
             Block::bordered()
-                .border_style(match self.tab {
-                    Tab::Http => Style::new().blue(),
-                    Tab::Ssh => Style::new().yellow(),
-                    Tab::Tcp => Style::new().green(),
-                })
+                .border_style(self.tab.style())
                 .border_set(border::PROPORTIONAL_TALL)
                 .render(inner_area, buf);
             self.render_tab(inner_area.inner(Margin::new(2, 1)), buf);
@@ -131,15 +146,12 @@ impl AdminState {
             Tab::Http => {
                 let data = self.server.http_data.read().unwrap().clone();
                 self.scroll_state = self.scroll_state.content_length(data.len());
-                let rows = data.into_iter().map(|(k, v)| {
-                    let len = v.0.len() as u16;
+                let rows = data.into_iter().map(|(host, (peers, req_per_min))| {
+                    let len = peers.len() as u16;
                     Row::new(vec![
-                        k,
-                        v.0.into_iter()
-                            .map(|addr| addr.to_string())
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                        v.1.to_string(),
+                        host,
+                        peers.into_iter().map(to_socket_addr_string).join("\n"),
+                        req_per_min.to_string(),
                     ])
                     .height(len)
                 });
@@ -167,14 +179,11 @@ impl AdminState {
             Tab::Ssh => {
                 let data = self.server.ssh_data.read().unwrap().clone();
                 self.scroll_state = self.scroll_state.content_length(data.len());
-                let rows = data.into_iter().map(|(k, v)| {
-                    let len = v.len() as u16;
+                let rows = data.into_iter().map(|(host, peers)| {
+                    let len = peers.len() as u16;
                     Row::new(vec![
-                        k,
-                        v.into_iter()
-                            .map(|addr| addr.to_string())
-                            .collect::<Vec<_>>()
-                            .join("\n"),
+                        host,
+                        peers.into_iter().map(to_socket_addr_string).join("\n"),
                     ])
                     .height(len)
                 });
@@ -198,15 +207,12 @@ impl AdminState {
             Tab::Tcp => {
                 let data = self.server.tcp_data.read().unwrap().clone();
                 self.scroll_state = self.scroll_state.content_length(data.len());
-                let rows = data.into_iter().map(|(k, v)| {
-                    let len = v.len() as u16;
+                let rows = data.into_iter().map(|(TcpAlias(alias, port), peers)| {
+                    let len = peers.len() as u16;
                     Row::new(vec![
-                        k.0,
-                        k.1.to_string(),
-                        v.into_iter()
-                            .map(|addr| addr.to_string())
-                            .collect::<Vec<_>>()
-                            .join("\n"),
+                        alias,
+                        port.to_string(),
+                        peers.into_iter().map(to_socket_addr_string).join("\n"),
                     ])
                     .height(len)
                 });

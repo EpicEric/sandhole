@@ -10,10 +10,10 @@ pub(crate) trait ConnectionHandler<T: Sync> {
 
     async fn tunneling_channel(&self, ip: &str, port: u16) -> anyhow::Result<T>;
 
-    async fn aliasing_channel(
+    async fn aliasing_channel<'a>(
         &self,
         ip: &str,
         port: u16,
-        fingerprint: Option<String>,
+        fingerprint: Option<&'a str>,
     ) -> anyhow::Result<T>;
 }

@@ -123,6 +123,13 @@ Options:
 
           Possible values:
           - allow:   Load-balance with all available handlers
+          - replace: Don't load-balance; When adding a new handler, replace the
+                     existing one
+          - deny:    Don't load-balance; Deny the new handler if there's an
+                     existing one
+
+          Possible values:
+          - allow:   Load-balance with all available handlers
           - replace: When adding a new handler, replace the existing one
           - deny:    Deny the new handler if there's an existing one
 

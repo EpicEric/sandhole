@@ -61,9 +61,9 @@ impl From<BindHostnames> for BHConfig {
 pub enum LoadBalancing {
     /// Load-balance with all available handlers.
     Allow,
-    /// When adding a new handler, replace the existing one.
+    /// Don't load-balance; When adding a new handler, replace the existing one.
     Replace,
-    /// Deny the new handler if there's an existing one
+    /// Don't load-balance; Deny the new handler if there's an existing one.
     Deny,
 }
 

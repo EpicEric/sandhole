@@ -23,6 +23,9 @@ pub enum LoadBalancing {
     Deny,
 }
 
+/// List of user-defined configurations for Sandhole.
+///
+/// Instead of constructing this directly, you should use the Sandhole CLI.
 #[derive(Debug)]
 pub struct ApplicationConfig {
     pub domain: String,

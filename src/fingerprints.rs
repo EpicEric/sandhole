@@ -74,12 +74,16 @@ impl FingerprintsValidator {
                                                     .flat_map(|line| {
                                                         PublicKey::from_openssh(line).ok()
                                                     })
-                                                    .flat_map(|key| {
-                                                        key.fingerprint(HashAlg::Sha256)
-                                                            .to_string()
-                                                            .split(':')
-                                                            .nth(1)
-                                                            .map(str::to_string)
+                                                    .map(|key| {
+                                                        let mut fingerprint = key
+                                                            .fingerprint(HashAlg::Sha256)
+                                                            .to_string();
+                                                        let split = fingerprint
+                                                            .rfind(':')
+                                                            .map(|idx| idx + 1)
+                                                            .unwrap_or_default();
+                                                        fingerprint.replace_range(..split, "");
+                                                        fingerprint
                                                     }),
                                             );
                                         }
@@ -114,12 +118,16 @@ impl FingerprintsValidator {
                                                     .flat_map(|line| {
                                                         PublicKey::from_openssh(line).ok()
                                                     })
-                                                    .flat_map(|key| {
-                                                        key.fingerprint(HashAlg::Sha256)
-                                                            .to_string()
-                                                            .split(':')
-                                                            .nth(1)
-                                                            .map(str::to_string)
+                                                    .map(|key| {
+                                                        let mut fingerprint = key
+                                                            .fingerprint(HashAlg::Sha256)
+                                                            .to_string();
+                                                        let split = fingerprint
+                                                            .rfind(':')
+                                                            .map(|idx| idx + 1)
+                                                            .unwrap_or_default();
+                                                        fingerprint.replace_range(..split, "");
+                                                        fingerprint
                                                     }),
                                             );
                                         }

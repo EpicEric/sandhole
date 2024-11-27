@@ -1,7 +1,11 @@
+//!
+#![doc = include_str!("../README.md")]
+//!
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     marker::PhantomData,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::{Arc, RwLock},
     time::Duration,
 };
@@ -88,6 +92,9 @@ pub(crate) struct SandholeServer {
     pub(crate) idle_connection_timeout: Duration,
 }
 
+/// The main entrypoint of the application.
+///
+/// Instead of calling this directly, you should use the Sandhole CLI.
 pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     // Initialize crypto and credentials
     rustls::crypto::aws_lc_rs::default_provider()
@@ -121,6 +128,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         }
         Err(err) => return Err(err).with_context(|| "Error reading secret key"),
     };
+    let listen_address: IpAddr = config
+        .listen_address
+        .parse()
+        .with_context(|| "Couldn't parse listen address")?;
 
     // Initialize modules
     if !config.disable_directory_creation {
@@ -246,7 +257,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     });
 
     // HTTP handlers
-    let http_listener = TcpListener::bind((config.listen_address.clone(), config.http_port))
+    let http_listener = TcpListener::bind((listen_address, config.http_port))
         .await
         .with_context(|| "Error listening to HTTP port and address")?;
     let http_map = Arc::clone(&http_connections);
@@ -294,7 +305,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     });
 
     // HTTPS handlers
-    let https_listener = TcpListener::bind((config.listen_address.clone(), config.https_port))
+    let https_listener = TcpListener::bind((listen_address, config.https_port))
         .await
         .with_context(|| "Error listening to HTTP port and address")?;
     let certificates_clone = Arc::clone(&certificates);
@@ -351,14 +362,20 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                                     let _ = conn.await;
                                 }
                                 Err(err) => {
-                                    warn!("Error establishing TLS connection: {}", err);
+                                    warn!(
+                                        "Error establishing TLS connection with {}: {}",
+                                        address, err
+                                    );
                                 }
                             }
                         });
                     }
                 }
                 Err(err) => {
-                    warn!("Failed to establish TLS handshake: {}", err);
+                    warn!(
+                        "Failed to establish TLS handshake with {}: {}",
+                        address, err
+                    );
                     continue;
                 }
             }
@@ -392,7 +409,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         authentication_request_timeout: config.authentication_request_timeout,
         idle_connection_timeout: config.idle_connection_timeout,
     });
-    let ssh_listener = TcpListener::bind((config.listen_address.clone(), config.ssh_port))
+    let ssh_listener = TcpListener::bind((listen_address, config.ssh_port))
         .await
         .with_context(|| "Error listening to SSH port and address")?;
     info!("sandhole is now running.");
@@ -416,7 +433,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             tokio::select! {
                 result = &mut session => {
                     if let Err(err) = result {
-                        warn!("Connection closed with error: {}", err);
+                        warn!("Connection with {} closed with error: {}", address, err);
                     }
                 }
                 _ = rx => {
