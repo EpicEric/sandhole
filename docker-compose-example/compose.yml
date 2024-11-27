@@ -16,9 +16,11 @@ services:
     volumes:
       - ./letsencrypt:/letsencrypt
       - ./deploy:/deploy
-    # See https://epiceric.github.io/sandhole/cli.html
+    # See also: https://epiceric.github.io/sandhole/cli.html
+    # Make sure to change at least --domain and --acme-contact-email below
     command: |
       --domain=server.com
+      --acme-contact-email=admin@server.com
       --user-keys-directory=/deploy/user_keys/
       --admin-keys-directory=/deploy/admin_keys/
       --certificates-directory=/letsencrypt/live/
@@ -28,6 +30,5 @@ services:
       --http-port=80
       --https-port=443
       --force-https
-      --acme-contact-email=admin@server.com
     network_mode: host
     restart: unless-stopped

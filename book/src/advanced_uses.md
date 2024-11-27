@@ -21,8 +21,10 @@ Then you can access `localhost:4000`, and all traffic will be redirected to port
 If you'd like to restrict which users can access your service, you can provide the allowed fingerprints as a comma-separated list at the end of the command, like so:
 
 ```shell
-ssh -R my.tunnel:3000:localhost:2000 server.com -p 2222 allowed-fingerprints=SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ
+ssh -R my.tunnel:3000:localhost:2000 server.com -p 2222 allowed-fingerprints=SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ,SHA256:bwf4FDtNeZzFv8xHBzHJwRpDRxssCll8w2tCHFC9n1o
 ```
+
+This only works for TCP aliases, and will be ignored for HTTP.
 
 ## Custom domains
 

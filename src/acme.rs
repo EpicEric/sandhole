@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
-use log::warn;
+use log::{info, warn};
 use rustls::{
     server::{ClientHello, ResolvesServerCert},
     sign::CertifiedKey,
@@ -43,6 +43,10 @@ impl AlpnChallengeResolver for AcmeResolver {
         if let Some(jh) = self.join_handle.take() {
             jh.abort();
         }
+        info!(
+            "Generating ACME certificates for the following domains: {:?}",
+            &domains
+        );
         let mut new_state = AcmeConfig::new(domains)
             .contact_push(format!("mailto:{}", self.contact))
             .cache(DirCache::new(self.cache_dir.clone()))

@@ -1,6 +1,6 @@
 # Admin interface
 
-Sandhole comes with a barebones admin interface available through SSH. In order to access it, you must be a [user with admin credentials](./configuration.md#adding-users-and-admins).
+Sandhole comes with a barebones command-line admin interface available through SSH. In order to access it, you must be a [user with admin credentials](./configuration.md#adding-users-and-admins).
 
 To access it, simply run the command:
 

@@ -6,7 +6,7 @@ Now that you have a Sandhole instance running, and you [authorized your public k
 ssh -R 80:localhost:3000 server.com -p 2222
 ```
 
-Yep, that's it! Sandhole will log that HTTP is being served for you, and you can access the provided URL to see that your service is available to the public.
+Yep, that's it! Sandhole will log that HTTP is being served for you on a certain subdomain, and you can access the provided URL to see that your service is available to the public.
 
 For HTTP and HTTPS services, Websockets work out of the box.
 
@@ -38,6 +38,6 @@ ssh -R 4321:localhost:3000 server.com -p 2222
 ssh -R localhost:4321:localhost:3000 server.com -p 2222
 ```
 
-### Automatic reconnection
+## Automatic reconnection
 
 If you'd like to have persistent tunnels, use a tool like `autossh` with the `-M 0` option to automatically reconnect when disconnected. Note that you'll be assigned a new subdomain/port if the option above is not enabled, depending on the server configuration.

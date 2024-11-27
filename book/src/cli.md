@@ -128,11 +128,6 @@ Options:
           - deny:    Don't load-balance; Deny the new handler if there's an
                      existing one
 
-          Possible values:
-          - allow:   Load-balance with all available handlers
-          - replace: When adding a new handler, replace the existing one
-          - deny:    Deny the new handler if there's an existing one
-
       --txt-record-prefix <TXT_RECORD_PREFIX>
           Prefix for TXT DNS records containing key fingerprints, for
           authorization to bind under a specific domain.
