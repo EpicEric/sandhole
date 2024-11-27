@@ -921,7 +921,9 @@ impl Handler for ServerHandler {
 
 impl Drop for ServerHandler {
     fn drop(&mut self) {
-        self.open_session_jh.take().map(|jh| jh.abort());
+        if let Some(jh) = self.open_session_jh.take() {
+            jh.abort()
+        };
         match &mut self.auth_data {
             AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
                 for host in user_data.ssh_hosts.iter() {
