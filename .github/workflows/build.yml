@@ -24,6 +24,8 @@ jobs:
         with:
           images: |
             ${{ vars.DOCKERHUB_USERNAME }}/sandhole
+            ghcr.io/${{ github.repository }}
+            ${{ vars.REGISTRY_HOSTNAME }}/${{ vars.REGISTRY_USERNAME }}/sandhole
           tags: |
             type=ref,event=branch
             type=sha,prefix=,suffix=,enable={{is_default_branch}}
@@ -38,6 +40,18 @@ jobs:
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PUSH_TOKEN  }}
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to custom registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.REGISTRY_HOSTNAME }}
+          username: ${{ vars.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PUSH_TOKEN }}
       - name: Build and push
         uses: docker/build-push-action@v6
         with:

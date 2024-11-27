@@ -96,9 +96,9 @@ struct AdminState {
 }
 
 fn to_socket_addr_string(addr: SocketAddr) -> String {
-    let ip = addr.ip();
+    let ip = addr.ip().to_canonical();
     if ip.is_ipv4() {
-        format!("{}:{}", ip.to_canonical(), addr.port())
+        format!("{}:{}", ip, addr.port())
     } else {
         addr.to_string()
     }

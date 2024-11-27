@@ -11,7 +11,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 ## Features
 
 - Reverse proxy that only requires your services to have a regular SSH client.
-- Automatic HTTPS support (with a tool like [dnsrobocert](https://github.com/adferrand/dnsrobocert) and/or ACME).
+- Automatic HTTPS support (with [dnsrobocert](https://github.com/adferrand/dnsrobocert) and/or ACME).
 - Random subdomain assignment by default, with options for deterministic assignment.
 - Easily balance load by pointing multiple services to the same domain/port.
 - Authorize keys for custom domains with DNS, via TXT records.
@@ -20,7 +20,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
 ## Status
 
-This is still in early development, and mostly serves as an experiment. Contributions are welcome, but try it in production at your own risk.
+This is still in early development. Contributions are welcome, but try it in production at your own risk.
 
 ## Alternatives
 
