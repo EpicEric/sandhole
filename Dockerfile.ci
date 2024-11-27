@@ -18,8 +18,8 @@ FROM --platform=$BUILDPLATFORM scratch AS binary
 COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/sandhole /sandhole-linux-amd64
 COPY --from=builder /app/target/aarch64-unknown-linux-musl/release/sandhole /sandhole-linux-arm64
 
-FROM alpine:3.20 AS runner
+FROM scratch AS runner
 ARG TARGETOS
 ARG TARGETARCH
-COPY --from=binary /sandhole-${TARGETOS}-${TARGETARCH} /usr/local/bin/sandhole
-ENTRYPOINT [ "sandhole" ]
+COPY --from=binary /sandhole-${TARGETOS}-${TARGETARCH} /sandhole
+ENTRYPOINT [ "/sandhole" ]
