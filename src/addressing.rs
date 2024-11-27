@@ -11,7 +11,10 @@ use rand_chacha::ChaCha20Rng;
 use rand_seeder::SipHasher;
 use webpki::types::DnsName;
 
-use crate::config::{BindHostnames, RandomSubdomainSeed};
+use crate::{
+    config::{BindHostnames, RandomSubdomainSeed},
+    tcp::is_alias,
+};
 
 pub(crate) struct DnsResolver(TokioAsyncResolver);
 
@@ -159,7 +162,7 @@ impl<R: Resolver> AddressDelegator<R> {
                     return format!("{}.{}", address, self.root_domain);
                 }
             }
-            if requested_address != "localhost" {
+            if is_alias(requested_address) {
                 warn!(
                     "Invalid address requested ({}), defaulting to random",
                     requested_address

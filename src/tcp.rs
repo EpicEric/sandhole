@@ -11,6 +11,12 @@ use dashmap::DashMap;
 use log::error;
 use tokio::{io::copy_bidirectional, net::TcpListener, task::JoinHandle, time::timeout};
 
+pub(crate) static NO_ALIAS_HOST: &str = "localhost";
+
+pub(crate) fn is_alias(address: &str) -> bool {
+    address != "localhost" && !address.is_empty() && address != "*"
+}
+
 pub(crate) struct TcpHandler {
     listen_address: String,
     sockets: DashMap<u16, DroppableHandle<()>>,
@@ -65,7 +71,7 @@ impl PortHandler for Arc<TcpHandler> {
             loop {
                 match listener.accept().await {
                     Ok((mut stream, address)) => {
-                        let key: &dyn TcpAliasKey = &BorrowedTcpAlias("localhost", &port);
+                        let key: &dyn TcpAliasKey = &BorrowedTcpAlias(NO_ALIAS_HOST, &port);
                         if let Some(handler) = clone.conn_manager.get(key) {
                             if let Ok(mut channel) = handler
                                 .tunneling_channel(
@@ -117,7 +123,7 @@ impl ConnectionMapReactor<TcpAlias> for Arc<TcpHandler> {
         let mut ports: HashSet<u16> = ports
             .into_iter()
             .filter_map(|TcpAlias(address, port)| {
-                if address == "localhost" {
+                if address == NO_ALIAS_HOST {
                     Some(port)
                 } else {
                     None

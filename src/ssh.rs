@@ -12,7 +12,7 @@ use crate::{
     error::ServerError,
     fingerprints::AuthenticationType,
     handler::ConnectionHandler,
-    tcp::PortHandler,
+    tcp::{is_alias, PortHandler, NO_ALIAS_HOST},
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
     SandholeServer,
 };
@@ -645,7 +645,7 @@ impl Handler for ServerHandler {
                 let tcp_alias = if is_alias(address) {
                     address
                 } else {
-                    "localhost"
+                    NO_ALIAS_HOST
                 };
                 if self
                     .server
@@ -940,8 +940,4 @@ impl Drop for ServerHandler {
         }
         info!("{} disconnected", self.peer);
     }
-}
-
-fn is_alias(address: &str) -> bool {
-    address != "localhost" && !address.is_empty() && address != "*"
 }

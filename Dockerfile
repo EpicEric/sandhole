@@ -8,6 +8,7 @@ RUN mkdir src \
   && cargo build --release \
   && rm src/main.rs
 COPY src ./src
+COPY README.md .
 RUN cargo build --release
 
 FROM alpine:3.20 AS runner
