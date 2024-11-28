@@ -6,12 +6,13 @@ use std::{
     time::Duration,
 };
 
+use human_bytes::human_bytes;
 use itertools::Itertools;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Margin, Rect},
     prelude::CrosstermBackend,
-    style::{Style, Stylize},
+    style::{Modifier, Style, Stylize},
     symbols::border,
     text::{Line, Text},
     widgets::{
@@ -26,7 +27,7 @@ use tokio::{
     time::sleep,
 };
 
-use crate::{tcp_alias::TcpAlias, SandholeServer};
+use crate::{tcp_alias::TcpAlias, SandholeServer, SystemData};
 
 struct BufferedSender {
     tx: UnboundedSender<Vec<u8>>,
@@ -119,10 +120,15 @@ impl AdminState {
                 .title_bottom(instructions.centered())
                 .border_set(border::THICK);
             block.render(area, buf);
-            let [tabs_area, inner_area] =
-                Layout::vertical([Constraint::Length(1), Constraint::Min(0)])
-                    .areas(area.inner(Margin::new(2, 2)));
+            let [system_data_area, _, tabs_area, inner_area] = Layout::vertical([
+                Constraint::Length(4),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .areas(area.inner(Margin::new(2, 2)));
             Tab::render(tabs_area, buf, self.tab.index());
+            self.render_system_data(system_data_area, buf);
             Block::bordered()
                 .border_style(self.tab.style())
                 .border_set(border::PROPORTIONAL_TALL)
@@ -160,7 +166,8 @@ impl AdminState {
                     Constraint::Length(47),
                     Constraint::Min(7),
                 ];
-                let header = Row::new(["Host", "Peer(s)", "Req/min"]);
+                let header =
+                    Row::new(["Host", "Peer(s)", "Req/min"]).add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("HTTP services".blue().bold()).centered());
                 let table = Table::new(rows, constraints)
@@ -171,7 +178,7 @@ impl AdminState {
                 StatefulWidget::render(table, area, buf, &mut self.table_state);
                 StatefulWidget::render(
                     Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-                    area.inner(Margin::new(1, 1)),
+                    area.inner(Margin::new(0, 1)),
                     buf,
                     &mut self.scroll_state,
                 );
@@ -188,7 +195,7 @@ impl AdminState {
                     .height(len)
                 });
                 let constraints = [Constraint::Min(25), Constraint::Length(47)];
-                let header = Row::new(["Host", "Peer(s)"]);
+                let header = Row::new(["Host", "Peer(s)"]).add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("SSH services".yellow().bold()).centered());
                 let table = Table::new(rows, constraints)
@@ -199,7 +206,7 @@ impl AdminState {
                 StatefulWidget::render(table, area, buf, &mut self.table_state);
                 StatefulWidget::render(
                     Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-                    area.inner(Margin::new(1, 1)),
+                    area.inner(Margin::new(0, 1)),
                     buf,
                     &mut self.scroll_state,
                 );
@@ -221,7 +228,8 @@ impl AdminState {
                     Constraint::Length(5),
                     Constraint::Length(47),
                 ];
-                let header = Row::new(["Alias", "Port", "Peer(s)"]);
+                let header =
+                    Row::new(["Alias", "Port", "Peer(s)"]).add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("TCP services".green().bold()).centered());
                 let table = Table::new(rows, constraints)
@@ -232,12 +240,56 @@ impl AdminState {
                 StatefulWidget::render(table, area, buf, &mut self.table_state);
                 StatefulWidget::render(
                     Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-                    area.inner(Margin::new(1, 1)),
+                    area.inner(Margin::new(0, 1)),
                     buf,
                     &mut self.scroll_state,
                 );
             }
         }
+    }
+
+    fn render_system_data(&mut self, area: Rect, buf: &mut Buffer) {
+        let SystemData {
+            used_memory,
+            total_memory,
+            network_tx,
+            network_rx,
+            cpu_usage,
+        } = self.server.system_data.read().unwrap().clone();
+        let block = Block::bordered().title("System information");
+        let [left_area, right_area] =
+            Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
+                .areas(block.inner(area));
+        let [cpu_area, memory_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(left_area);
+        let [tx_area, rx_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(right_area);
+        let cpu_usage = Line::from(vec![
+            "  CPU%  ".bold().reversed(),
+            format!(" {:.1} %", cpu_usage).into(),
+        ]);
+        let memory_usage = Line::from(vec![
+            " Memory ".bold().reversed(),
+            format!(
+                " {} / {}",
+                human_bytes(used_memory as f64),
+                human_bytes(total_memory as f64)
+            )
+            .into(),
+        ]);
+        let network_tx = Line::from(vec![
+            "   TX   ".bold().reversed(),
+            format!(" {}/s", human_bytes(network_tx as f64)).into(),
+        ]);
+        let network_rx = Line::from(vec![
+            "   RX   ".bold().reversed(),
+            format!(" {}/s", human_bytes(network_rx as f64)).into(),
+        ]);
+        Widget::render(block, area, buf);
+        Widget::render(cpu_usage, cpu_area, buf);
+        Widget::render(memory_usage, memory_area, buf);
+        Widget::render(network_tx, tx_area, buf);
+        Widget::render(network_rx, rx_area, buf);
     }
 }
 
@@ -251,8 +303,6 @@ pub(crate) struct AdminInterface {
     jh: JoinHandle<()>,
     change_notifier: watch::Sender<()>,
 }
-
-//struct TerminalApp(Terminal<CrosstermBackend<BufferedSender>>);
 
 impl AdminInterface {
     pub(crate) fn new(tx: UnboundedSender<Vec<u8>>, server: Arc<SandholeServer>) -> Self {

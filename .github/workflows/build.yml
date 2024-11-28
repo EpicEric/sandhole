@@ -89,4 +89,4 @@ jobs:
       - name: Create release draft with binary assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create ${{ github.ref_name }} ./out/* --draft --verify-tag
+        run: gh release create ${{ github.ref_name }} ./out/sandhole-* --draft --verify-tag

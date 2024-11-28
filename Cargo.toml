@@ -30,6 +30,7 @@ env_logger = "0.11.5"
 hickory-resolver = "0.24.1"
 http = "1.1.0"
 http-body-util = "0.1.2"
+human_bytes = { version = "0.4.3", default-features = false }
 humantime = "2.1.0"
 hyper = { version = "1.5.0", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
@@ -51,6 +52,7 @@ rustls-webpki = "0.102.8"
 serde = "1.0.215"
 serde_json = "1.0.133"
 ssh-key = "0.6.7"
+sysinfo = "0.32.1"
 thiserror = "2.0.3"
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = "0.26.0"

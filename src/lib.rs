@@ -22,6 +22,7 @@ use russh::server::Config;
 use russh_keys::decode_secret_key;
 use rustls::ServerConfig;
 use rustls_acme::is_tls_alpn_challenge;
+use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
 use tcp::TcpHandler;
 use tcp_alias::TcpAlias;
 use telemetry::Telemetry;
@@ -71,6 +72,15 @@ impl ConnectionMapReactor<String> for HttpReactor {
     }
 }
 
+#[derive(Default, Clone)]
+struct SystemData {
+    used_memory: u64,
+    total_memory: u64,
+    network_tx: u64,
+    network_rx: u64,
+    cpu_usage: f32,
+}
+
 #[derive(Clone)]
 pub(crate) struct SandholeServer {
     pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
@@ -79,6 +89,7 @@ pub(crate) struct SandholeServer {
     pub(crate) http_data: Arc<DataTable<String, (BTreeSet<SocketAddr>, f64)>>,
     pub(crate) ssh_data: Arc<DataTable<String, BTreeSet<SocketAddr>>>,
     pub(crate) tcp_data: Arc<DataTable<TcpAlias, BTreeSet<SocketAddr>>>,
+    pub(crate) system_data: Arc<RwLock<SystemData>>,
     pub(crate) fingerprints_validator: Arc<FingerprintsValidator>,
     pub(crate) api_login: Arc<Option<ApiLogin>>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
@@ -255,6 +266,36 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             *data_clone.write().unwrap() = data;
         }
     });
+    let sys_data = Arc::new(RwLock::default());
+    let data_clone = Arc::clone(&sys_data);
+    tokio::spawn(async move {
+        let system_refresh = RefreshKind::new()
+            .with_cpu(CpuRefreshKind::new().with_cpu_usage())
+            .with_memory(MemoryRefreshKind::new().with_ram());
+        let mut system = System::new_with_specifics(system_refresh);
+        let mut networks = Networks::new_with_refreshed_list();
+        loop {
+            sleep(Duration::from_millis(1_000)).await;
+            system.refresh_specifics(system_refresh);
+            networks.refresh();
+            let (network_tx, network_rx) = match networks
+                .values()
+                .map(|data| (data.transmitted(), data.received()))
+                .reduce(|acc, elem| (acc.0 + elem.0, acc.1 + elem.1))
+            {
+                Some((tx, rx)) => (tx, rx),
+                None => (0, 0),
+            };
+            let data = SystemData {
+                cpu_usage: system.global_cpu_usage() / system.cpus().len() as f32,
+                used_memory: system.used_memory(),
+                total_memory: system.total_memory(),
+                network_tx,
+                network_rx,
+            };
+            *data_clone.write().unwrap() = data;
+        }
+    });
 
     // HTTP handlers
     let http_listener = TcpListener::bind((listen_address, config.http_port))
@@ -397,6 +438,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         http_data,
         ssh_data,
         tcp_data,
+        system_data: sys_data,
         fingerprints_validator: fingerprints,
         api_login,
         address_delegator: addressing,
