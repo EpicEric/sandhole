@@ -34,13 +34,22 @@ impl Counter {
             let Some(element) = self.history.front() else {
                 break self.count;
             };
-            if element.0.elapsed() < self.window {
+            if element.1 == self.count {
+                self.history.pop_front();
+                break self.count;
+            } else if element.0.elapsed() < self.window {
                 break element.1;
             } else {
                 self.history.pop_front();
             }
         };
-        self.history.push_back((Instant::now(), self.count));
+        if let Some(element) = self.history.back() {
+            if element.1 != self.count {
+                self.history.push_back((Instant::now(), self.count));
+            }
+        } else {
+            self.history.push_back((Instant::now(), self.count));
+        }
         (self.count - delta) as f64 / self.period
     }
 }
