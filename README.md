@@ -26,7 +26,4 @@ This is still in early development. Contributions are welcome, but try it in pro
 
 - [sish](https://github.com/antoniomika/sish/) - My favorite one. Written in Golang.
 - [rlt](https://github.com/kaichaosun/rlt) - Uses own protocol instead of SSH. Written in Rust.
-- [localhost.run](https://localhost.run/) - Free but closed-source, no self-hosting option.
-- [Serveo](https://serveo.net) - Free but closed-source, no self-hosting option. Frequently goes offline.
-
-Beware that not self-hosting your reverse proxy allows others to spy on your traffic!
+- [sshuttle](https://github.com/sshuttle/sshuttle) - A smarter proxy service, also based on SSH. Written in Python.
