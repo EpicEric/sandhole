@@ -2,6 +2,7 @@ use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use crate::{
     connections::{ConnectionMap, ConnectionMapReactor},
+    droppable_handle::DroppableHandle,
     handler::ConnectionHandler,
     ssh::SshTunnelHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
@@ -9,7 +10,7 @@ use crate::{
 use async_trait::async_trait;
 use dashmap::DashMap;
 use log::error;
-use tokio::{io::copy_bidirectional, net::TcpListener, task::JoinHandle, time::timeout};
+use tokio::{io::copy_bidirectional, net::TcpListener, time::timeout};
 
 pub(crate) static NO_ALIAS_HOST: &str = "localhost";
 
@@ -23,14 +24,6 @@ pub(crate) struct TcpHandler {
     conn_manager: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<Self>>>,
     tcp_connection_timeout: Option<Duration>,
     disable_tcp_logs: bool,
-}
-
-struct DroppableHandle<T>(JoinHandle<T>);
-
-impl<T> Drop for DroppableHandle<T> {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
 }
 
 impl TcpHandler {

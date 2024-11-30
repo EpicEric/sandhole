@@ -23,11 +23,10 @@ use ratatui::{
 };
 use tokio::{
     sync::{mpsc::UnboundedSender, watch},
-    task::JoinHandle,
     time::sleep,
 };
 
-use crate::{tcp_alias::TcpAlias, SandholeServer, SystemData};
+use crate::{droppable_handle::DroppableHandle, tcp_alias::TcpAlias, SandholeServer, SystemData};
 
 struct BufferedSender {
     tx: UnboundedSender<Vec<u8>>,
@@ -300,7 +299,7 @@ struct AdminTerminal {
 
 pub(crate) struct AdminInterface {
     interface: Arc<Mutex<AdminTerminal>>,
-    jh: JoinHandle<()>,
+    _jh: DroppableHandle<()>,
     change_notifier: watch::Sender<()>,
 }
 
@@ -325,7 +324,7 @@ impl AdminInterface {
             },
         }));
         let interface_clone = Arc::clone(&interface);
-        let jh = tokio::spawn(async move {
+        let jh = DroppableHandle(tokio::spawn(async move {
             loop {
                 {
                     let mut interface = interface.lock().unwrap();
@@ -346,10 +345,10 @@ impl AdminInterface {
                     _ = subscriber.changed() => ()
                 }
             }
-        });
+        }));
         Self {
             interface: interface_clone,
-            jh,
+            _jh: jh,
             change_notifier,
         }
     }
@@ -449,11 +448,5 @@ impl AdminInterface {
             drop(interface);
         }
         let _ = self.change_notifier.send(());
-    }
-}
-
-impl Drop for AdminInterface {
-    fn drop(&mut self) {
-        self.jh.abort();
     }
 }

@@ -7,17 +7,16 @@ use rustls::{
     ServerConfig,
 };
 use rustls_acme::{caches::DirCache, AcmeConfig, ResolvesServerCertAcme};
-use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 
-use crate::certificates::AlpnChallengeResolver;
+use crate::{certificates::AlpnChallengeResolver, droppable_handle::DroppableHandle};
 
 #[derive(Debug)]
 pub(crate) struct AcmeResolver {
     cache_dir: PathBuf,
     contact: String,
     use_staging: bool,
-    join_handle: Option<JoinHandle<()>>,
+    join_handle: Option<DroppableHandle<()>>,
     config: Option<Arc<ServerConfig>>,
     resolver: Option<Arc<ResolvesServerCertAcme>>,
 }
@@ -40,9 +39,7 @@ impl AlpnChallengeResolver for AcmeResolver {
         if domains.is_empty() {
             return;
         }
-        if let Some(jh) = self.join_handle.take() {
-            jh.abort();
-        }
+        self.join_handle.take();
         info!(
             "Generating ACME certificates for the following domains: {:?}",
             &domains
@@ -54,14 +51,14 @@ impl AlpnChallengeResolver for AcmeResolver {
             .state();
         self.config = Some(new_state.challenge_rustls_config());
         self.resolver = Some(new_state.resolver());
-        self.join_handle = Some(tokio::spawn(async move {
+        self.join_handle = Some(DroppableHandle(tokio::spawn(async move {
             loop {
                 match new_state.next().await.unwrap() {
                     Ok(_) => (),
                     Err(err) => warn!("ACME listener error: {:?}", err),
                 }
             }
-        }));
+        })));
     }
 
     fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {

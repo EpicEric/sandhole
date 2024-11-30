@@ -11,31 +11,31 @@ Options:
       --domain <DOMAIN>
           The root domain of the application
 
-      --domain-redirect <DOMAIN_REDIRECT>
+      --domain-redirect <URL>
           Where to redirect requests to the root domain
 
           [default: https://github.com/EpicEric/sandhole]
 
-      --user-keys-directory <USER_KEYS_DIRECTORY>
+      --user-keys-directory <DIRECTORY>
           Directory containing public keys of authorized users. Each file must
           contain at least one key
 
           [default: ./deploy/user_keys/]
 
-      --admin-keys-directory <ADMIN_KEYS_DIRECTORY>
+      --admin-keys-directory <DIRECTORY>
           Directory containing public keys of admin users. Each file must
           contain at least one key
 
           [default: ./deploy/admin_keys/]
 
-      --certificates-directory <CERTIFICATES_DIRECTORY>
+      --certificates-directory <DIRECTORY>
           Directory containing SSL certificates and keys. Each sub-directory
           inside of this one must contain a certificate chain in a
           `fullchain.pem` file and its private key in a `privkey.pem` file
 
           [default: ./deploy/certificates/]
 
-      --acme-cache-directory <ACME_CACHE_DIRECTORY>
+      --acme-cache-directory <DIRECTORY>
           Directory to use as a cache for Let's Encrypt's account and
           certificates. This will automatically be created for you.
 
@@ -43,7 +43,7 @@ Options:
 
           [default: ./deploy/acme_cache]
 
-      --private-key-file <PRIVATE_KEY_FILE>
+      --private-key-file <FILE>
           File path to the server's secret key. If missing, it will be created
           for you
 
@@ -54,22 +54,22 @@ Options:
           application. This may result in application errors if the directories
           are missing
 
-      --listen-address <LISTEN_ADDRESS>
+      --listen-address <ADDRESS>
           Address to listen for all client connections
 
           [default: ::]
 
-      --ssh-port <SSH_PORT>
+      --ssh-port <PORT>
           Port to listen for SSH connections
 
           [default: 2222]
 
-      --http-port <HTTP_PORT>
+      --http-port <PORT>
           Port to listen for HTTP connections
 
           [default: 80]
 
-      --https-port <HTTPS_PORT>
+      --https-port <PORT>
           Port to listen for HTTPS connections
 
           [default: 443]
@@ -77,18 +77,24 @@ Options:
       --force-https
           Always redirect HTTP requests to HTTPS
 
-      --acme-contact-email <ACME_CONTACT_EMAIL>
+      --disable-http-logs
+          Disable sending HTTP logs to clients
+
+      --disable-tcp-logs
+          Disable sending TCP/proxy logs to clients
+
+      --acme-contact-email <EMAIL>
           Contact e-mail to use with Let's Encrypt. If set, enables ACME for
           HTTPS certificates.
 
           By providing your e-mail, you agree to the Let's Encrypt Subscriber
-          Agreement
+          Agreement.
 
       --acme-use-staging
           Controls whether to use the staging directory for Let's Encrypt
           certificates (default is production). Only set this option for testing
 
-      --password-authentication-url <PASSWORD_AUTHENTICATION_URL>
+      --password-authentication-url <URL>
           If set, defines a URL against which password authentication requests
           will be validated. This is done by sending the following JSON payload:
 
@@ -96,7 +102,7 @@ Options:
 
           Any 2xx response indicates that the credentials are authorized.
 
-      --bind-hostnames <BIND_HOSTNAMES>
+      --bind-hostnames <POLICY>
           Policy on whether to allow binding specific hostnames.
 
           Beware that this can lead to domain takeovers if misused!
@@ -112,7 +118,7 @@ Options:
                    fingerprint, including the main domain
           - none:  Don't allow user-provided hostnames, enforce subdomains
 
-      --load-balancing <LOAD_BALANCING>
+      --load-balancing <STRATEGY>
           Strategy for load-balancing when multiple services request the same
           hostname/port.
 
@@ -128,7 +134,7 @@ Options:
           - deny:    Don't load-balance; Deny the new handler if there's an
                      existing one
 
-      --txt-record-prefix <TXT_RECORD_PREFIX>
+      --txt-record-prefix <PREFIX>
           Prefix for TXT DNS records containing key fingerprints, for
           authorization to bind under a specific domain.
 
@@ -144,7 +150,7 @@ Options:
       --allow-requested-ports
           Allow user-requested ports. By default, ports are always random
 
-      --random-subdomain-seed <RANDOM_SUBDOMAIN_SEED>
+      --random-subdomain-seed <SEED>
           Which value to seed with when generating random subdomains, for
           determinism. This allows binding to the same random address until
           Sandhole is restarted.
@@ -161,7 +167,7 @@ Options:
           - address:     From SSH connection socket (address + port) and
                          requested address
 
-      --idle-connection-timeout <IDLE_CONNECTION_TIMEOUT>
+      --idle-connection-timeout <DURATION>
           Grace period for dangling/unauthenticated SSH connections before they
           are forcefully disconnected.
 
@@ -170,18 +176,18 @@ Options:
 
           [default: 2s]
 
-      --authentication-request-timeout <AUTHENTICATION_REQUEST_TIMEOUT>
+      --authentication-request-timeout <DURATION>
           Time until a user+password authentication request is canceled. Any
           timed out requests will not authenticate the user
 
           [default: 5s]
 
-      --http-request-timeout <HTTP_REQUEST_TIMEOUT>
+      --http-request-timeout <DURATION>
           Time until an outgoing HTTP request is automatically canceled
 
           [default: 10s]
 
-      --tcp-connection-timeout <TCP_CONNECTION_TIMEOUT>
+      --tcp-connection-timeout <DURATION>
           How long until TCP connections (including Websockets) are
           automatically garbage-collected.
 

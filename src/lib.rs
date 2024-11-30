@@ -48,6 +48,7 @@ mod certificates;
 pub mod config;
 mod connections;
 mod directory;
+mod droppable_handle;
 mod error;
 mod fingerprints;
 mod handler;
@@ -207,7 +208,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let ssh_connections = Arc::new(ConnectionMap::new(config.load_balancing, None));
     let tcp_connections = Arc::new(ConnectionMap::new(config.load_balancing, None));
     let tcp_handler: Arc<TcpHandler> = Arc::new(TcpHandler::new(
-        config.listen_address.clone(),
+        config.listen_address,
         Arc::clone(&tcp_connections),
         config.tcp_connection_timeout,
         config.disable_tcp_logs,

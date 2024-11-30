@@ -85,34 +85,54 @@ struct Args {
     domain: String,
 
     /// Where to redirect requests to the root domain.
-    #[arg(long, default_value_t = String::from(env!("CARGO_PKG_REPOSITORY")))]
+    #[arg(long, default_value_t = String::from(env!("CARGO_PKG_REPOSITORY")), value_name = "URL")]
     domain_redirect: String,
 
     /// Directory containing public keys of authorized users.
     /// Each file must contain at least one key.
-    #[arg(long, default_value_os = "./deploy/user_keys/")]
+    #[arg(
+        long,
+        default_value_os = "./deploy/user_keys/",
+        value_name = "DIRECTORY"
+    )]
     user_keys_directory: PathBuf,
 
     /// Directory containing public keys of admin users.
     /// Each file must contain at least one key.
-    #[arg(long, default_value_os = "./deploy/admin_keys/")]
+    #[arg(
+        long,
+        default_value_os = "./deploy/admin_keys/",
+        value_name = "DIRECTORY"
+    )]
     admin_keys_directory: PathBuf,
 
     /// Directory containing SSL certificates and keys.
     /// Each sub-directory inside of this one must contain a certificate chain in a
     /// `fullchain.pem` file and its private key in a `privkey.pem` file.
-    #[arg(long, default_value_os = "./deploy/certificates/")]
+    #[arg(
+        long,
+        default_value_os = "./deploy/certificates/",
+        value_name = "DIRECTORY"
+    )]
     certificates_directory: PathBuf,
 
     /// Directory to use as a cache for Let's Encrypt's account and certificates.
     /// This will automatically be created for you.
     ///
     /// Note that this setting ignores the --disable-directory-creation flag.
-    #[arg(long, default_value_os = "./deploy/acme_cache")]
+    #[arg(
+        long,
+        default_value_os = "./deploy/acme_cache",
+        value_name = "DIRECTORY"
+    )]
     acme_cache_directory: PathBuf,
 
     /// File path to the server's secret key. If missing, it will be created for you.
-    #[arg(long, default_value_os = "./deploy/server_keys/ssh")]
+    #[arg(
+        long,
+        default_value_os = "./deploy/server_keys/ssh",
+        value_name = "FILE"
+    )]
     private_key_file: PathBuf,
 
     /// If set, disables automatic creation of the directories expected by the application.
@@ -121,19 +141,19 @@ struct Args {
     disable_directory_creation: bool,
 
     /// Address to listen for all client connections.
-    #[arg(long, default_value_t = String::from("::"))]
+    #[arg(long, default_value_t = String::from("::"), value_name = "ADDRESS")]
     listen_address: String,
 
     /// Port to listen for SSH connections.
-    #[arg(long, default_value_t = 2222, value_parser = validate_port)]
+    #[arg(long, default_value_t = 2222, value_parser = validate_port, value_name = "PORT")]
     ssh_port: u16,
 
     /// Port to listen for HTTP connections.
-    #[arg(long, default_value_t = 80, value_parser = validate_port)]
+    #[arg(long, default_value_t = 80, value_parser = validate_port, value_name = "PORT")]
     http_port: u16,
 
     /// Port to listen for HTTPS connections.
-    #[arg(long, default_value_t = 443, value_parser = validate_port)]
+    #[arg(long, default_value_t = 443, value_parser = validate_port, value_name = "PORT")]
     https_port: u16,
 
     /// Always redirect HTTP requests to HTTPS.
@@ -151,7 +171,7 @@ struct Args {
     /// Contact e-mail to use with Let's Encrypt. If set, enables ACME for HTTPS certificates.
     ///
     /// By providing your e-mail, you agree to the Let's Encrypt Subscriber Agreement.
-    #[arg(long)]
+    #[arg(long, value_name = "EMAIL")]
     acme_contact_email: Option<String>,
 
     /// Controls whether to use the staging directory for Let's Encrypt certificates (default is production).
@@ -165,25 +185,25 @@ struct Args {
     /// `{"user": "...", "password": "..."}`
     ///
     /// Any 2xx response indicates that the credentials are authorized.
-    #[arg(long)]
+    #[arg(long, value_name = "URL")]
     password_authentication_url: Option<String>,
 
     /// Policy on whether to allow binding specific hostnames.
     ///
     /// Beware that this can lead to domain takeovers if misused!
-    #[arg(long, value_enum, default_value_t = BindHostnames::Txt)]
+    #[arg(long, value_enum, default_value_t = BindHostnames::Txt, value_name = "POLICY")]
     bind_hostnames: BindHostnames,
 
     /// Strategy for load-balancing when multiple services request the same hostname/port.
     ///
     /// By default, traffic towards matching hostnames/ports will be load-balanced.
-    #[arg(long, value_enum, default_value_t = LoadBalancing::Allow)]
+    #[arg(long, value_enum, default_value_t = LoadBalancing::Allow, value_name = "STRATEGY")]
     load_balancing: LoadBalancing,
 
     /// Prefix for TXT DNS records containing key fingerprints, for authorization to bind under a specific domain.
     ///
     /// In other words, valid records will be of the form: `TXT prefix.custom-domain SHA256:...`
-    #[arg(long, default_value_t = String::from("_sandhole"), value_parser = validate_txt_record_prefix)]
+    #[arg(long, default_value_t = String::from("_sandhole"), value_parser = validate_txt_record_prefix, value_name = "PREFIX")]
     txt_record_prefix: String,
 
     /// Allow user-provided subdomains. By default, subdomains are always random.
@@ -200,28 +220,28 @@ struct Args {
     /// Beware that this can lead to collisions if misused!
     ///
     /// If unset, defaults to a random seed.
-    #[arg(long, value_enum)]
+    #[arg(long, value_enum, value_name = "SEED")]
     random_subdomain_seed: Option<RandomSubdomainSeed>,
 
     /// Grace period for dangling/unauthenticated SSH connections before they are forcefully disconnected.
     ///
     /// A low value may cause valid proxy/tunnel connections to be erroneously removed.
-    #[arg(long, default_value = "2s")]
+    #[arg(long, default_value = "2s", value_name = "DURATION")]
     idle_connection_timeout: Duration,
 
     /// Time until a user+password authentication request is canceled.
     /// Any timed out requests will not authenticate the user.
-    #[arg(long, default_value = "5s")]
+    #[arg(long, default_value = "5s", value_name = "DURATION")]
     authentication_request_timeout: Duration,
 
     /// Time until an outgoing HTTP request is automatically canceled.
-    #[arg(long, default_value = "10s")]
+    #[arg(long, default_value = "10s", value_name = "DURATION")]
     http_request_timeout: Duration,
 
     /// How long until TCP connections (including Websockets) are automatically garbage-collected.
     ///
     /// By default, these connections are not terminated by Sandhole.
-    #[arg(long)]
+    #[arg(long, value_name = "DURATION")]
     tcp_connection_timeout: Option<Duration>,
 }
 

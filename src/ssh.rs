@@ -9,6 +9,7 @@ use std::{
 
 use crate::{
     admin::AdminInterface,
+    droppable_handle::DroppableHandle,
     error::ServerError,
     fingerprints::AuthenticationType,
     handler::ConnectionHandler,
@@ -27,7 +28,6 @@ use russh_keys::key::PublicKey;
 use tokio::{
     io::{copy_bidirectional, AsyncWriteExt},
     sync::{mpsc, oneshot, Mutex, RwLock},
-    task::JoinHandle,
     time::{sleep, timeout},
 };
 
@@ -187,7 +187,7 @@ pub(crate) struct ServerHandler {
     auth_data: AuthenticatedData,
     tx: mpsc::UnboundedSender<Vec<u8>>,
     rx: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
-    open_session_jh: Option<JoinHandle<()>>,
+    open_session_jh: Option<DroppableHandle<()>>,
     server: Arc<SandholeServer>,
 }
 
@@ -248,7 +248,7 @@ impl Handler for ServerHandler {
                 }
             }
         });
-        self.open_session_jh = Some(jh);
+        self.open_session_jh = Some(DroppableHandle(jh));
         Ok(true)
     }
 
@@ -369,45 +369,47 @@ impl Handler for ServerHandler {
     ) -> Result<(), Self::Error> {
         debug!("exec_request data {:?}", data);
         let cmd = String::from_utf8_lossy(data);
-        match (cmd.split_whitespace().next(), &mut self.auth_data) {
-            (
-                Some("admin"),
-                AuthenticatedData::Admin {
-                    user_data,
-                    admin_data,
-                },
-            ) => {
-                let mut admin_interface =
-                    AdminInterface::new(self.tx.clone(), Arc::clone(&self.server));
-                if let (Some(col_width), Some(row_height)) =
-                    (user_data.col_width, user_data.row_height)
-                {
-                    let _ = admin_interface.resize(col_width as u16, row_height as u16);
+        for command in cmd.split_whitespace() {
+            match (command, &mut self.auth_data) {
+                (
+                    "admin",
+                    AuthenticatedData::Admin {
+                        user_data,
+                        admin_data,
+                    },
+                ) => {
+                    let mut admin_interface =
+                        AdminInterface::new(self.tx.clone(), Arc::clone(&self.server));
+                    if let (Some(col_width), Some(row_height)) =
+                        (user_data.col_width, user_data.row_height)
+                    {
+                        let _ = admin_interface.resize(col_width as u16, row_height as u16);
+                    }
+                    admin_data.admin_interface = Some(admin_interface);
                 }
-                admin_data.admin_interface = Some(admin_interface);
+                (
+                    command,
+                    AuthenticatedData::User { user_data }
+                    | AuthenticatedData::Admin { user_data, .. },
+                ) if command.starts_with("allowed-fingerprints=") => {
+                    let set: HashSet<String> = command
+                        .trim_start_matches("allowed-fingerprints=")
+                        .split(',')
+                        .filter_map(|key| key.split(':').last().map(|k| k.to_string()))
+                        .collect();
+                    *user_data.allow_fingerprint.write().await =
+                        Box::new(move |fingerprint| fingerprint.is_some_and(|fp| set.contains(fp)))
+                }
+                (command, _) => {
+                    debug!(
+                        "Invalid command {} received for {} ({})",
+                        command, self.auth_data, self.peer
+                    );
+                    let _ = self
+                        .tx
+                        .send(format!("Ignoring unknown command {}...", command).into_bytes());
+                }
             }
-            (
-                Some(cmd),
-                AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. },
-            ) if cmd.starts_with("allowed-fingerprints=") => {
-                let set: HashSet<String> = cmd
-                    .trim_start_matches("allowed-fingerprints=")
-                    .split(',')
-                    .filter_map(|key| key.split(':').last().map(|k| k.to_string()))
-                    .collect();
-                *user_data.allow_fingerprint.write().await =
-                    Box::new(move |fingerprint| fingerprint.is_some_and(|fp| set.contains(fp)))
-            }
-            (Some(command), _) => {
-                debug!(
-                    "Invalid command {} received for {} ({})",
-                    command, self.auth_data, self.peer
-                );
-                let _ = self
-                    .tx
-                    .send(format!("Ignoring unknown command {}...", command).into_bytes());
-            }
-            (None, _) => (),
         }
         Ok(())
     }
@@ -428,10 +430,10 @@ impl Handler for ServerHandler {
             AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
                 user_data.col_width = Some(col_width);
                 user_data.row_height = Some(row_height);
+                session.channel_success(channel);
             }
             AuthenticatedData::None | AuthenticatedData::Proxy => (),
         }
-        session.channel_success(channel);
         Ok(())
     }
 
@@ -921,9 +923,6 @@ impl Handler for ServerHandler {
 
 impl Drop for ServerHandler {
     fn drop(&mut self) {
-        if let Some(jh) = self.open_session_jh.take() {
-            jh.abort()
-        };
         match &mut self.auth_data {
             AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
                 for host in user_data.ssh_hosts.iter() {
