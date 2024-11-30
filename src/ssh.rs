@@ -1,6 +1,6 @@
 use std::{
     borrow::Borrow,
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt::Display,
     net::SocketAddr,
     ops::Deref,
@@ -24,7 +24,8 @@ use russh::{
     server::{Auth, Handler, Msg, Session},
     Channel, ChannelId, ChannelStream, Disconnect, MethodSet,
 };
-use russh_keys::key::PublicKey;
+use russh_keys::PublicKey;
+use ssh_key::{Fingerprint, HashAlg};
 use tokio::{
     io::{copy_bidirectional, AsyncWriteExt},
     sync::{mpsc, oneshot, Mutex, RwLock},
@@ -93,7 +94,7 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
         &self,
         ip: &str,
         port: u16,
-        fingerprint: Option<&'a str>,
+        fingerprint: Option<&'a Fingerprint>,
     ) -> anyhow::Result<ChannelStream<Msg>> {
         if !(self.allow_fingerprint.read().await)(fingerprint) {
             Err(ServerError::FingerprintDenied)?
@@ -107,7 +108,7 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
     }
 }
 
-type FingerprintFn = dyn Fn(Option<&str>) -> bool + Send + Sync;
+type FingerprintFn = dyn Fn(Option<&Fingerprint>) -> bool + Send + Sync;
 
 struct UserData {
     allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
@@ -182,7 +183,7 @@ pub(crate) struct ServerHandler {
     cancelation_tx: Option<oneshot::Sender<()>>,
     peer: SocketAddr,
     user: Option<String>,
-    key_fingerprint: Option<String>,
+    key_fingerprint: Option<Fingerprint>,
     is_proxied: Arc<Mutex<bool>>,
     auth_data: AuthenticatedData,
     tx: mpsc::UnboundedSender<Vec<u8>>,
@@ -285,12 +286,7 @@ impl Handler for ServerHandler {
         user: &str,
         public_key: &PublicKey,
     ) -> Result<Auth, Self::Error> {
-        let mut fingerprint = public_key.fingerprint();
-        let split = fingerprint
-            .rfind(':')
-            .map(|idx| idx + 1)
-            .unwrap_or_default();
-        fingerprint.replace_range(..split, "");
+        let fingerprint = public_key.fingerprint(HashAlg::Sha256);
         self.user = Some(user.to_string());
         self.key_fingerprint = Some(fingerprint);
         let authentication = self
@@ -331,7 +327,7 @@ impl Handler for ServerHandler {
     ) -> Result<(), Self::Error> {
         // Sending Ctrl+C ends the session and disconnects the client
         if data == [3] {
-            session.disconnect(Disconnect::ByApplication, "", "English");
+            session.disconnect(Disconnect::ByApplication, "", "English")?;
             return Ok(());
         }
         debug!("received data {:?}", data);
@@ -392,10 +388,10 @@ impl Handler for ServerHandler {
                     AuthenticatedData::User { user_data }
                     | AuthenticatedData::Admin { user_data, .. },
                 ) if command.starts_with("allowed-fingerprints=") => {
-                    let set: HashSet<String> = command
+                    let set: BTreeSet<Fingerprint> = command
                         .trim_start_matches("allowed-fingerprints=")
                         .split(',')
-                        .filter_map(|key| key.split(':').last().map(|k| k.to_string()))
+                        .filter_map(|key| key.parse::<Fingerprint>().ok())
                         .collect();
                     *user_data.allow_fingerprint.write().await =
                         Box::new(move |fingerprint| fingerprint.is_some_and(|fp| set.contains(fp)))
@@ -430,7 +426,7 @@ impl Handler for ServerHandler {
             AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
                 user_data.col_width = Some(col_width);
                 user_data.row_height = Some(row_height);
-                session.channel_success(channel);
+                session.channel_success(channel)?;
             }
             AuthenticatedData::None | AuthenticatedData::Proxy => (),
         }
@@ -811,7 +807,7 @@ impl Handler for ServerHandler {
                     .aliasing_channel(
                         originator_address,
                         originator_port as u16,
-                        self.key_fingerprint.as_ref().map(String::as_ref),
+                        self.key_fingerprint.as_ref(),
                     )
                     .await
                 {
@@ -846,7 +842,7 @@ impl Handler for ServerHandler {
                     .aliasing_channel(
                         originator_address,
                         originator_port as u16,
-                        self.key_fingerprint.as_ref().map(String::as_ref),
+                        self.key_fingerprint.as_ref(),
                     )
                     .await
                 {
@@ -884,7 +880,7 @@ impl Handler for ServerHandler {
                 .aliasing_channel(
                     originator_address,
                     originator_port as u16,
-                    self.key_fingerprint.as_ref().map(String::as_ref),
+                    self.key_fingerprint.as_ref(),
                 )
                 .await
             {

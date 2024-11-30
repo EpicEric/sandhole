@@ -5,7 +5,7 @@ use russh::{
     client::{Msg, Session},
     Channel,
 };
-use russh_keys::{key, load_secret_key};
+use russh_keys::load_secret_key;
 use sandhole::{
     config::{ApplicationConfig, BindHostnames, LoadBalancing},
     entrypoint,
@@ -96,7 +96,7 @@ struct SshClient;
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
         Ok(true)
     }
 

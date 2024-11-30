@@ -6,12 +6,13 @@ use std::{
 };
 
 use async_trait::async_trait;
+use rand::rngs::OsRng;
 use russh::{
     client::{self, Msg},
     server::{self, Auth, Server},
     Channel, MethodSet,
 };
-use russh_keys::{key, load_secret_key};
+use russh_keys::load_secret_key;
 use sandhole::{
     config::{ApplicationConfig, BindHostnames, LoadBalancing},
     entrypoint,
@@ -87,7 +88,7 @@ async fn ssh_proxy_jump() {
         .expect("tcpip_forward failed");
 
     // 3. Connect to the SSH port of our proxy
-    let key = russh_keys::key::KeyPair::generate_ed25519();
+    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = ProxyClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -136,7 +137,7 @@ struct SshClient {
 impl client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
         Ok(true)
     }
 
@@ -158,7 +159,11 @@ impl client::Handler for SshClient {
         tokio::spawn(async move {
             let session = match server::run_stream(
                 Arc::new(server::Config {
-                    keys: vec![russh_keys::key::KeyPair::generate_ed25519()],
+                    keys: vec![russh_keys::PrivateKey::random(
+                        &mut OsRng,
+                        russh_keys::Algorithm::Ed25519,
+                    )
+                    .unwrap()],
                     ..Default::default()
                 }),
                 stream,
@@ -203,7 +208,7 @@ impl server::Handler for HoneypotHandler {
     async fn auth_publickey(
         &mut self,
         _user: &str,
-        _public_key: &key::PublicKey,
+        _public_key: &ssh_key::PublicKey,
     ) -> Result<Auth, Self::Error> {
         Ok(Auth::Reject {
             proceed_with_methods: Some(MethodSet::PASSWORD),
@@ -237,7 +242,7 @@ struct ProxyClient;
 impl client::Handler for ProxyClient {
     type Error = russh::Error;
 
-    async fn check_server_key(&mut self, _key: &key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
         Ok(true)
     }
 

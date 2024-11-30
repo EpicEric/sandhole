@@ -1,11 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use rand::rngs::OsRng;
 use russh::{
     client::{self, Msg, Session},
     Channel,
 };
-use russh_keys::{key, load_secret_key};
+use russh_keys::load_secret_key;
 use sandhole::{
     config::{ApplicationConfig, BindHostnames, LoadBalancing},
     entrypoint,
@@ -86,7 +87,7 @@ async fn auth_prevent_unauthorized_actions() {
         .expect("tcpip_forward failed");
 
     // 3a. Try to port forward without credentials
-    let key = russh_keys::key::KeyPair::generate_ed25519();
+    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -99,7 +100,7 @@ async fn auth_prevent_unauthorized_actions() {
     assert!(session.is_closed());
 
     // 3b. Try to local-forward with an inexistent alias
-    let key = russh_keys::key::KeyPair::generate_ed25519();
+    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -115,7 +116,7 @@ async fn auth_prevent_unauthorized_actions() {
     assert!(session.is_closed());
 
     // 3c. Try to open session without credentials
-    let key = russh_keys::key::KeyPair::generate_ed25519();
+    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -128,7 +129,7 @@ async fn auth_prevent_unauthorized_actions() {
     assert!(session.is_closed());
 
     // 3d. Local-forward with proxy, then try to port forward
-    let key = russh_keys::key::KeyPair::generate_ed25519();
+    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -149,7 +150,7 @@ async fn auth_prevent_unauthorized_actions() {
     assert!(session.is_closed());
 
     // 3e. Try to idle longer than the idle_connection_timeout configuration
-    let key = russh_keys::key::KeyPair::generate_ed25519();
+    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -168,7 +169,7 @@ struct SshClient;
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
         Ok(true)
     }
 

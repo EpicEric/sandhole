@@ -9,6 +9,7 @@ use mockall::automock;
 use rand::{seq::SliceRandom, thread_rng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rand_seeder::SipHasher;
+use ssh_key::Fingerprint;
 use webpki::types::DnsName;
 
 use crate::{
@@ -25,7 +26,7 @@ pub(crate) trait Resolver {
         &self,
         txt_record_prefix: &str,
         requested_address: &str,
-        fingerprint: &str,
+        fingerprint: &Fingerprint,
     ) -> bool;
 
     async fn has_cname_record_for_domain(&self, requested_address: &str, domain: &str) -> bool;
@@ -46,7 +47,7 @@ impl Resolver for DnsResolver {
         &self,
         txt_record_prefix: &str,
         requested_address: &str,
-        fingerprint: &str,
+        fingerprint: &Fingerprint,
     ) -> bool {
         if let Ok(lookup) = self
             .0
@@ -54,8 +55,12 @@ impl Resolver for DnsResolver {
             .await
         {
             lookup.iter().any(|txt| {
-                txt.iter()
-                    .any(|data| data.ends_with(fingerprint.as_bytes()))
+                txt.iter().any(|data| {
+                    String::from_utf8_lossy(data)
+                        .parse::<Fingerprint>()
+                        .as_ref()
+                        == Ok(fingerprint)
+                })
             })
         } else {
             false
@@ -121,7 +126,7 @@ impl<R: Resolver> AddressDelegator<R> {
         &self,
         requested_address: &str,
         user: &Option<String>,
-        fingerprint: &Option<String>,
+        fingerprint: &Option<Fingerprint>,
         socket_address: &SocketAddr,
     ) -> String {
         if DnsName::try_from(requested_address).is_ok() {
@@ -186,7 +191,7 @@ impl<R: Resolver> AddressDelegator<R> {
         &self,
         requested_address: &str,
         user: &Option<String>,
-        fingerprint: &Option<String>,
+        fingerprint: &Option<Fingerprint>,
         socket_address: &SocketAddr,
     ) -> String {
         let mut hasher = SipHasher::default();
@@ -206,7 +211,7 @@ impl<R: Resolver> AddressDelegator<R> {
                 RandomSubdomainSeed::KeyFingerprint => {
                     if let Some(fingerprint) = fingerprint {
                         requested_address.hash(&mut hasher);
-                        fingerprint.hash(&mut hasher);
+                        fingerprint.as_bytes().hash(&mut hasher);
                         hash_initialized = true;
                     } else {
                         warn!(
@@ -257,7 +262,9 @@ mod address_delegator_tests {
 
     use super::{AddressDelegator, MockResolver};
     use mockall::predicate::*;
+    use rand::rngs::OsRng;
     use regex::Regex;
+    use ssh_key::HashAlg;
     use std::net::SocketAddr;
     use webpki::types::DnsName;
 
@@ -338,9 +345,17 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_provided_address_if_cname_matches_fingerprint() {
+        let fingerprint =
+            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519)
+                .unwrap()
+                .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
-            .with(eq("_some_prefix"), eq("some.address"), eq("fingerprint1"))
+            .with(
+                eq("_some_prefix"),
+                eq("some.address"),
+                eq(fingerprint.clone()),
+            )
             .return_const(true);
         mock.expect_has_cname_record_for_domain()
             .once()
@@ -357,7 +372,7 @@ mod address_delegator_tests {
             .get_address(
                 "some.address",
                 &None,
-                &Some("fingerprint1".into()),
+                &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -367,9 +382,17 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_provided_address_if_txt_record_matches_fingerprint() {
+        let fingerprint =
+            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519)
+                .unwrap()
+                .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
-            .with(eq("_some_prefix"), eq("some.address"), eq("fingerprint1"))
+            .with(
+                eq("_some_prefix"),
+                eq("some.address"),
+                eq(fingerprint.clone()),
+            )
             .return_const(true);
         let delegator = AddressDelegator::new(
             mock,
@@ -383,7 +406,7 @@ mod address_delegator_tests {
             .get_address(
                 "some.address",
                 &None,
-                &Some("fingerprint1".into()),
+                &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -419,9 +442,13 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_subdomain_if_no_txt_record_matches_fingerprint() {
+        let fingerprint =
+            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519)
+                .unwrap()
+                .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
-            .with(eq("_some_prefix"), eq("something"), eq("fingerprint1"))
+            .with(eq("_some_prefix"), eq("something"), eq(fingerprint.clone()))
             .return_const(false);
         let delegator = AddressDelegator::new(
             mock,
@@ -435,7 +462,7 @@ mod address_delegator_tests {
             .get_address(
                 "something",
                 &None,
-                &Some("fingerprint1".into()),
+                &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -469,6 +496,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_host_domain_if_address_equals_host_domain_and_has_fingerprint() {
+        let fingerprint =
+            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519)
+                .unwrap()
+                .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .once()
@@ -485,7 +516,7 @@ mod address_delegator_tests {
             .get_address(
                 "root.tld",
                 &None,
-                &Some("fingerprint1".into()),
+                &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -495,6 +526,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_random_subdomain_if_address_equals_host_domain_and_doesnt_have_fingerprint() {
+        let fingerprint =
+            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519)
+                .unwrap()
+                .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .once()
@@ -511,7 +546,7 @@ mod address_delegator_tests {
             .get_address(
                 "root.tld",
                 &None,
-                &Some("fingerprint1".into()),
+                &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -527,6 +562,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_random_subdomain_if_requested_address_is_not_direct_subdomain() {
+        let fingerprint =
+            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519)
+                .unwrap()
+                .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .once()
@@ -543,7 +582,7 @@ mod address_delegator_tests {
             .get_address(
                 "we.are.root.tld",
                 &None,
-                &Some("fingerprint1".into()),
+                &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -559,6 +598,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_random_subdomain_if_invalid_address() {
+        let fingerprint =
+            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519)
+                .unwrap()
+                .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(
@@ -573,7 +616,7 @@ mod address_delegator_tests {
             .get_address(
                 ".",
                 &None,
-                &Some("fingerprint1".into()),
+                &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -589,6 +632,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_unique_random_subdomains_if_forced() {
+        let fingerprint =
+            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519)
+                .unwrap()
+                .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(
@@ -606,7 +653,7 @@ mod address_delegator_tests {
                 .get_address(
                     "some.address",
                     &None,
-                    &Some("fingerprint1".into()),
+                    &Some(fingerprint),
                     &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
                 )
                 .await;
@@ -673,6 +720,12 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_unique_random_subdomains_per_fingerprint_and_address_if_forced() {
+        let f1 = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519)
+            .unwrap()
+            .fingerprint(HashAlg::Sha256);
+        let f2 = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519)
+            .unwrap()
+            .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(
@@ -687,7 +740,7 @@ mod address_delegator_tests {
             .get_address(
                 "a1",
                 &None,
-                &Some("f1".into()),
+                &Some(f1.clone()),
                 &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -695,7 +748,7 @@ mod address_delegator_tests {
             .get_address(
                 "a1",
                 &None,
-                &Some("f1".into()),
+                &Some(f1.clone()),
                 &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -703,7 +756,7 @@ mod address_delegator_tests {
             .get_address(
                 "a1",
                 &None,
-                &Some("f2".into()),
+                &Some(f2.clone()),
                 &"127.0.0.1:12342".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -711,7 +764,7 @@ mod address_delegator_tests {
             .get_address(
                 "a2",
                 &None,
-                &Some("f1".into()),
+                &Some(f1.clone()),
                 &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
             )
             .await;

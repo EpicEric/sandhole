@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 #[cfg(test)]
 use mockall::automock;
+use ssh_key::Fingerprint;
 use tokio::sync::mpsc;
 
 #[cfg_attr(test, automock)]
@@ -14,6 +15,6 @@ pub(crate) trait ConnectionHandler<T: Sync> {
         &self,
         ip: &str,
         port: u16,
-        fingerprint: Option<&'a str>,
+        fingerprint: Option<&'a Fingerprint>,
     ) -> anyhow::Result<T>;
 }

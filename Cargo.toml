@@ -43,8 +43,8 @@ rand = "0.8.5"
 rand_chacha = "0.3.1"
 rand_seeder = "0.3.0"
 ratatui = "0.29.0"
-russh = "0.46.0"
-russh-keys = "0.46.0"
+russh = { git = "https://github.com/EpicEric/russh", branch = "fix-396" }
+russh-keys = { git = "https://github.com/EpicEric/russh", branch = "fix-396" }
 rustls = "0.23.16"
 rustls-acme = "0.12.1"
 rustls-platform-verifier = "0.4.0"

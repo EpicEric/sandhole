@@ -1,11 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use rand::rngs::OsRng;
 use russh::{
     client::{self, Msg, Session},
     Channel,
 };
-use russh_keys::{key, load_secret_key};
+use russh_keys::load_secret_key;
 use sandhole::{
     config::{ApplicationConfig, BindHostnames, LoadBalancing},
     entrypoint,
@@ -135,7 +136,7 @@ async fn alias_require_allowed_fingerprints() {
     };
 
     // 3b. Try to local-forward with invalid key
-    let key = russh_keys::key::KeyPair::generate_ed25519();
+    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -157,7 +158,7 @@ struct SshClient;
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
         Ok(true)
     }
 
