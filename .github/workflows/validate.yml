@@ -30,9 +30,13 @@ jobs:
   tests:
     name: Tests
     runs-on: ubuntu-latest
+    env:
+      RUST_MSRV: 1.75.0
     steps:
       - uses: actions/checkout@v4
       - name: Run tests
         run: |
+          rustup toolchain install ${RUST_MSRV}-x86_64-unknown-linux-gnu
+          rustup override set ${RUST_MSRV}-x86_64-unknown-linux-gnu
           cargo build
           cargo test --verbose

@@ -1,10 +1,10 @@
+# See https://dnsrobocert.readthedocs.io/en/latest/user_guide.html
+
 # 1. Change this to your e-mail address
-# https://dnsrobocert.readthedocs.io/en/latest/user_guide.html#configuring-acme-section
 acme:
   email_account: admin@server.com
 
 # 2. Change this from server.com to your domain
-# https://dnsrobocert.readthedocs.io/en/latest/user_guide.html#configuring-certificates-section
 certificates:
   - domains:
       - server.com
@@ -13,7 +13,6 @@ certificates:
     profile: hetzner
 
 # 3. Configure your DNS provider.
-# https://dnsrobocert.readthedocs.io/en/latest/user_guide.html#configuring-profiles-section
 profiles:
   - name: hetzner
     provider: hetzner

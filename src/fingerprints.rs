@@ -168,38 +168,13 @@ impl Drop for FingerprintsValidator {
 
 #[cfg(test)]
 mod fingerprints_validator_tests {
-    use std::sync::LazyLock;
-
     use super::{AuthenticationType, FingerprintsValidator};
-    use russh_keys::{parse_public_key_base64, PublicKey};
+    use russh_keys::parse_public_key_base64;
     use ssh_key::HashAlg;
 
     static USER_KEYS_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys");
     static ADMIN_KEYS_DIRECTORY: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys");
-    static ADMIN_KEY: LazyLock<PublicKey> = LazyLock::new(|| {
-        parse_public_key_base64(
-            "AAAAC3NzaC1lZDI1NTE5AAAAIDpmDGLbC68yM87r+fD/aoEimDdnzZtmnZXCnxkIGHMq",
-        )
-        .unwrap()
-    });
-    static KEY_ONE: LazyLock<PublicKey> = LazyLock::new(|| {
-        parse_public_key_base64(
-            "AAAAC3NzaC1lZDI1NTE5AAAAIMYVfXHTqf3/0W8ZQ/I8zmMirvmosV78n1qtYgVQX58W",
-        )
-        .unwrap()
-    });
-    static KEY_TWO: LazyLock<PublicKey> = LazyLock::new(|| {
-        parse_public_key_base64(
-            "AAAAB3NzaC1yc2EAAAADAQABAAABgQCUdw1f/va/ax8L/5qoZw37+76psjybsY7qNJMxOhwqKQ6fKiLu2xv+uFQxdEbNitXbcC8zZ2m98XzEPlNoY3DTqw5RAt2qZQMMXFLzDNHCpY6xT1DxLFTYxczXj9Xk4Ms7/RQP6pxLV5PIVc06HXBThCzcLMDdnl9n0jEWu1CwSGtsc87/Gvbnr3QrfrnK40IS7c5SIfbI5yN7pfnCEkRf637EGzc11Tq4e2/ujweETZ1C+KcJZapVVHTvFfITyOqLeqrgXgsMQUML48SfDUl/RsY4nk6aFKwK7f0oGzykqLTX0YHS1wxLOnPSkK33ohvtjvcUzA/eAmjUiQquJQ7DW6RPvW57lozzIxwFvO4O/j398r3W1de3R7Q3rmAwKbujFSJlZb4OvS1ZLS8md8TwCO1xwE+4aY3xvsmeHpfBcEjhTmEYEEY630hbiMgHsbH1M7uAZkbXUgw7R6cLPCndc4GiDOLN/bkKwa55evbOS1J1cD4pi5lUSnzZzk9lYrU="
-        ).unwrap()
-    });
-    static UNKNOWN_KEY: LazyLock<PublicKey> = LazyLock::new(|| {
-        parse_public_key_base64(
-            "AAAAC3NzaC1lZDI1NTE5AAAAIFlIvi8Fw1QvxpkRuAMiBKGL84r2wlgxTj7iOzXWBeU4",
-        )
-        .unwrap()
-    });
 
     #[tokio::test]
     async fn authenticates_user_keys() {
@@ -209,20 +184,38 @@ mod fingerprints_validator_tests {
         )
         .await
         .unwrap();
+
+        let admin_key = parse_public_key_base64(
+            "AAAAC3NzaC1lZDI1NTE5AAAAIDpmDGLbC68yM87r+fD/aoEimDdnzZtmnZXCnxkIGHMq",
+        )
+        .unwrap();
+        let key_one = parse_public_key_base64(
+            "AAAAC3NzaC1lZDI1NTE5AAAAIMYVfXHTqf3/0W8ZQ/I8zmMirvmosV78n1qtYgVQX58W",
+        )
+        .unwrap();
+        let key_two =
+            parse_public_key_base64(
+                "AAAAB3NzaC1yc2EAAAADAQABAAABgQCUdw1f/va/ax8L/5qoZw37+76psjybsY7qNJMxOhwqKQ6fKiLu2xv+uFQxdEbNitXbcC8zZ2m98XzEPlNoY3DTqw5RAt2qZQMMXFLzDNHCpY6xT1DxLFTYxczXj9Xk4Ms7/RQP6pxLV5PIVc06HXBThCzcLMDdnl9n0jEWu1CwSGtsc87/Gvbnr3QrfrnK40IS7c5SIfbI5yN7pfnCEkRf637EGzc11Tq4e2/ujweETZ1C+KcJZapVVHTvFfITyOqLeqrgXgsMQUML48SfDUl/RsY4nk6aFKwK7f0oGzykqLTX0YHS1wxLOnPSkK33ohvtjvcUzA/eAmjUiQquJQ7DW6RPvW57lozzIxwFvO4O/j398r3W1de3R7Q3rmAwKbujFSJlZb4OvS1ZLS8md8TwCO1xwE+4aY3xvsmeHpfBcEjhTmEYEEY630hbiMgHsbH1M7uAZkbXUgw7R6cLPCndc4GiDOLN/bkKwa55evbOS1J1cD4pi5lUSnzZzk9lYrU="
+            ).unwrap();
+        let unknown_key = parse_public_key_base64(
+            "AAAAC3NzaC1lZDI1NTE5AAAAIFlIvi8Fw1QvxpkRuAMiBKGL84r2wlgxTj7iOzXWBeU4",
+        )
+        .unwrap();
+
         assert_eq!(
-            validator.authenticate_fingerprint(&ADMIN_KEY.fingerprint(HashAlg::Sha256)),
+            validator.authenticate_fingerprint(&admin_key.fingerprint(HashAlg::Sha256)),
             AuthenticationType::Admin
         );
         assert_eq!(
-            validator.authenticate_fingerprint(&KEY_ONE.fingerprint(HashAlg::Sha256)),
+            validator.authenticate_fingerprint(&key_one.fingerprint(HashAlg::Sha256)),
             AuthenticationType::User
         );
         assert_eq!(
-            validator.authenticate_fingerprint(&KEY_TWO.fingerprint(HashAlg::Sha256)),
+            validator.authenticate_fingerprint(&key_two.fingerprint(HashAlg::Sha256)),
             AuthenticationType::User
         );
         assert_eq!(
-            validator.authenticate_fingerprint(&UNKNOWN_KEY.fingerprint(HashAlg::Sha256)),
+            validator.authenticate_fingerprint(&unknown_key.fingerprint(HashAlg::Sha256)),
             AuthenticationType::None
         );
     }
