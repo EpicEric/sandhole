@@ -6,7 +6,7 @@ However, especially for your main domain, it's recommended that you set up a too
 
 Assuming that the output of dnsrobocert is `./letsencrypt`, Sandhole can then read the certificates via:
 
-```shell
+```bash
 sandhole --domain server.com --certificates-directory ./letsencrypt/live
 ```
 

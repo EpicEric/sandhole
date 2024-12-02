@@ -8,18 +8,8 @@ An example configuration is provided in the repository's [docker-compose-example
 
 Adjust the fields and CLI flags as appropriate for your use-case. Then, simply run:
 
-```shell
+```bash
 docker compose up -d
 ```
 
-Then, if you need to restart the service:
-
-```shell
-docker compose restart
-```
-
-Or stop it entirely:
-
-```shell
-docker compose down
-```
+You should also re-run the command whenever you change your Docker Compose file. See the [official documentation](https://docs.docker.com/compose/) for more information.

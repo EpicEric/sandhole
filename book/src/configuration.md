@@ -18,7 +18,7 @@ However, it might be more desirable to have Sandhole listen on port 22 instead. 
 
 Now you'll be able to run Sandhole on port 22:
 
-```shell
+```bash
 sandhole --domain server.com --ssh-port 22
 ```
 

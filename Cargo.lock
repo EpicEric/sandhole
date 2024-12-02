@@ -2518,7 +2518,7 @@ dependencies = [
 [[package]]
 name = "pageant"
 version = "0.0.1-beta.3"
-source = "git+https://github.com/EpicEric/russh?branch=fix-396#6bfcd8e86f88cf6b7f381791f4570955d06bedf9"
+source = "git+https://github.com/Eugeny/russh?rev=fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52#fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52"
 dependencies = [
  "bytes",
  "delegate",
@@ -2994,7 +2994,7 @@ dependencies = [
 [[package]]
 name = "russh"
 version = "0.47.0-beta.3"
-source = "git+https://github.com/EpicEric/russh?branch=fix-396#6bfcd8e86f88cf6b7f381791f4570955d06bedf9"
+source = "git+https://github.com/Eugeny/russh?rev=fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52#fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -3042,7 +3042,7 @@ dependencies = [
 [[package]]
 name = "russh-cryptovec"
 version = "0.8.0-beta.2"
-source = "git+https://github.com/EpicEric/russh?branch=fix-396#6bfcd8e86f88cf6b7f381791f4570955d06bedf9"
+source = "git+https://github.com/Eugeny/russh?rev=fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52#fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52"
 dependencies = [
  "libc",
  "ssh-encoding",
@@ -3052,7 +3052,7 @@ dependencies = [
 [[package]]
 name = "russh-keys"
 version = "0.47.0-beta.2"
-source = "git+https://github.com/EpicEric/russh?branch=fix-396#6bfcd8e86f88cf6b7f381791f4570955d06bedf9"
+source = "git+https://github.com/Eugeny/russh?rev=fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52#fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52"
 dependencies = [
  "aes",
  "async-trait",
@@ -3125,7 +3125,7 @@ dependencies = [
 [[package]]
 name = "russh-util"
 version = "0.46.0"
-source = "git+https://github.com/EpicEric/russh?branch=fix-396#6bfcd8e86f88cf6b7f381791f4570955d06bedf9"
+source = "git+https://github.com/Eugeny/russh?rev=fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52#fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52"
 dependencies = [
  "chrono",
  "tokio",

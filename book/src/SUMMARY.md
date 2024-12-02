@@ -3,7 +3,8 @@
 # Administrator guide
 
 - [Quick start](./quick_start.md)
-- [Using Docker Compose](./docker_compose.md)
+  - [Compiling from source](./compiling_from_source.md)
+  - [Using Docker Compose](./docker_compose.md)
 - [Configuration](./configuration.md)
 - [TLS support](./tls_support.md)
 - [Admin interface](./admin_interface.md)

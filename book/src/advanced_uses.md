@@ -6,13 +6,13 @@ In addition to remote port forwarding, Sandhole also supports local port forward
 
 Given a remote service running as
 
-```shell
+```bash
 ssh -R my.tunnel:3000:localhost:2000 server.com -p 2222
 ```
 
 Note that the server won't listen on port 3000; instead, you can establish a local forward to the port from your machine:
 
-```shell
+```bash
 ssh -L 4000:my.tunnel:3000
 ```
 
@@ -20,7 +20,7 @@ Then you can access `localhost:4000`, and all traffic will be redirected to port
 
 If you'd like to restrict which users can access your service, you can provide the allowed fingerprints as a comma-separated list at the end of the command, like so:
 
-```shell
+```bash
 ssh -R my.tunnel:3000:localhost:2000 server.com -p 2222 allowed-fingerprints=SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ,SHA256:bwf4FDtNeZzFv8xHBzHJwRpDRxssCll8w2tCHFC9n1o
 ```
 
@@ -38,10 +38,10 @@ SHA256:bwf4FDtNeZzFv8xHBzHJwRpDRxssCll8w2tCHFC9n1o
 
 Then, add the following entries to your DNS (assuming that your domain is `my.domain.net`):
 
-| Type  | Domain                    | Data                                                 |
-| ----- | ------------------------- | ---------------------------------------------------- |
-| CNAME | `my.domain.net`           | `server.com`                                         |
-| TXT   | `_sandhole.my.domain.net` | `SHA256:bwf4FDtNeZzFv8xHBzHJwRpDRxssCll8w2tCHFC9n1o` |
+| Type  | Domain                              | Data                                                          |
+| ----- | ----------------------------------- | ------------------------------------------------------------- |
+| CNAME | <pre>my.domain.net</pre>            | <pre>server.com</pre>                                         |
+| TXT   | <pre>\_sandhole.my.domain.net</pre> | <pre>SHA256:bwf4FDtNeZzFv8xHBzHJwRpDRxssCll8w2tCHFC9n1o</pre> |
 
 This instructs your DNS to redirect requests to Sandhole, and tells Sandhole to authorize your SSH key for the given domain, respectively.
 
@@ -53,8 +53,8 @@ If your administrator has configured [ACME support](./tls_support.md#acme-suppor
 
 However, if you require DNS challenges for your domain's certification for any reason, and your administrator is running [dnsrobocert](./tls_support.md), you can simply set another DNS entry:
 
-| Type  | Domain                          | Data                                       |
-| ----- | ------------------------------- | ------------------------------------------ |
-| CNAME | `_acme-challenge.my.domain.net` | `_acme-challenge.my.domain.net.server.com` |
+| Type  | Domain                                    | Data                                                 |
+| ----- | ----------------------------------------- | ---------------------------------------------------- |
+| CNAME | <pre>\_acme-challenge.my.domain.net</pre> | <pre>\_acme-challenge.my.domain.net.server.com</pre> |
 
 This lets dnsrobocert manage the ACME challenge for you.

@@ -2,107 +2,109 @@
 
 Sandhole exposes several options, which you can see by running `sandhole --help`.
 
-```
+---
+
+<pre class="terminal">
 Expose HTTP/SSH/TCP services through SSH port forwarding.
 
-Usage: sandhole [OPTIONS] --domain <DOMAIN>
+<b><u>Usage:</u></b> <b>sandhole</b> [OPTIONS] <b>--domain</b> &lt;DOMAIN&gt;
 
-Options:
-      --domain <DOMAIN>
-          The root domain of the application
+<b><u>Options:</u></b>
+<b>--domain</b> &lt;DOMAIN&gt;
+The root domain of the application
 
-      --domain-redirect <URL>
+      <b>--domain-redirect</b> &lt;URL&gt;
           Where to redirect requests to the root domain
 
           [default: https://github.com/EpicEric/sandhole]
 
-      --user-keys-directory <DIRECTORY>
+      <b>--user-keys-directory</b> &lt;DIRECTORY&gt;
           Directory containing public keys of authorized users. Each file must
           contain at least one key
 
           [default: ./deploy/user_keys/]
 
-      --admin-keys-directory <DIRECTORY>
+      <b>--admin-keys-directory</b> &lt;DIRECTORY&gt;
           Directory containing public keys of admin users. Each file must
           contain at least one key
 
           [default: ./deploy/admin_keys/]
 
-      --certificates-directory <DIRECTORY>
+      <b>--certificates-directory</b> &lt;DIRECTORY&gt;
           Directory containing SSL certificates and keys. Each sub-directory
           inside of this one must contain a certificate chain in a
           `fullchain.pem` file and its private key in a `privkey.pem` file
 
           [default: ./deploy/certificates/]
 
-      --acme-cache-directory <DIRECTORY>
-          Directory to use as a cache for Let's Encrypt's account and
+      <b>--acme-cache-directory</b> &lt;DIRECTORY&gt;
+          Directory to use as a cache for Let&#39;s Encrypt&#39;s account and
           certificates. This will automatically be created for you.
 
           Note that this setting ignores the --disable-directory-creation flag.
 
           [default: ./deploy/acme_cache]
 
-      --private-key-file <FILE>
-          File path to the server's secret key. If missing, it will be created
-          for you
+      <b>--private-key-file</b> &lt;FILE&gt;
+          File path to the server&#39;s secret key. If missing, it will be
+          created for you
 
           [default: ./deploy/server_keys/ssh]
 
-      --disable-directory-creation
+      <b>--disable-directory-creation</b>
           If set, disables automatic creation of the directories expected by the
           application. This may result in application errors if the directories
           are missing
 
-      --listen-address <ADDRESS>
+      <b>--listen-address</b> &lt;ADDRESS&gt;
           Address to listen for all client connections
 
           [default: ::]
 
-      --ssh-port <PORT>
+      <b>--ssh-port</b> &lt;PORT&gt;
           Port to listen for SSH connections
 
           [default: 2222]
 
-      --http-port <PORT>
+      <b>--http-port</b> &lt;PORT&gt;
           Port to listen for HTTP connections
 
           [default: 80]
 
-      --https-port <PORT>
+      <b>--https-port</b> &lt;PORT&gt;
           Port to listen for HTTPS connections
 
           [default: 443]
 
-      --force-https
+      <b>--force-https</b>
           Always redirect HTTP requests to HTTPS
 
-      --disable-http-logs
+      <b>--disable-http-logs</b>
           Disable sending HTTP logs to clients
 
-      --disable-tcp-logs
+      <b>--disable-tcp-logs</b>
           Disable sending TCP/proxy logs to clients
 
-      --acme-contact-email <EMAIL>
-          Contact e-mail to use with Let's Encrypt. If set, enables ACME for
+      <b>--acme-contact-email</b> &lt;EMAIL&gt;
+          Contact e-mail to use with Let&#39;s Encrypt. If set, enables ACME for
           HTTPS certificates.
 
-          By providing your e-mail, you agree to the Let's Encrypt Subscriber
-          Agreement.
+          By providing your e-mail, you agree to the Let&#39;s Encrypt
+          Subscriber Agreement.
 
-      --acme-use-staging
-          Controls whether to use the staging directory for Let's Encrypt
+      <b>--acme-use-staging</b>
+          Controls whether to use the staging directory for Let&#39;s Encrypt
           certificates (default is production). Only set this option for testing
 
-      --password-authentication-url <URL>
+      <b>--password-authentication-url</b> &lt;URL&gt;
           If set, defines a URL against which password authentication requests
           will be validated. This is done by sending the following JSON payload:
 
-          `{"user": "...", "password": "..."}`
+          `{&quot;user&quot;: &quot;...&quot;, &quot;password&quot;: &quot;...&quot;}`
 
           Any 2xx response indicates that the credentials are authorized.
 
-      --bind-hostnames <POLICY>
+      <b>--bind-hostnames</b> &lt;POLICY&gt;
           Policy on whether to allow binding specific hostnames.
 
           Beware that this can lead to domain takeovers if misused!
@@ -110,15 +112,16 @@ Options:
           [default: txt]
 
           Possible values:
-          - all:   Allow any hostnames unconditionally, including the main
-                   domain
-          - cname: Allow any hostnames with a CNAME record pointing to the main
-                   domain
-          - txt:   Allow any hostnames with a TXT record containing a
+          - <b>all</b>:   Allow any hostnames unconditionally, including the
+                   main domain
+          - <b>cname</b>: Allow any hostnames with a CNAME record pointing to
+                   the main domain
+          - <b>txt</b>:   Allow any hostnames with a TXT record containing a
                    fingerprint, including the main domain
-          - none:  Don't allow user-provided hostnames, enforce subdomains
+          - <b>none</b>:  Don&#39;t allow user-provided hostnames, enforce
+                   subdomains
 
-      --load-balancing <STRATEGY>
+      <b>--load-balancing</b> &lt;STRATEGY&gt;
           Strategy for load-balancing when multiple services request the same
           hostname/port.
 
@@ -128,13 +131,13 @@ Options:
           [default: allow]
 
           Possible values:
-          - allow:   Load-balance with all available handlers
-          - replace: Don't load-balance; When adding a new handler, replace the
-                     existing one
-          - deny:    Don't load-balance; Deny the new handler if there's an
-                     existing one
+          - <b>allow</b>:   Load-balance with all available handlers
+          - <b>replace</b>: Don&#39;t load-balance; When adding a new handler,
+                     replace the existing one
+          - <b>deny</b>:    Don&#39;t load-balance; Deny the new handler if
+                     there&#39;s an existing one
 
-      --txt-record-prefix <PREFIX>
+      <b>--txt-record-prefix</b> &lt;PREFIX&gt;
           Prefix for TXT DNS records containing key fingerprints, for
           authorization to bind under a specific domain.
 
@@ -143,14 +146,14 @@ Options:
 
           [default: _sandhole]
 
-      --allow-provided-subdomains
+      <b>--allow-provided-subdomains</b>
           Allow user-provided subdomains. By default, subdomains are always
           random
 
-      --allow-requested-ports
+      <b>--allow-requested-ports</b>
           Allow user-requested ports. By default, ports are always random
 
-      --random-subdomain-seed <SEED>
+      <b>--random-subdomain-seed</b> &lt;SEED&gt;
           Which value to seed with when generating random subdomains, for
           determinism. This allows binding to the same random address until
           Sandhole is restarted.
@@ -160,14 +163,14 @@ Options:
           If unset, defaults to a random seed.
 
           Possible values:
-          - ip-and-user: From IP address, SSH user, and requested address.
-                         Recommended if unsure
-          - user:        From SSH user and requested address
-          - fingerprint: From SSH key fingerprint and requested address
-          - address:     From SSH connection socket (address + port) and
+          - <b>ip-and-user</b>: From IP address, SSH user, and requested
+                         address. Recommended if unsure
+          - <b>user</b>:        From SSH user and requested address
+          - <b>fingerprint</b>: From SSH key fingerprint and requested address
+          - <b>address</b>:     From SSH connection socket (address + port) and
                          requested address
 
-      --idle-connection-timeout <DURATION>
+      <b>--idle-connection-timeout</b> &lt;DURATION&gt;
           Grace period for dangling/unauthenticated SSH connections before they
           are forcefully disconnected.
 
@@ -176,26 +179,27 @@ Options:
 
           [default: 2s]
 
-      --authentication-request-timeout <DURATION>
+      <b>--authentication-request-timeout</b> &lt;DURATION&gt;
           Time until a user+password authentication request is canceled. Any
           timed out requests will not authenticate the user
 
           [default: 5s]
 
-      --http-request-timeout <DURATION>
+      <b>--http-request-timeout</b> &lt;DURATION&gt;
           Time until an outgoing HTTP request is automatically canceled
 
           [default: 10s]
 
-      --tcp-connection-timeout <DURATION>
+      <b>--tcp-connection-timeout</b> &lt;DURATION&gt;
           How long until TCP connections (including Websockets) are
           automatically garbage-collected.
 
           By default, these connections are not terminated by Sandhole.
 
-  -h, --help
-          Print help (see a summary with '-h')
+<b>-h</b>, <b>--help</b>
+Print help (see a summary with &#39;-h&#39;)
 
-  -V, --version
-          Print version
-```
+<b>-V</b>, <b>--version</b>
+Print version
+
+</pre>

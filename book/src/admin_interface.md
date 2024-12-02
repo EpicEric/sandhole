@@ -4,7 +4,7 @@ Sandhole comes with a command-line admin interface available through SSH, which 
 
 To access it, simply run the command:
 
-```shell
+```bash
 ssh -t server.com -p 2222 admin
 ```
 
