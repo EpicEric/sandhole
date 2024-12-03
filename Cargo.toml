@@ -44,8 +44,8 @@ rand = "0.8.5"
 rand_chacha = "0.3.1"
 rand_seeder = "0.3.0"
 ratatui = "0.29.0"
-russh = { git = "https://github.com/Eugeny/russh", rev = "fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52" }
-russh-keys = { git = "https://github.com/Eugeny/russh", rev = "fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52" }
+russh = "0.47.0-beta.4"
+russh-keys = "0.47.0-beta.4"
 rustls = "0.23.16"
 rustls-acme = "0.12.1"
 rustls-platform-verifier = "0.4.0"

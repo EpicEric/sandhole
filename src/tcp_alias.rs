@@ -28,33 +28,33 @@ impl TcpAliasKey for TcpAlias {
     }
 }
 
-impl<'a> TcpAliasKey for BorrowedTcpAlias<'a> {
+impl TcpAliasKey for BorrowedTcpAlias<'_> {
     fn key(&self) -> BorrowedTcpAlias<'_> {
         *self
     }
 }
 
-impl<'a> PartialEq for (dyn TcpAliasKey + 'a) {
+impl PartialEq for (dyn TcpAliasKey + '_) {
     fn eq(&self, other: &Self) -> bool {
         self.key().eq(&other.key())
     }
 }
 
-impl<'a> Eq for (dyn TcpAliasKey + 'a) {}
+impl Eq for (dyn TcpAliasKey + '_) {}
 
-impl<'a> PartialOrd for (dyn TcpAliasKey + 'a) {
+impl PartialOrd for (dyn TcpAliasKey + '_) {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'a> Ord for (dyn TcpAliasKey + 'a) {
+impl Ord for (dyn TcpAliasKey + '_) {
     fn cmp(&self, other: &Self) -> Ordering {
         self.key().cmp(&other.key())
     }
 }
 
-impl<'a> Hash for (dyn TcpAliasKey + 'a) {
+impl Hash for (dyn TcpAliasKey + '_) {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.key().hash(state)
     }

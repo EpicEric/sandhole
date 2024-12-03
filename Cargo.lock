@@ -962,6 +962,17 @@ checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
 
 [[package]]
 name = "delegate"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e018fccbeeb50ff26562ece792ed06659b9c2dae79ece77c4456bb10d9bf79b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "delegate"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc2323e10c92e1cf4d86e11538512e6dc03ceb586842970b6332af3d4046a046"
@@ -2518,10 +2529,11 @@ dependencies = [
 [[package]]
 name = "pageant"
 version = "0.0.1-beta.3"
-source = "git+https://github.com/Eugeny/russh?rev=fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52#fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c8ca7f786256e4d89f369656546b1f504cfd2d5ec796f0b99600919dd993723"
 dependencies = [
  "bytes",
- "delegate",
+ "delegate 0.12.0",
  "futures",
  "rand",
  "thiserror 1.0.69",
@@ -2993,8 +3005,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.47.0-beta.3"
-source = "git+https://github.com/Eugeny/russh?rev=fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52#fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52"
+version = "0.47.0-beta.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c22ed68890c87b58c7c1b206c0097588df989c0e5af52bc576fc7aae52a58520"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -3006,7 +3019,7 @@ dependencies = [
  "chacha20",
  "ctr",
  "curve25519-dalek",
- "delegate",
+ "delegate 0.13.1",
  "des",
  "digest",
  "elliptic-curve",
@@ -3041,8 +3054,9 @@ dependencies = [
 
 [[package]]
 name = "russh-cryptovec"
-version = "0.8.0-beta.2"
-source = "git+https://github.com/Eugeny/russh?rev=fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52#fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52"
+version = "0.47.0-beta.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65a96a0cd2422b3c7ec4b3c713aa193c67dd3a61c5ebad9e1a6232a631107a60"
 dependencies = [
  "libc",
  "ssh-encoding",
@@ -3051,8 +3065,9 @@ dependencies = [
 
 [[package]]
 name = "russh-keys"
-version = "0.47.0-beta.2"
-source = "git+https://github.com/Eugeny/russh?rev=fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52#fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52"
+version = "0.47.0-beta.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c062b8788789ea15211be6722469a5c112ee6ba4238c015dc66941465050e56"
 dependencies = [
  "aes",
  "async-trait",
@@ -3125,7 +3140,8 @@ dependencies = [
 [[package]]
 name = "russh-util"
 version = "0.46.0"
-source = "git+https://github.com/Eugeny/russh?rev=fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52#fb8d3eaaffa24c2f498e1dde02b9b7c59cf2ab52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63aeb9d2b74f8f38befdc0c5172d5ffcf58f3d2ffcb423f3b6cdfe2c2d747b80"
 dependencies = [
  "chrono",
  "tokio",
