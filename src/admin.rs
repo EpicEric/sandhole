@@ -12,7 +12,7 @@ use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Margin, Rect},
     prelude::CrosstermBackend,
-    style::{Modifier, Style, Stylize},
+    style::{Color, Modifier, Style, Stylize},
     symbols::border,
     text::{Line, Text},
     widgets::{
@@ -58,18 +58,16 @@ enum Tab {
 impl Tab {
     fn render(area: Rect, buf: &mut Buffer, selected: usize) {
         Tabs::new(vec![
-            Line::from("  HTTP  ".black().on_blue()),
-            Line::from("  SSH  ".black().on_yellow()),
-            Line::from("  TCP  ".black().on_green()),
+            Line::from("  HTTP  ".black().bg(Tab::Http.color())),
+            Line::from("  SSH  ".black().bg(Tab::Ssh.color())),
+            Line::from("  TCP  ".black().bg(Tab::Tcp.color())),
         ])
         .select(selected)
         .highlight_style(Style::new().bold())
         .divider(" ")
         .render(area, buf);
     }
-}
 
-impl Tab {
     fn index(&self) -> usize {
         match self {
             Tab::Http => 0,
@@ -78,11 +76,11 @@ impl Tab {
         }
     }
 
-    fn style(&self) -> Style {
+    fn color(&self) -> Color {
         match self {
-            Tab::Http => Style::new().blue(),
-            Tab::Ssh => Style::new().yellow(),
-            Tab::Tcp => Style::new().green(),
+            Tab::Http => Color::Blue,
+            Tab::Ssh => Color::Yellow,
+            Tab::Tcp => Color::Green,
         }
     }
 }
@@ -129,7 +127,7 @@ impl AdminState {
             Tab::render(tabs_area, buf, self.tab.index());
             self.render_system_data(system_data_area, buf);
             Block::bordered()
-                .border_style(self.tab.style())
+                .border_style(Style::new().fg(self.tab.color()))
                 .border_set(border::PROPORTIONAL_TALL)
                 .render(inner_area, buf);
             self.render_tab(inner_area.inner(Margin::new(2, 1)), buf);
@@ -147,7 +145,8 @@ impl AdminState {
     }
 
     fn render_tab(&mut self, area: Rect, buf: &mut Buffer) {
-        match self.tab {
+        let color = self.tab.color();
+        let table = match self.tab {
             Tab::Http => {
                 let data = self.server.http_data.read().unwrap().clone();
                 self.scroll_state = self.scroll_state.content_length(data.len());
@@ -168,19 +167,12 @@ impl AdminState {
                 let header =
                     Row::new(["Host", "Peer(s)", "Req/min"]).add_modifier(Modifier::UNDERLINED);
                 let title =
-                    Block::new().title(Line::from("HTTP services".blue().bold()).centered());
-                let table = Table::new(rows, constraints)
+                    Block::new().title(Line::from("HTTP services".fg(color).bold()).centered());
+                Table::new(rows, constraints)
                     .header(header)
                     .column_spacing(1)
                     .block(title)
-                    .row_highlight_style(Style::new().blue().reversed());
-                StatefulWidget::render(table, area, buf, &mut self.table_state);
-                StatefulWidget::render(
-                    Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-                    area.inner(Margin::new(0, 1)),
-                    buf,
-                    &mut self.scroll_state,
-                );
+                    .row_highlight_style(Style::new().fg(color).reversed())
             }
             Tab::Ssh => {
                 let data = self.server.ssh_data.read().unwrap().clone();
@@ -196,19 +188,12 @@ impl AdminState {
                 let constraints = [Constraint::Min(25), Constraint::Length(47)];
                 let header = Row::new(["Host", "Peer(s)"]).add_modifier(Modifier::UNDERLINED);
                 let title =
-                    Block::new().title(Line::from("SSH services".yellow().bold()).centered());
-                let table = Table::new(rows, constraints)
+                    Block::new().title(Line::from("SSH services".fg(color).bold()).centered());
+                Table::new(rows, constraints)
                     .header(header)
                     .column_spacing(1)
                     .block(title)
-                    .row_highlight_style(Style::new().yellow().reversed());
-                StatefulWidget::render(table, area, buf, &mut self.table_state);
-                StatefulWidget::render(
-                    Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-                    area.inner(Margin::new(0, 1)),
-                    buf,
-                    &mut self.scroll_state,
-                );
+                    .row_highlight_style(Style::new().fg(color).reversed())
             }
             Tab::Tcp => {
                 let data = self.server.tcp_data.read().unwrap().clone();
@@ -230,21 +215,21 @@ impl AdminState {
                 let header =
                     Row::new(["Alias", "Port", "Peer(s)"]).add_modifier(Modifier::UNDERLINED);
                 let title =
-                    Block::new().title(Line::from("TCP services".green().bold()).centered());
-                let table = Table::new(rows, constraints)
+                    Block::new().title(Line::from("TCP services".fg(color).bold()).centered());
+                Table::new(rows, constraints)
                     .header(header)
                     .column_spacing(1)
                     .block(title)
-                    .row_highlight_style(Style::new().green().reversed());
-                StatefulWidget::render(table, area, buf, &mut self.table_state);
-                StatefulWidget::render(
-                    Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-                    area.inner(Margin::new(0, 1)),
-                    buf,
-                    &mut self.scroll_state,
-                );
+                    .row_highlight_style(Style::new().fg(color).reversed())
             }
-        }
+        };
+        StatefulWidget::render(table, area, buf, &mut self.table_state);
+        StatefulWidget::render(
+            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+            area.inner(Margin::new(0, 1)),
+            buf,
+            &mut self.scroll_state,
+        );
     }
 
     fn render_system_data(&mut self, area: Rect, buf: &mut Buffer) {

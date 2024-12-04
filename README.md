@@ -6,7 +6,7 @@
 
 Expose HTTP/SSH/TCP services through SSH port forwarding.
 
-[Check out the Sandhole book.](https://epiceric.github.io/sandhole/)
+[Check out the Sandhole book.](https://sandhole.eric.dev.br)
 
 ## Features
 
