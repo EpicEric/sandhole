@@ -17,8 +17,9 @@ struct Counter {
 
 impl Counter {
     fn new(window: Duration, interval: Duration) -> Self {
+        debug_assert!(window >= interval);
         Counter {
-            history: VecDeque::new(),
+            history: [(Instant::now(), 0)].into_iter().collect(),
             period: window.as_secs_f64() / interval.as_secs_f64(),
             window,
             count: 0,
@@ -26,6 +27,21 @@ impl Counter {
     }
 
     fn add(&mut self, value: u64) {
+        loop {
+            let Some(element) = self.history.front() else {
+                break;
+            };
+            if element.0.elapsed() >= self.window {
+                if self.history.len() == 1 {
+                    self.history.front_mut().unwrap().0 = Instant::now();
+                    break;
+                } else {
+                    self.history.pop_front();
+                }
+            } else {
+                break;
+            }
+        }
         self.count += value;
     }
 
@@ -50,7 +66,38 @@ impl Counter {
         } else {
             self.history.push_back((Instant::now(), self.count));
         }
+        dbg!(&self.history);
         (self.count - delta) as f64 / self.period
+    }
+}
+
+#[cfg(test)]
+mod counter_tests {
+    use std::{thread::sleep, time::Duration};
+
+    use super::Counter;
+
+    #[test]
+    fn takes_measurements() {
+        let mut counter = Counter::new(Duration::from_secs(5), Duration::from_secs(1));
+        assert_eq!(counter.measure(), 0.0);
+        counter.add(10);
+        let measure_1 = counter.measure();
+        assert!(measure_1 > 0.0);
+        counter.add(10);
+        let measure_2 = counter.measure();
+        assert!(measure_2 > measure_1);
+    }
+
+    #[test]
+    fn resets_on_moving_window() {
+        let mut counter = Counter::new(Duration::from_millis(1_000), Duration::from_millis(200));
+        counter.add(10);
+        let measure_1 = counter.measure();
+        sleep(Duration::from_millis(1_000));
+        counter.add(10);
+        let measure_2 = counter.measure();
+        assert_eq!(measure_2, measure_1);
     }
 }
 
@@ -89,5 +136,24 @@ impl ConnectionMapReactor<String> for Arc<Telemetry> {
         let hostnames: HashSet<String> = hostnames.into_iter().collect();
         self.http_requests_per_minute
             .retain(|key, _| hostnames.contains(key));
+    }
+}
+
+#[cfg(test)]
+mod telemetry_tests {
+    use super::Telemetry;
+
+    #[test]
+    fn includes_data_for_requests_on_http_domains() {
+        let telemetry = Telemetry::new();
+        assert!(telemetry.get_http_requests_per_minute().is_empty());
+        telemetry.add_http_request("foo".into());
+        telemetry.add_http_request("bar".into());
+        telemetry.add_http_request("qux".into());
+        telemetry.add_http_request("qux".into());
+        let data = telemetry.get_http_requests_per_minute();
+        assert_eq!(data.len(), 3);
+        assert_eq!(data.get("foo").unwrap(), data.get("bar").unwrap());
+        assert_eq!(*data.get("qux").unwrap(), 2.0 * data.get("foo").unwrap());
     }
 }

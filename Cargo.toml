@@ -11,12 +11,7 @@ authors = ["Eric Rodrigues Pires <eric@eric.dev.br>"]
 readme = "README.md"
 keywords = ["ssh", "proxy"]
 categories = ["network-programming", "web-programming", "authentication"]
-exclude = [
-  ".github",
-  "book",
-  "docker-compose-example",
-  "tests/data",
-]
+exclude = [".github", "book", "docker-compose-example", "tests/data"]
 
 [dependencies]
 anyhow = "1.0.93"

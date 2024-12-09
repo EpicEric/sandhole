@@ -1,7 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use rand::rngs::OsRng;
 use russh::{
     client::{Msg, Session},
     Channel,
@@ -12,12 +11,13 @@ use sandhole::{
     entrypoint,
 };
 use tokio::{
+    io::AsyncReadExt,
     net::TcpStream,
     time::{sleep, timeout},
 };
 
 #[tokio::test(flavor = "multi_thread")]
-async fn tcp_aliasing_tunnel() {
+async fn tcp_bind_random_ports() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),
@@ -42,7 +42,7 @@ async fn tcp_aliasing_tunnel() {
         bind_hostnames: BindHostnames::None,
         load_balancing: LoadBalancing::Allow,
         allow_provided_subdomains: false,
-        allow_requested_ports: true,
+        allow_requested_ports: false,
         random_subdomain_seed: None,
         txt_record_prefix: "_sandhole".into(),
         idle_connection_timeout: Duration::from_secs(1),
@@ -76,45 +76,41 @@ async fn tcp_aliasing_tunnel() {
         .authenticate_publickey("user", Arc::new(key))
         .await
         .expect("SSH authentication failed"));
+    let mut channel = session
+        .channel_open_session()
+        .await
+        .expect("channel_open_session failed");
     session
-        .tcpip_forward("my.tunnel", 42)
+        .tcpip_forward("", 12345)
         .await
         .expect("tcpip_forward failed");
-    assert!(
-        TcpStream::connect("127.0.0.1:42").await.is_err(),
-        "alias shouldn't create socket listener"
-    );
-
-    // 3. Establish a tunnel via aliasing
-    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
-    let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
-    assert!(session
-        .authenticate_publickey("user", Arc::new(key))
-        .await
-        .expect("SSH authentication failed"));
-    let mut channel = session
-        .channel_open_direct_tcpip("my.tunnel", 42, "::1", 23456)
-        .await
-        .expect("Local forwarding failed");
-    if timeout(Duration::from_secs(5), async {
-        match channel.wait().await.unwrap() {
-            russh::ChannelMsg::Data { data } => {
-                assert_eq!(
-                    String::from_utf8(data.to_vec()).unwrap(),
-                    "Poor man's VPN..."
-                );
+    let regex = regex::Regex::new(r"foobar.tld:(\d+)").unwrap();
+    let port = async move {
+        while let Some(message) = channel.wait().await {
+            match message {
+                russh::ChannelMsg::Data { data } => {
+                    let data =
+                        String::from_utf8(data.to_vec()).expect("Invalid UTF-8 from message");
+                    if let Some(captures) = regex.captures(&data) {
+                        let port = captures.get(1).unwrap().as_str().to_string();
+                        return port;
+                    }
+                }
+                message => panic!("Unexpected message {:?}", message),
             }
-            msg => panic!("Unexpected message {:?}", msg),
         }
-    })
-    .await
-    .is_err()
-    {
-        panic!("Timeout waiting for proxy server to reply.")
-    };
+        panic!("Unexpected end of channel");
+    }
+    .await;
+    assert!(port.parse::<u16>().expect("should be a valid port number") > 1024);
+
+    // 3. Connect to the TCP port of our proxy
+    let mut tcp_stream = TcpStream::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("TCP connection failed");
+    let mut buf = String::with_capacity(13);
+    tcp_stream.read_to_string(&mut buf).await.unwrap();
+    assert_eq!(buf, "Hello, world!");
 }
 
 struct SshClient;
@@ -136,7 +132,7 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        channel.data(&b"Poor man's VPN..."[..]).await.unwrap();
+        channel.data(&b"Hello, world!"[..]).await.unwrap();
         channel.eof().await.unwrap();
         Ok(())
     }

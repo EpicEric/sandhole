@@ -463,7 +463,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         };
         debug_assert_eq!(stream.peer_addr().ok(), Some(address));
         let config = Arc::clone(&ssh_config);
-        let (tx, rx) = oneshot::channel::<()>();
+        let (tx, mut rx) = oneshot::channel::<()>();
         let handler = sandhole.new_client(Some(address), tx);
         tokio::spawn(async move {
             let mut session = match russh::server::run_stream(config, stream, handler).await {
@@ -479,7 +479,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                         warn!("Connection with {} closed with error: {}", address, err);
                     }
                 }
-                _ = rx => {
+                Ok(_) = &mut rx => {
                     let _ = session.handle().disconnect(russh::Disconnect::ByApplication, "".into(), "English".into()).await;
                 },
             }

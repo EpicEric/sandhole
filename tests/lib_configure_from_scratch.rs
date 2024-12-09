@@ -1,7 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{fs, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use rand::rngs::OsRng;
+use rand::{seq::SliceRandom, thread_rng};
 use russh::{
     client::{Msg, Session},
     Channel,
@@ -17,18 +17,30 @@ use tokio::{
 };
 
 #[tokio::test(flavor = "multi_thread")]
-async fn tcp_aliasing_tunnel() {
-    // 1. Initialize Sandhole
+async fn lib_configure_from_scratch() {
+    // 1. Create random temporary directory and initialize Sandhole
+    let random_name = String::from_utf8(
+        (0..6)
+            .flat_map(|_| {
+                "0123456789abcdefghijklmnopqrstuvwxyz"
+                    .as_bytes()
+                    .choose(&mut thread_rng())
+                    .copied()
+            })
+            .collect(),
+    )
+    .unwrap();
+    let temp_dir = std::env::temp_dir().join(random_name);
+    fs::create_dir(temp_dir.as_path()).unwrap();
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),
         domain_redirect: "https://tokio.rs/".into(),
-        user_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys").into(),
-        admin_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys").into(),
+        user_keys_directory: temp_dir.join("user_keys"),
+        admin_keys_directory: temp_dir.join("admin_keys"),
         password_authentication_url: None,
-        certificates_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates")
-            .into(),
-        private_key_file: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh").into(),
-        disable_directory_creation: true,
+        certificates_directory: temp_dir.join("certificates"),
+        private_key_file: temp_dir.join("server_keys/ssh"),
+        disable_directory_creation: false,
         listen_address: "127.0.0.1".into(),
         ssh_port: 18022,
         http_port: 18080,
@@ -37,7 +49,7 @@ async fn tcp_aliasing_tunnel() {
         disable_http_logs: false,
         disable_tcp_logs: false,
         acme_contact_email: None,
-        acme_cache_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache").into(),
+        acme_cache_directory: temp_dir.join("acme_cache"), // Doesn't get created because ACME is disabled
         acme_use_staging: true,
         bind_hostnames: BindHostnames::None,
         load_balancing: LoadBalancing::Allow,
@@ -61,8 +73,13 @@ async fn tcp_aliasing_tunnel() {
     {
         panic!("Timeout waiting for Sandhole to start.")
     };
+    assert!(temp_dir.join("user_keys").is_dir());
+    assert!(temp_dir.join("admin_keys").is_dir());
+    assert!(temp_dir.join("certificates").is_dir());
+    assert!(temp_dir.join("server_keys").is_dir());
+    assert!(temp_dir.join("server_keys/ssh").is_file());
 
-    // 2. Start SSH client that will be proxied
+    // 2. Start SSH client that is not recognized
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
@@ -76,17 +93,24 @@ async fn tcp_aliasing_tunnel() {
         .authenticate_publickey("user", Arc::new(key))
         .await
         .expect("SSH authentication failed"));
-    session
-        .tcpip_forward("my.tunnel", 42)
-        .await
-        .expect("tcpip_forward failed");
-    assert!(
-        TcpStream::connect("127.0.0.1:42").await.is_err(),
-        "alias shouldn't create socket listener"
-    );
+    assert!(session.tcpip_forward("localhost", 12345).await.is_err());
 
-    // 3. Establish a tunnel via aliasing
-    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
+    // 3. Add key for SSH client that will be recognized
+    fs::copy(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/user_keys/keys_1_2.pub"
+        ),
+        temp_dir.join("user_keys/keys_1_2.pub"),
+    )
+    .expect("cannot copy key2");
+    // Wait for debounce on user pubkeys watcher (2s) + time to process the file
+    sleep(Duration::from_millis(3_000)).await;
+    let key = load_secret_key(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
+        None,
+    )
+    .expect("Missing file key2");
     let ssh_client = SshClient;
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -95,26 +119,10 @@ async fn tcp_aliasing_tunnel() {
         .authenticate_publickey("user", Arc::new(key))
         .await
         .expect("SSH authentication failed"));
-    let mut channel = session
-        .channel_open_direct_tcpip("my.tunnel", 42, "::1", 23456)
+    session
+        .tcpip_forward("localhost", 12345)
         .await
-        .expect("Local forwarding failed");
-    if timeout(Duration::from_secs(5), async {
-        match channel.wait().await.unwrap() {
-            russh::ChannelMsg::Data { data } => {
-                assert_eq!(
-                    String::from_utf8(data.to_vec()).unwrap(),
-                    "Poor man's VPN..."
-                );
-            }
-            msg => panic!("Unexpected message {:?}", msg),
-        }
-    })
-    .await
-    .is_err()
-    {
-        panic!("Timeout waiting for proxy server to reply.")
-    };
+        .expect("unable to request port-forwarding");
 }
 
 struct SshClient;
@@ -136,7 +144,7 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        channel.data(&b"Poor man's VPN..."[..]).await.unwrap();
+        channel.data(&b"Hello, world!"[..]).await.unwrap();
         channel.eof().await.unwrap();
         Ok(())
     }

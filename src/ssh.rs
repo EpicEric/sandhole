@@ -142,7 +142,9 @@ struct AdminData {
 }
 
 enum AuthenticatedData {
-    None,
+    None {
+        cancelation_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    },
     Proxy,
     User {
         user_data: Box<UserData>,
@@ -153,25 +155,10 @@ enum AuthenticatedData {
     },
 }
 
-impl From<AuthenticationType> for AuthenticatedData {
-    fn from(value: AuthenticationType) -> Self {
-        match value {
-            AuthenticationType::None => AuthenticatedData::None,
-            AuthenticationType::User => AuthenticatedData::User {
-                user_data: Box::default(),
-            },
-            AuthenticationType::Admin => AuthenticatedData::Admin {
-                user_data: Box::default(),
-                admin_data: Box::default(),
-            },
-        }
-    }
-}
-
 impl Display for AuthenticatedData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AuthenticatedData::None => f.write_str("no authentication"),
+            AuthenticatedData::None { .. } => f.write_str("no authentication"),
             AuthenticatedData::Proxy => f.write_str("no authentication (proxy)"),
             AuthenticatedData::User { .. } => f.write_str("user authentication"),
             AuthenticatedData::Admin { .. } => f.write_str("admin authentication"),
@@ -180,11 +167,10 @@ impl Display for AuthenticatedData {
 }
 
 pub(crate) struct ServerHandler {
-    cancelation_tx: Option<oneshot::Sender<()>>,
+    _timeout_handle: Option<DroppableHandle<()>>,
     peer: SocketAddr,
     user: Option<String>,
     key_fingerprint: Option<Fingerprint>,
-    is_proxied: Arc<Mutex<bool>>,
     auth_data: AuthenticatedData,
     tx: mpsc::UnboundedSender<Vec<u8>>,
     rx: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
@@ -212,12 +198,13 @@ impl Server for Arc<SandholeServer> {
         let (tx, rx) = mpsc::unbounded_channel();
         let peer_address = peer_address.unwrap();
         ServerHandler {
-            cancelation_tx: Some(cancelation_tx),
+            _timeout_handle: None,
             peer: peer_address,
             user: None,
             key_fingerprint: None,
-            is_proxied: Arc::new(Mutex::new(false)),
-            auth_data: AuthenticatedData::None,
+            auth_data: AuthenticatedData::None {
+                cancelation_tx: Arc::new(Mutex::new(Some(cancelation_tx))),
+            },
             tx,
             rx: Some(rx),
             open_session_jh: None,
@@ -238,7 +225,7 @@ impl Handler for ServerHandler {
         let Some(mut rx) = self.rx.take() else {
             return Ok(false);
         };
-        if let AuthenticatedData::None = self.auth_data {
+        if let AuthenticatedData::None { .. } = self.auth_data {
             return Err(russh::Error::Disconnect);
         }
         let mut stream = channel.into_stream();
@@ -268,7 +255,9 @@ impl Handler for ServerHandler {
                 .await
             {
                 if is_authenticated {
-                    self.auth_data = AuthenticatedData::from(AuthenticationType::User);
+                    self.auth_data = AuthenticatedData::User {
+                        user_data: Box::default(),
+                    };
                     info!("{} connected with {} (password)", self.peer, self.auth_data);
                     return Ok(Auth::Accept);
                 }
@@ -293,7 +282,6 @@ impl Handler for ServerHandler {
             .server
             .fingerprints_validator
             .authenticate_fingerprint(self.key_fingerprint.as_ref().unwrap());
-        self.auth_data = AuthenticatedData::from(authentication);
         info!(
             "{} connected with {} (public key)",
             self.peer, self.auth_data
@@ -302,20 +290,35 @@ impl Handler for ServerHandler {
             AuthenticationType::None => {
                 // Start timer for user to do local port forwarding.
                 // Otherwise, the connection will be canceled upon expiration
-                let authenticated = Arc::clone(&self.is_proxied);
-                let Some(cancelation_tx) = self.cancelation_tx.take() else {
-                    return Err(russh::Error::Disconnect);
+                let AuthenticatedData::None { ref cancelation_tx } = self.auth_data else {
+                    warn!("{} is already authenticated", self.peer);
+                    return Ok(Auth::Reject {
+                        proceed_with_methods: None,
+                    });
                 };
+                let cancelation_tx = Arc::clone(cancelation_tx);
                 let timeout = self.server.idle_connection_timeout;
-                tokio::spawn(async move {
+                self._timeout_handle = Some(DroppableHandle(tokio::spawn(async move {
                     sleep(timeout).await;
-                    if !*authenticated.lock().await {
+                    if let Some(cancelation_tx) = cancelation_tx.lock().await.take() {
                         let _ = cancelation_tx.send(());
                     }
-                });
+                })));
                 Ok(Auth::Accept)
             }
-            AuthenticationType::User | AuthenticationType::Admin => Ok(Auth::Accept),
+            AuthenticationType::User => {
+                self.auth_data = AuthenticatedData::User {
+                    user_data: Box::default(),
+                };
+                Ok(Auth::Accept)
+            }
+            AuthenticationType::Admin => {
+                self.auth_data = AuthenticatedData::Admin {
+                    user_data: Box::default(),
+                    admin_data: Box::default(),
+                };
+                Ok(Auth::Accept)
+            }
         }
     }
 
@@ -332,7 +335,7 @@ impl Handler for ServerHandler {
         }
         debug!("received data {:?}", data);
         match &mut self.auth_data {
-            AuthenticatedData::None => return Err(russh::Error::Disconnect),
+            AuthenticatedData::None { .. } => return Err(russh::Error::Disconnect),
             AuthenticatedData::Proxy | AuthenticatedData::User { .. } => (),
             AuthenticatedData::Admin { admin_data, .. } => {
                 if let Some(admin_interface) = admin_data.admin_interface.as_mut() {
@@ -428,7 +431,7 @@ impl Handler for ServerHandler {
                 user_data.row_height = Some(row_height);
                 session.channel_success(channel)?;
             }
-            AuthenticatedData::None | AuthenticatedData::Proxy => (),
+            AuthenticatedData::None { .. } | AuthenticatedData::Proxy => (),
         }
         Ok(())
     }
@@ -473,7 +476,7 @@ impl Handler for ServerHandler {
             AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
                 user_data
             }
-            AuthenticatedData::None | AuthenticatedData::Proxy => {
+            AuthenticatedData::None { .. } | AuthenticatedData::Proxy => {
                 return Err(russh::Error::Disconnect)
             }
         };
@@ -740,7 +743,7 @@ impl Handler for ServerHandler {
             AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
                 user_data
             }
-            AuthenticatedData::None | AuthenticatedData::Proxy => {
+            AuthenticatedData::None { .. } | AuthenticatedData::Proxy => {
                 return Err(russh::Error::Disconnect)
             }
         };
@@ -811,9 +814,9 @@ impl Handler for ServerHandler {
                     )
                     .await
                 {
-                    if let AuthenticatedData::None = self.auth_data {
+                    if let AuthenticatedData::None { ref cancelation_tx } = self.auth_data {
+                        cancelation_tx.lock().await.take();
                         self.auth_data = AuthenticatedData::Proxy;
-                        *self.is_proxied.lock().await = true;
                     }
                     let _ = handler.log_channel().send(
                         format!(
@@ -846,9 +849,9 @@ impl Handler for ServerHandler {
                     )
                     .await
                 {
-                    if let AuthenticatedData::None = self.auth_data {
+                    if let AuthenticatedData::None { ref cancelation_tx } = self.auth_data {
+                        cancelation_tx.lock().await.take();
                         self.auth_data = AuthenticatedData::Proxy;
-                        *self.is_proxied.lock().await = true;
                     }
                     let _ = handler.log_channel().send(
                         format!(
@@ -884,9 +887,9 @@ impl Handler for ServerHandler {
                 )
                 .await
             {
-                if let AuthenticatedData::None = self.auth_data {
+                if let AuthenticatedData::None { ref cancelation_tx } = self.auth_data {
+                    cancelation_tx.lock().await.take();
                     self.auth_data = AuthenticatedData::Proxy;
-                    *self.is_proxied.lock().await = true;
                 }
                 let _ = handler.log_channel().send(
                     format!(
@@ -909,7 +912,7 @@ impl Handler for ServerHandler {
                 return Ok(true);
             }
         }
-        if let AuthenticatedData::None = self.auth_data {
+        if let AuthenticatedData::None { .. } = self.auth_data {
             Err(russh::Error::Disconnect)
         } else {
             Ok(false)
@@ -931,7 +934,7 @@ impl Drop for ServerHandler {
                     self.server.tcp.remove(port, self.peer);
                 }
             }
-            AuthenticatedData::Proxy | AuthenticatedData::None => (),
+            AuthenticatedData::Proxy | AuthenticatedData::None { .. } => (),
         }
         info!("{} disconnected", self.peer);
     }

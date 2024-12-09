@@ -19,10 +19,15 @@ use webpki::types::ServerName;
 pub(crate) struct ApiLogin {
     url: Uri,
     address: String,
-    scheme: Scheme,
+    scheme: ApiScheme,
     host: String,
     server_name: ServerName<'static>,
     config: Arc<ClientConfig>,
+}
+
+enum ApiScheme {
+    Http,
+    Https,
 }
 
 #[derive(Serialize)]
@@ -40,9 +45,13 @@ impl ApiLogin {
             .scheme()
             .with_context(|| "API login URL has no scheme")?
             .clone();
-        if scheme != Scheme::HTTP && scheme != Scheme::HTTPS {
+        let scheme = if scheme == Scheme::HTTP {
+            ApiScheme::Http
+        } else if scheme == Scheme::HTTPS {
+            ApiScheme::Https
+        } else {
             panic!("API login URL has unknown scheme (must be set to either http:// or https://)");
-        }
+        };
         let host = url
             .host()
             .with_context(|| "API login URL has no host")?
@@ -52,14 +61,9 @@ impl ApiLogin {
         let address = format!(
             "{}:{}",
             host,
-            url.port_u16().unwrap_or_else(|| {
-                if scheme == Scheme::HTTPS {
-                    443
-                } else if scheme == Scheme::HTTP {
-                    80
-                } else {
-                    unreachable!();
-                }
+            url.port_u16().unwrap_or(match scheme {
+                ApiScheme::Http => 80,
+                ApiScheme::Https => 443,
             })
         );
         Ok(ApiLogin {
@@ -88,64 +92,64 @@ impl ApiLogin {
             .header(CONTENT_TYPE, "application/json; charset=UTF-8")
             .body(serde_json::to_string(&data).unwrap())
             .unwrap();
-        if self.scheme == Scheme::HTTP {
-            let (mut sender, conn) =
-                match hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream)).await {
-                    Ok(result) => result,
+        match self.scheme {
+            ApiScheme::Http => {
+                let (mut sender, conn) =
+                    match hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream)).await {
+                        Ok(result) => result,
+                        Err(err) => {
+                            error!("API login handshake failed: {}", err);
+                            return false;
+                        }
+                    };
+                tokio::spawn(async move {
+                    if let Err(err) = conn.await {
+                        warn!("API login TCP connection errored: {:?}", err);
+                    }
+                });
+                let response = match sender.send_request(request).await {
+                    Ok(response) => response,
                     Err(err) => {
-                        error!("API login handshake failed: {}", err);
+                        error!("API login HTTP request failed: {}", err);
                         return false;
                     }
                 };
-            tokio::spawn(async move {
-                if let Err(err) = conn.await {
-                    warn!("API login TCP connection errored: {:?}", err);
-                }
-            });
-            let response = match sender.send_request(request).await {
-                Ok(response) => response,
-                Err(err) => {
-                    error!("API login HTTP request failed: {}", err);
-                    return false;
-                }
-            };
-            dbg!(response.status());
-            response.status().is_success()
-        } else if self.scheme == Scheme::HTTPS {
-            let connector = TlsConnector::from(Arc::clone(&self.config));
-            let tls_stream = match connector
-                .connect(self.server_name.clone(), tcp_stream)
-                .await
-            {
-                Ok(tls_stream) => tls_stream,
-                Err(err) => {
-                    error!("API login TLS connection failed: {}", err);
-                    return false;
-                }
-            };
-            let (mut sender, conn) =
-                match hyper::client::conn::http1::handshake(TokioIo::new(tls_stream)).await {
-                    Ok(result) => result,
+                response.status().is_success()
+            }
+            ApiScheme::Https => {
+                let connector = TlsConnector::from(Arc::clone(&self.config));
+                let tls_stream = match connector
+                    .connect(self.server_name.clone(), tcp_stream)
+                    .await
+                {
+                    Ok(tls_stream) => tls_stream,
                     Err(err) => {
-                        error!("API login handshake failed: {}", err);
+                        error!("API login TLS connection failed: {}", err);
                         return false;
                     }
                 };
-            tokio::spawn(async move {
-                if let Err(err) = conn.await {
-                    warn!("API login TCP connection errored: {:?}", err);
-                }
-            });
-            let response = match sender.send_request(request).await {
-                Ok(response) => response,
-                Err(err) => {
-                    error!("API login HTTP request failed: {}", err);
-                    return false;
-                }
-            };
-            response.status().is_success()
-        } else {
-            unreachable!();
+                let (mut sender, conn) =
+                    match hyper::client::conn::http1::handshake(TokioIo::new(tls_stream)).await {
+                        Ok(result) => result,
+                        Err(err) => {
+                            error!("API login handshake failed: {}", err);
+                            return false;
+                        }
+                    };
+                tokio::spawn(async move {
+                    if let Err(err) = conn.await {
+                        warn!("API login TCP connection errored: {:?}", err);
+                    }
+                });
+                let response = match sender.send_request(request).await {
+                    Ok(response) => response,
+                    Err(err) => {
+                        error!("API login HTTP request failed: {}", err);
+                        return false;
+                    }
+                };
+                response.status().is_success()
+            }
         }
     }
 }

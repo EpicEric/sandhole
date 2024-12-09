@@ -93,7 +93,7 @@ async fn https_force_random_subdomains() {
         .await
         .expect("channel_open_session failed");
     session
-        .tcpip_forward("some.random.hostname", 80)
+        .tcpip_forward("something.foobar.tld", 80)
         .await
         .expect("tcpip_forward failed");
     let regex = regex::Regex::new(r"https://(\S+)").unwrap();
@@ -122,6 +122,8 @@ async fn https_force_random_subdomains() {
         panic!("Unexpected end of channel");
     }
     .await;
+    assert!(hostname.ends_with(".foobar.tld"));
+    assert_ne!(hostname, "something.foobar.tld");
 
     // 3. Connect to the HTTPS port of our proxy
     let mut root_store = RootCertStore::empty();

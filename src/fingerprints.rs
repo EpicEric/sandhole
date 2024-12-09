@@ -5,14 +5,13 @@ use std::{
     time::Duration,
 };
 
-use crate::directory::watch_directory;
+use crate::{directory::watch_directory, droppable_handle::DroppableHandle};
 use log::{error, warn};
 use notify::RecommendedWatcher;
 use ssh_key::{Fingerprint, HashAlg, PublicKey};
 use tokio::{
     fs::{read_dir, read_to_string},
     sync::oneshot,
-    task::JoinHandle,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -29,7 +28,7 @@ pub(crate) enum AuthenticationType {
 pub(crate) struct FingerprintsValidator {
     user_fingerprints: Arc<RwLock<BTreeSet<Fingerprint>>>,
     admin_fingerprints: Arc<RwLock<BTreeSet<Fingerprint>>>,
-    join_handle: JoinHandle<()>,
+    _join_handle: DroppableHandle<()>,
     _watchers: [RecommendedWatcher; 2],
 }
 
@@ -48,7 +47,7 @@ impl FingerprintsValidator {
         let user_fingerprints_clone = Arc::clone(&user_fingerprints);
         let admin_fingerprints_clone = Arc::clone(&admin_fingerprints);
         let (init_tx, init_rx) = oneshot::channel::<()>();
-        let join_handle = tokio::spawn(async move {
+        let join_handle = DroppableHandle(tokio::spawn(async move {
             let mut init_tx = Some(init_tx);
             loop {
                 if async {
@@ -134,12 +133,12 @@ impl FingerprintsValidator {
                 init_tx.take().map(|tx| tx.send(()));
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
-        });
+        }));
         init_rx.await.unwrap();
         Ok(FingerprintsValidator {
             user_fingerprints,
             admin_fingerprints,
-            join_handle,
+            _join_handle: join_handle,
             _watchers: [user_watcher, admin_watcher],
         })
     }
@@ -157,12 +156,6 @@ impl FingerprintsValidator {
         } else {
             AuthenticationType::None
         }
-    }
-}
-
-impl Drop for FingerprintsValidator {
-    fn drop(&mut self) {
-        self.join_handle.abort();
     }
 }
 

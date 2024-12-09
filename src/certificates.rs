@@ -5,7 +5,10 @@ use std::{
     time::Duration,
 };
 
-use crate::{connections::ConnectionMapReactor, directory::watch_directory};
+use crate::{
+    connections::ConnectionMapReactor, directory::watch_directory,
+    droppable_handle::DroppableHandle,
+};
 use log::{error, warn};
 #[cfg(test)]
 use mockall::automock;
@@ -18,7 +21,7 @@ use rustls::{
     sign::CertifiedKey,
     ServerConfig,
 };
-use tokio::{fs::read_dir, sync::oneshot, task::JoinHandle};
+use tokio::{fs::read_dir, sync::oneshot};
 use trie_rs::map::{Trie, TrieBuilder};
 use webpki::{types::CertificateDer, EndEntityCert};
 
@@ -49,7 +52,7 @@ impl AlpnChallengeResolver for DummyAlpnChallengeResolver {
 pub(crate) struct CertificateResolver {
     certificates: Arc<RwLock<Trie<String, Arc<CertifiedKey>>>>,
     alpn_resolver: RwLock<Box<dyn AlpnChallengeResolver>>,
-    join_handle: JoinHandle<()>,
+    _join_handle: DroppableHandle<()>,
     _watcher: RecommendedWatcher,
 }
 
@@ -65,7 +68,7 @@ impl CertificateResolver {
         certificates_rx.mark_changed();
         let certs_clone = Arc::clone(&certificates);
         let (init_tx, init_rx) = oneshot::channel::<()>();
-        let join_handle = tokio::spawn(async move {
+        let join_handle = DroppableHandle(tokio::spawn(async move {
             let mut init_tx = Some(init_tx);
             while certificates_rx.changed().await.is_ok() {
                 let mut builder = TrieBuilder::new();
@@ -143,12 +146,12 @@ impl CertificateResolver {
                 init_tx.take().map(|tx| tx.send(()));
                 tokio::time::sleep(Duration::from_secs(2)).await
             }
-        });
+        }));
         init_rx.await.unwrap();
         Ok(CertificateResolver {
             certificates,
             alpn_resolver,
-            join_handle,
+            _join_handle: join_handle,
             _watcher: watcher,
         })
     }
@@ -200,12 +203,6 @@ impl ConnectionMapReactor<String> for Arc<CertificateResolver> {
             .filter(|domain| self.resolve_server_name(domain.as_ref()).is_none())
             .collect();
         self.alpn_resolver.write().unwrap().update_domains(domains);
-    }
-}
-
-impl Drop for CertificateResolver {
-    fn drop(&mut self) {
-        self.join_handle.abort();
     }
 }
 
