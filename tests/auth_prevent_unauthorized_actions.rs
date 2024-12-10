@@ -103,7 +103,23 @@ async fn auth_prevent_unauthorized_actions() {
     assert!(session.tcpip_forward("my.hostname", 12345).await.is_err());
     assert!(session.is_closed());
 
-    // 3b. Try to local-forward with an inexistent alias
+    // 3b. Try to close port forward without credentials
+    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
+    let ssh_client = SshClient;
+    let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
+    assert!(session
+        .authenticate_publickey("user", Arc::new(key))
+        .await
+        .expect("SSH authentication failed"));
+    assert!(session
+        .cancel_tcpip_forward("proxy.hostname", 12345)
+        .await
+        .is_err());
+    assert!(session.is_closed());
+
+    // 3c. Try to local-forward with an inexistent alias
     let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
@@ -119,7 +135,7 @@ async fn auth_prevent_unauthorized_actions() {
         .is_err());
     assert!(session.is_closed());
 
-    // 3c. Try to open session without credentials
+    // 3d. Try to open session without credentials
     let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
@@ -132,7 +148,7 @@ async fn auth_prevent_unauthorized_actions() {
     assert!(session.channel_open_session().await.is_err());
     assert!(session.is_closed());
 
-    // 3d. Local-forward with HTTP proxy, then try to port forward
+    // 3e. Local-forward with HTTP proxy, then try to port forward
     let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
@@ -150,7 +166,7 @@ async fn auth_prevent_unauthorized_actions() {
     assert!(session.tcpip_forward("some.hostname", 12345).await.is_err());
     assert!(session.is_closed());
 
-    // 3e. Local-forward with TCP proxy, then try to port forward
+    // 3f. Local-forward with TCP proxy, then try to port forward
     let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
@@ -171,7 +187,7 @@ async fn auth_prevent_unauthorized_actions() {
         .is_err());
     assert!(session.is_closed());
 
-    // 3f. Try to idle longer than the idle_connection_timeout configuration
+    // 3g. Try to idle longer than the idle_connection_timeout configuration
     let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)

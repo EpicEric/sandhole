@@ -60,7 +60,7 @@ impl PortHandler for Arc<TcpHandler> {
         let clone = Arc::clone(self);
         let tcp_connection_timeout = self.tcp_connection_timeout;
         let disable_tcp_logs = self.disable_tcp_logs;
-        let jh = DroppableHandle(tokio::spawn(async move {
+        let join_handle = DroppableHandle(tokio::spawn(async move {
             loop {
                 match listener.accept().await {
                     Ok((mut stream, address)) => {
@@ -102,7 +102,7 @@ impl PortHandler for Arc<TcpHandler> {
                 }
             }
         }));
-        self.sockets.insert(port, jh);
+        self.sockets.insert(port, join_handle);
         port
     }
 

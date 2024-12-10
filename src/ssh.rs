@@ -174,7 +174,7 @@ pub(crate) struct ServerHandler {
     auth_data: AuthenticatedData,
     tx: mpsc::UnboundedSender<Vec<u8>>,
     rx: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
-    open_session_jh: Option<DroppableHandle<()>>,
+    open_session_join_handle: Option<DroppableHandle<()>>,
     server: Arc<SandholeServer>,
 }
 
@@ -207,7 +207,7 @@ impl Server for Arc<SandholeServer> {
             },
             tx,
             rx: Some(rx),
-            open_session_jh: None,
+            open_session_join_handle: None,
             server: Arc::clone(self),
         }
     }
@@ -229,14 +229,14 @@ impl Handler for ServerHandler {
             return Err(russh::Error::Disconnect);
         }
         let mut stream = channel.into_stream();
-        let jh = tokio::spawn(async move {
+        let join_handle = tokio::spawn(async move {
             while let Some(message) = rx.recv().await {
                 if stream.write_all(&message).await.is_err() {
                     break;
                 }
             }
         });
-        self.open_session_jh = Some(DroppableHandle(jh));
+        self.open_session_join_handle = Some(DroppableHandle(join_handle));
         Ok(true)
     }
 

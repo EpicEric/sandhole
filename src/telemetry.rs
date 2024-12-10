@@ -66,7 +66,6 @@ impl Counter {
         } else {
             self.history.push_back((Instant::now(), self.count));
         }
-        dbg!(&self.history);
         (self.count - delta) as f64 / self.period
     }
 }
@@ -79,14 +78,14 @@ mod counter_tests {
 
     #[test]
     fn takes_measurements() {
-        let mut counter = Counter::new(Duration::from_secs(5), Duration::from_secs(1));
+        let mut counter = Counter::new(Duration::from_secs(4), Duration::from_secs(1));
         assert_eq!(counter.measure(), 0.0);
-        counter.add(10);
+        counter.add(8);
         let measure_1 = counter.measure();
-        assert!(measure_1 > 0.0);
-        counter.add(10);
+        assert_eq!(measure_1, 2.0);
+        counter.add(8);
         let measure_2 = counter.measure();
-        assert!(measure_2 > measure_1);
+        assert_eq!(measure_2, 4.0);
     }
 
     #[test]
@@ -141,7 +140,9 @@ impl ConnectionMapReactor<String> for Arc<Telemetry> {
 
 #[cfg(test)]
 mod telemetry_tests {
-    use super::Telemetry;
+    use std::sync::Arc;
+
+    use super::{ConnectionMapReactor, Telemetry};
 
     #[test]
     fn includes_data_for_requests_on_http_domains() {
@@ -155,5 +156,22 @@ mod telemetry_tests {
         assert_eq!(data.len(), 3);
         assert_eq!(data.get("foo").unwrap(), data.get("bar").unwrap());
         assert_eq!(*data.get("qux").unwrap(), 2.0 * data.get("foo").unwrap());
+    }
+
+    #[test]
+    fn retains_hostnames_that_are_still_active() {
+        let telemetry = Arc::new(Telemetry::new());
+        let reactor: &dyn ConnectionMapReactor<String> = &telemetry;
+        reactor.call(vec!["host1".into(), "host2".into(), "host3".into()]);
+        let data = telemetry.get_http_requests_per_minute();
+        assert!(data.is_empty());
+        telemetry.add_http_request("host1".into());
+        telemetry.add_http_request("host3".into());
+        telemetry.add_http_request("host4".into());
+        reactor.call(vec!["host1".into(), "host4".into(), "host5".into()]);
+        let data = telemetry.get_http_requests_per_minute();
+        assert_eq!(data.len(), 2);
+        assert!(*data.get("host1").unwrap() > 0.0);
+        assert!(*data.get("host4").unwrap() > 0.0);
     }
 }

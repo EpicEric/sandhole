@@ -284,7 +284,7 @@ struct AdminTerminal {
 
 pub(crate) struct AdminInterface {
     interface: Arc<Mutex<AdminTerminal>>,
-    _jh: DroppableHandle<()>,
+    _join_handle: DroppableHandle<()>,
     change_notifier: watch::Sender<()>,
 }
 
@@ -309,7 +309,7 @@ impl AdminInterface {
             },
         }));
         let interface_clone = Arc::clone(&interface);
-        let jh = DroppableHandle(tokio::spawn(async move {
+        let join_handle = DroppableHandle(tokio::spawn(async move {
             loop {
                 {
                     let mut interface = interface.lock().unwrap();
@@ -333,7 +333,7 @@ impl AdminInterface {
         }));
         Self {
             interface: interface_clone,
-            _jh: jh,
+            _join_handle: join_handle,
             change_notifier,
         }
     }

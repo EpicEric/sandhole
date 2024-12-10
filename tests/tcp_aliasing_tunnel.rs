@@ -69,14 +69,15 @@ async fn tcp_aliasing_tunnel() {
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
-    assert!(session
+    let mut proxy_session =
+        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+            .await
+            .expect("Failed to connect to SSH server");
+    assert!(proxy_session
         .authenticate_publickey("user", Arc::new(key))
         .await
         .expect("SSH authentication failed"));
-    session
+    proxy_session
         .tcpip_forward("my.tunnel", 42)
         .await
         .expect("tcpip_forward failed");
@@ -88,19 +89,20 @@ async fn tcp_aliasing_tunnel() {
     // 3. Establish a tunnel via aliasing
     let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
-    assert!(session
+    let mut client_session =
+        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+            .await
+            .expect("Failed to connect to SSH server");
+    assert!(client_session
         .authenticate_publickey("user", Arc::new(key))
         .await
         .expect("SSH authentication failed"));
-    let mut channel = session
+    let mut channel = client_session
         .channel_open_direct_tcpip("my.tunnel", 42, "::1", 23456)
         .await
         .expect("Local forwarding failed");
     if timeout(Duration::from_secs(5), async {
-        match channel.wait().await.unwrap() {
+        match &mut channel.wait().await.unwrap() {
             russh::ChannelMsg::Data { data } => {
                 assert_eq!(
                     String::from_utf8(data.to_vec()).unwrap(),
@@ -115,6 +117,18 @@ async fn tcp_aliasing_tunnel() {
     {
         panic!("Timeout waiting for proxy server to reply.")
     };
+
+    // 4. Cancel the port forwarding
+    proxy_session
+        .cancel_tcpip_forward("my.tunnel", 42)
+        .await
+        .expect("cancel_tcpip_forward failed");
+    assert!(client_session
+        .channel_open_direct_tcpip("my.tunnel", 42, "::1", 23456)
+        .await
+        .is_err());
+    assert!(!proxy_session.is_closed());
+    assert!(!client_session.is_closed());
 }
 
 struct SshClient;

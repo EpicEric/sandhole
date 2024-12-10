@@ -85,7 +85,7 @@ async fn tcp_bind_random_ports() {
         .await
         .expect("tcpip_forward failed");
     let regex = regex::Regex::new(r"foobar.tld:(\d+)").unwrap();
-    let port = async move {
+    let Ok(port) = timeout(Duration::from_secs(3), async move {
         while let Some(message) = channel.wait().await {
             match message {
                 russh::ChannelMsg::Data { data } => {
@@ -100,8 +100,11 @@ async fn tcp_bind_random_ports() {
             }
         }
         panic!("Unexpected end of channel");
-    }
-    .await;
+    })
+    .await
+    else {
+        panic!("Timed out waiting for port allocation.");
+    };
     assert!(port.parse::<u16>().expect("should be a valid port number") > 1024);
 
     // 3. Connect to the TCP port of our proxy

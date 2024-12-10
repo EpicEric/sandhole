@@ -97,7 +97,7 @@ async fn https_force_random_subdomains() {
         .await
         .expect("tcpip_forward failed");
     let regex = regex::Regex::new(r"https://(\S+)").unwrap();
-    let (_, hostname) = async move {
+    let Ok((_, hostname)) = timeout(Duration::from_secs(3), async move {
         while let Some(message) = channel.wait().await {
             match message {
                 russh::ChannelMsg::Data { data } => {
@@ -120,8 +120,11 @@ async fn https_force_random_subdomains() {
             }
         }
         panic!("Unexpected end of channel");
-    }
-    .await;
+    })
+    .await
+    else {
+        panic!("Timed out waiting for subdomain allocation.");
+    };
     assert!(hostname.ends_with(".foobar.tld"));
     assert_ne!(hostname, "something.foobar.tld");
 
