@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Bump MSRV to 1.79.0.
 - Update `russh` dependency to version `0.48.0`.
 - Update `sysinfo` dependency to version `0.33.0`.
 
