@@ -5,7 +5,7 @@ use russh::{
     client::{Msg, Session},
     Channel,
 };
-use russh_keys::load_secret_key;
+use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{
     config::{ApplicationConfig, BindHostnames, LoadBalancing},
     entrypoint,
@@ -73,7 +73,10 @@ async fn tcp_bind_random_ports() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     let mut channel = session

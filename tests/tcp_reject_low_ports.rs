@@ -5,7 +5,7 @@ use russh::{
     client::{Msg, Session},
     Channel,
 };
-use russh_keys::load_secret_key;
+use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{
     config::{ApplicationConfig, BindHostnames, LoadBalancing},
     entrypoint,
@@ -61,7 +61,7 @@ async fn tcp_reject_low_ports() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied
+    // 2. Start SSH client that will fail to bind
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
@@ -72,7 +72,10 @@ async fn tcp_reject_low_ports() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     session

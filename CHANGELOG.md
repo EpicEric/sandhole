@@ -6,6 +6,11 @@
 
 - Better handling of initial value and windowing for telemetry counters.
 
+### Changed
+
+- Update `russh` dependency to version `0.48.0`.
+- Update `sysinfo` dependency to version `0.33.0`.
+
 ## 0.1.4 (2024-12-03)
 
 ### Changed

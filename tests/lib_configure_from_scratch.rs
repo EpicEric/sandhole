@@ -6,11 +6,12 @@ use russh::{
     client::{Msg, Session},
     Channel,
 };
-use russh_keys::load_secret_key;
+use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{
     config::{ApplicationConfig, BindHostnames, LoadBalancing},
     entrypoint,
 };
+use ssh_key::HashAlg;
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
@@ -90,7 +91,10 @@ async fn lib_configure_from_scratch() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     assert!(session.tcpip_forward("localhost", 12345).await.is_err());
@@ -116,7 +120,10 @@ async fn lib_configure_from_scratch() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), Some(HashAlg::Sha256)).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     session

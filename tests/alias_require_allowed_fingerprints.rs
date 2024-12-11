@@ -6,7 +6,7 @@ use russh::{
     client::{self, Msg, Session},
     Channel,
 };
-use russh_keys::load_secret_key;
+use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{
     config::{ApplicationConfig, BindHostnames, LoadBalancing},
     entrypoint,
@@ -78,7 +78,10 @@ async fn alias_require_allowed_fingerprints() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     session
@@ -111,7 +114,10 @@ async fn alias_require_allowed_fingerprints() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     let mut channel = session
@@ -142,7 +148,10 @@ async fn alias_require_allowed_fingerprints() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     assert!(session

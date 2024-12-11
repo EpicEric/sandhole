@@ -6,7 +6,7 @@ use russh::{
     client::{self, Msg, Session},
     Channel,
 };
-use russh_keys::load_secret_key;
+use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{
     config::{ApplicationConfig, BindHostnames, LoadBalancing},
     entrypoint,
@@ -78,7 +78,10 @@ async fn auth_prevent_unauthorized_actions() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     session
@@ -97,7 +100,10 @@ async fn auth_prevent_unauthorized_actions() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     assert!(session.tcpip_forward("my.hostname", 12345).await.is_err());
@@ -110,7 +116,10 @@ async fn auth_prevent_unauthorized_actions() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     assert!(session
@@ -126,7 +135,10 @@ async fn auth_prevent_unauthorized_actions() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     assert!(session
@@ -142,7 +154,10 @@ async fn auth_prevent_unauthorized_actions() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     assert!(session.channel_open_session().await.is_err());
@@ -155,7 +170,10 @@ async fn auth_prevent_unauthorized_actions() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     assert!(session
@@ -173,7 +191,10 @@ async fn auth_prevent_unauthorized_actions() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     assert!(session
@@ -194,7 +215,10 @@ async fn auth_prevent_unauthorized_actions() {
         .await
         .expect("Failed to connect to SSH server");
     assert!(session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     assert!(!session.is_closed());

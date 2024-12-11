@@ -1,5 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
+#[doc(hidden)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RandomSubdomainSeed {
     User,
@@ -8,6 +9,7 @@ pub enum RandomSubdomainSeed {
     SocketAddress,
 }
 
+#[doc(hidden)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BindHostnames {
     All,
@@ -16,6 +18,7 @@ pub enum BindHostnames {
     None,
 }
 
+#[doc(hidden)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LoadBalancing {
     Allow,
@@ -23,9 +26,7 @@ pub enum LoadBalancing {
     Deny,
 }
 
-/// List of user-defined configurations for Sandhole.
-///
-/// Instead of constructing this directly, you should use the Sandhole CLI.
+#[doc(hidden)]
 #[derive(Debug)]
 pub struct ApplicationConfig {
     pub domain: String,

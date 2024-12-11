@@ -6,7 +6,7 @@ use russh::{
     client::{Msg, Session},
     Channel,
 };
-use russh_keys::load_secret_key;
+use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{
     config::{ApplicationConfig, BindHostnames, LoadBalancing},
     entrypoint,
@@ -17,7 +17,7 @@ use tokio::{
 };
 
 #[tokio::test(flavor = "multi_thread")]
-async fn tcp_aliasing_tunnel() {
+async fn alias_aliasing_tunnel() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),
@@ -74,7 +74,10 @@ async fn tcp_aliasing_tunnel() {
             .await
             .expect("Failed to connect to SSH server");
     assert!(proxy_session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     proxy_session
@@ -94,7 +97,10 @@ async fn tcp_aliasing_tunnel() {
             .await
             .expect("Failed to connect to SSH server");
     assert!(client_session
-        .authenticate_publickey("user", Arc::new(key))
+        .authenticate_publickey(
+            "user",
+            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+        )
         .await
         .expect("SSH authentication failed"));
     let mut channel = client_session

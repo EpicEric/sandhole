@@ -45,6 +45,7 @@ mod acme;
 mod addressing;
 mod admin;
 mod certificates;
+#[doc(hidden)]
 pub mod config;
 mod connections;
 mod directory;
@@ -104,9 +105,7 @@ pub(crate) struct SandholeServer {
     pub(crate) idle_connection_timeout: Duration,
 }
 
-/// The main entrypoint of the application.
-///
-/// Instead of calling this directly, you should use the Sandhole CLI.
+#[doc(hidden)]
 pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     // Initialize crypto and credentials
     rustls::crypto::aws_lc_rs::default_provider()
@@ -267,18 +266,18 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             *data_clone.write().unwrap() = data;
         }
     });
-    let sys_data = Arc::new(RwLock::default());
-    let data_clone = Arc::clone(&sys_data);
+    let system_data = Arc::new(RwLock::default());
+    let data_clone = Arc::clone(&system_data);
     tokio::spawn(async move {
-        let system_refresh = RefreshKind::new()
-            .with_cpu(CpuRefreshKind::new().with_cpu_usage())
-            .with_memory(MemoryRefreshKind::new().with_ram());
+        let system_refresh = RefreshKind::nothing()
+            .with_cpu(CpuRefreshKind::nothing().with_cpu_usage())
+            .with_memory(MemoryRefreshKind::nothing().with_ram());
         let mut system = System::new_with_specifics(system_refresh);
         let mut networks = Networks::new_with_refreshed_list();
         loop {
             sleep(Duration::from_millis(1_000)).await;
             system.refresh_specifics(system_refresh);
-            networks.refresh();
+            networks.refresh(true);
             let (network_tx, network_rx) = match networks
                 .values()
                 .map(|data| (data.transmitted(), data.received()))
@@ -439,7 +438,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         http_data,
         ssh_data,
         tcp_data,
-        system_data: sys_data,
+        system_data,
         fingerprints_validator: fingerprints,
         api_login,
         address_delegator: addressing,

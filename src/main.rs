@@ -12,7 +12,7 @@ use sandhole::{
 use webpki::types::DnsName;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum RandomSubdomainSeed {
+enum RandomSubdomainSeed {
     /// From IP address, SSH user, and requested address. Recommended if unsure
     IpAndUser,
     /// From SSH user and requested address.
@@ -35,7 +35,7 @@ impl From<RandomSubdomainSeed> for RSSConfig {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum BindHostnames {
+enum BindHostnames {
     /// Allow any hostnames unconditionally, including the main domain.
     All,
     /// Allow any hostnames with a CNAME record pointing to the main domain.
@@ -58,7 +58,7 @@ impl From<BindHostnames> for BHConfig {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum LoadBalancing {
+enum LoadBalancing {
     /// Load-balance with all available handlers.
     Allow,
     /// Don't load-balance; When adding a new handler, replace the existing one.
