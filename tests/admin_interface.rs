@@ -11,8 +11,9 @@ use sandhole::{
     entrypoint,
 };
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::AsyncWriteExt,
     net::TcpStream,
+    sync::mpsc,
     time::{sleep, timeout},
 };
 
@@ -76,8 +77,6 @@ async fn admin_interface() {
         .authenticate_publickey("user", Arc::new(key))
         .await
         .expect("SSH authentication failed"));
-    // NOTE: Due to how simple the test is, there cannot be character collisions between
-    // the different hosts/aliases, otherwise Ratatui's diffing optimizes away part of them.
     session
         .tcpip_forward("http.aaa", 443)
         .await
@@ -121,13 +120,31 @@ async fn admin_interface() {
         .expect("exec admin failed");
 
     // 4. Interact with the admin interface and verify displayed data
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut writer = channel.make_writer();
+    let jh = tokio::spawn(async move {
+        let mut parser = vt100_ctt::Parser::new(30, 40, 0);
+        let mut screen = Vec::new();
+        while let Some(msg) = channel.wait().await {
+            match msg {
+                russh::ChannelMsg::Data { data } => {
+                    parser.process(&data);
+                    let new_screen = parser.screen();
+                    let contents_formatted = new_screen.contents_formatted();
+                    if contents_formatted != screen {
+                        screen = contents_formatted;
+                        tx.send(new_screen.contents()).unwrap();
+                    }
+                }
+                _ => break,
+            }
+        }
+    });
     if timeout(Duration::from_secs(3), async move {
-        let mut writer = channel.make_writer();
-        let reader = BufReader::new(channel.make_reader());
-        let mut segments = reader.split(b'\x1b');
         // 4a. Validate header, system information, and HTTP tab data
-        let mut search_strings = vec![
+        let search_strings = vec![
             "Sandhole admin",
+            "System information",
             "  CPU%  ",
             " Memory ",
             "   TX   ",
@@ -135,20 +152,10 @@ async fn admin_interface() {
             "HTTP services",
             "http.aaa",
         ];
-        while let Some(segment) = segments.next_segment().await.unwrap() {
-            let segment = String::from_utf8_lossy(&segment);
-            let mut remove_index = None;
-            for (i, needle) in search_strings.iter().enumerate() {
-                if segment.contains(needle) {
-                    remove_index = Some(i);
-                    break;
-                }
-            }
-            if let Some(i) = remove_index {
-                search_strings.remove(i);
-                if search_strings.is_empty() {
-                    break;
-                }
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|needle| screen.contains(needle)) {
+                break;
             }
         }
         // 4b. Switch tabs and validate SSH tab data
@@ -156,21 +163,20 @@ async fn admin_interface() {
             .write(&b"\t"[..])
             .await
             .expect("channel write failed");
-        let mut search_strings = vec!["SSH services", "ssh.bbb"];
-        while let Some(segment) = segments.next_segment().await.unwrap() {
-            let segment = String::from_utf8_lossy(&segment);
-            let mut remove_index = None;
-            for (i, needle) in search_strings.iter().enumerate() {
-                if segment.contains(needle) {
-                    remove_index = Some(i);
-                    break;
-                }
-            }
-            if let Some(i) = remove_index {
-                search_strings.remove(i);
-                if search_strings.is_empty() {
-                    break;
-                }
+        let search_strings = vec![
+            "Sandhole admin",
+            "System information",
+            "  CPU%  ",
+            " Memory ",
+            "   TX   ",
+            "   RX   ",
+            "SSH services",
+            "ssh.bbb",
+        ];
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|needle| screen.contains(needle)) {
+                break;
             }
         }
         // 4c. Switch tabs again and validate TCP tab data
@@ -178,21 +184,20 @@ async fn admin_interface() {
             .write(&b"\t"[..])
             .await
             .expect("channel write failed");
-        let mut search_strings = vec!["TCP services", "proxy.ccc"];
-        while let Some(segment) = segments.next_segment().await.unwrap() {
-            let segment = String::from_utf8_lossy(&segment);
-            let mut remove_index = None;
-            for (i, needle) in search_strings.iter().enumerate() {
-                if segment.contains(needle) {
-                    remove_index = Some(i);
-                    break;
-                }
-            }
-            if let Some(i) = remove_index {
-                search_strings.remove(i);
-                if search_strings.is_empty() {
-                    break;
-                }
+        let search_strings = vec![
+            "Sandhole admin",
+            "System information",
+            "  CPU%  ",
+            " Memory ",
+            "   TX   ",
+            "   RX   ",
+            "TCP services",
+            "proxy.ccc",
+        ];
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|needle| screen.contains(needle)) {
+                break;
             }
         }
         // 4d. Select line with TCP alias in table by pressing Down
@@ -200,8 +205,19 @@ async fn admin_interface() {
             .write(&b"\x1b[B"[..])
             .await
             .expect("channel write failed");
-        while let Some(segment) = segments.next_segment().await.unwrap() {
-            if String::from_utf8_lossy(&segment).contains("proxy.ccc") {
+        let search_strings = vec![
+            "Sandhole admin",
+            "System information",
+            "  CPU%  ",
+            " Memory ",
+            "   TX   ",
+            "   RX   ",
+            "TCP services",
+            "proxy.ccc",
+        ];
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|needle| screen.contains(needle)) {
                 break;
             }
         }
@@ -210,21 +226,21 @@ async fn admin_interface() {
             .write(&b"\x1b[Z"[..])
             .await
             .expect("channel write failed");
-        let mut search_strings = vec!["SSH services", "ssh.bbb"];
-        while let Some(segment) = segments.next_segment().await.unwrap() {
-            let segment = String::from_utf8_lossy(&segment);
-            let mut remove_index = None;
-            for (i, needle) in search_strings.iter().enumerate() {
-                if segment.contains(needle) {
-                    remove_index = Some(i);
-                    break;
-                }
-            }
-            if let Some(i) = remove_index {
-                search_strings.remove(i);
-                if search_strings.is_empty() {
-                    break;
-                }
+        let mut search_strings = vec![
+            "Sandhole admin",
+            "System information",
+            "  CPU%  ",
+            " Memory ",
+            "   TX   ",
+            "   RX   ",
+            "SSH services",
+            "ssh.bbb",
+        ];
+        loop {
+            let screen = rx.recv().await.unwrap();
+            search_strings.retain(|needle| !screen.contains(needle));
+            if search_strings.is_empty() {
+                break;
             }
         }
         // 4f. Quit the admin interface with Ctrl-C (ETX)
@@ -240,6 +256,7 @@ async fn admin_interface() {
     }
     sleep(Duration::from_millis(200)).await;
     assert!(session.is_closed());
+    jh.abort();
 }
 
 struct SshClient;
