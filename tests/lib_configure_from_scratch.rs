@@ -122,7 +122,7 @@ async fn lib_configure_from_scratch() {
     assert!(session
         .authenticate_publickey(
             "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), Some(HashAlg::Sha256)).unwrap()
+            PrivateKeyWithHashAlg::new(Arc::new(key), Some(HashAlg::Sha512)).unwrap()
         )
         .await
         .expect("SSH authentication failed"));

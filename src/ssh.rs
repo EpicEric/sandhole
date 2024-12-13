@@ -13,6 +13,7 @@ use crate::{
     error::ServerError,
     fingerprints::AuthenticationType,
     handler::ConnectionHandler,
+    login::AuthenticationRequest,
     tcp::{is_alias, PortHandler, NO_ALIAS_HOST},
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
     SandholeServer,
@@ -250,7 +251,13 @@ impl Handler for ServerHandler {
         if let Some(api_login) = self.server.api_login.deref() {
             if let Ok(is_authenticated) =
                 timeout(self.server.authentication_request_timeout, async {
-                    api_login.authenticate(user, password).await
+                    api_login
+                        .authenticate(&AuthenticationRequest {
+                            user,
+                            password,
+                            remote_address: &self.peer,
+                        })
+                        .await
                 })
                 .await
             {
@@ -260,6 +267,8 @@ impl Handler for ServerHandler {
                     };
                     info!("{} connected with {} (password)", self.peer, self.auth_data);
                     return Ok(Auth::Accept);
+                } else {
+                    warn!("{} failed password authentication", self.peer);
                 }
             } else {
                 warn!("Authentication request timed out");

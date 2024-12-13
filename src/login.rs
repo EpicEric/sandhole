@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Context;
 use http::{
@@ -16,24 +16,26 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use webpki::types::ServerName;
 
+use crate::droppable_handle::DroppableHandle;
+
 pub(crate) struct ApiLogin {
     url: Uri,
     address: String,
     scheme: ApiScheme,
     host: String,
     server_name: ServerName<'static>,
-    config: Arc<ClientConfig>,
 }
 
 enum ApiScheme {
     Http,
-    Https,
+    Https(Arc<ClientConfig>),
 }
 
 #[derive(Serialize)]
-struct AuthenticationRequest<'a> {
-    user: &'a str,
-    password: &'a str,
+pub(crate) struct AuthenticationRequest<'a> {
+    pub(crate) user: &'a str,
+    pub(crate) password: &'a str,
+    pub(crate) remote_address: &'a SocketAddr,
 }
 
 impl ApiLogin {
@@ -48,7 +50,7 @@ impl ApiLogin {
         let scheme = if scheme == Scheme::HTTP {
             ApiScheme::Http
         } else if scheme == Scheme::HTTPS {
-            ApiScheme::Https
+            ApiScheme::Https(Arc::new(ClientConfig::with_platform_verifier()))
         } else {
             panic!("API login URL has unknown scheme (must be set to either http:// or https://)");
         };
@@ -63,7 +65,7 @@ impl ApiLogin {
             host,
             url.port_u16().unwrap_or(match scheme {
                 ApiScheme::Http => 80,
-                ApiScheme::Https => 443,
+                ApiScheme::Https(_) => 443,
             })
         );
         Ok(ApiLogin {
@@ -72,12 +74,10 @@ impl ApiLogin {
             scheme,
             host,
             server_name,
-            config: Arc::new(ClientConfig::with_platform_verifier()),
         })
     }
 
-    pub(crate) async fn authenticate(&self, user: &str, password: &str) -> bool {
-        let data = AuthenticationRequest { user, password };
+    pub(crate) async fn authenticate(&self, data: &AuthenticationRequest<'_>) -> bool {
         let tcp_stream = match TcpStream::connect(&self.address).await {
             Ok(tcp_stream) => tcp_stream,
             Err(err) => {
@@ -90,9 +90,9 @@ impl ApiLogin {
             .uri(&self.url)
             .header(HOST, &self.host)
             .header(CONTENT_TYPE, "application/json; charset=UTF-8")
-            .body(serde_json::to_string(&data).unwrap())
+            .body(serde_json::to_string(data).unwrap())
             .unwrap();
-        match self.scheme {
+        let (response, _jh) = match self.scheme {
             ApiScheme::Http => {
                 let (mut sender, conn) =
                     match hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream)).await {
@@ -102,22 +102,21 @@ impl ApiLogin {
                             return false;
                         }
                     };
-                tokio::spawn(async move {
+                let _jh = DroppableHandle(tokio::spawn(async move {
                     if let Err(err) = conn.await {
                         warn!("API login TCP connection errored: {:?}", err);
                     }
-                });
-                let response = match sender.send_request(request).await {
-                    Ok(response) => response,
+                }));
+                match sender.send_request(request).await {
+                    Ok(response) => (response, _jh),
                     Err(err) => {
                         error!("API login HTTP request failed: {}", err);
                         return false;
                     }
-                };
-                response.status().is_success()
+                }
             }
-            ApiScheme::Https => {
-                let connector = TlsConnector::from(Arc::clone(&self.config));
+            ApiScheme::Https(ref config) => {
+                let connector = TlsConnector::from(Arc::clone(config));
                 let tls_stream = match connector
                     .connect(self.server_name.clone(), tcp_stream)
                     .await
@@ -136,37 +135,40 @@ impl ApiLogin {
                             return false;
                         }
                     };
-                tokio::spawn(async move {
+                let _jh = DroppableHandle(tokio::spawn(async move {
                     if let Err(err) = conn.await {
                         warn!("API login TCP connection errored: {:?}", err);
                     }
-                });
-                let response = match sender.send_request(request).await {
-                    Ok(response) => response,
+                }));
+                match sender.send_request(request).await {
+                    Ok(response) => (response, _jh),
                     Err(err) => {
                         error!("API login HTTP request failed: {}", err);
                         return false;
                     }
-                };
-                response.status().is_success()
+                }
             }
-        }
+        };
+        response.status().is_success()
     }
 }
 
 #[cfg(test)]
 mod api_login_tests {
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
     use axum::{response::IntoResponse, routing::post, Json, Router};
     use http::StatusCode;
     use tokio::net::TcpListener;
 
-    use super::ApiLogin;
+    use super::{ApiLogin, AuthenticationRequest};
 
     #[tokio::test]
     async fn authenticates_on_successful_response() {
         async fn endpoint(Json(payload): Json<serde_json::Value>) -> impl IntoResponse {
             if payload.get("user").unwrap() == "eric"
                 && payload.get("password").unwrap() == "sandhole"
+                && payload.get("remote_address").unwrap() == "127.0.0.1:12345"
             {
                 (StatusCode::OK, "Success")
             } else {
@@ -177,7 +179,18 @@ mod api_login_tests {
         let listener = TcpListener::bind("127.0.0.1:28011").await.unwrap();
         let jh = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let api_login = ApiLogin::new("http://localhost:28011/authentication".into()).unwrap();
-        assert!(api_login.authenticate("eric", "sandhole").await);
+        assert!(
+            api_login
+                .authenticate(&AuthenticationRequest {
+                    user: "eric",
+                    password: "sandhole",
+                    remote_address: &SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                        12345
+                    )
+                })
+                .await
+        );
         jh.abort();
     }
 
@@ -186,6 +199,7 @@ mod api_login_tests {
         async fn endpoint(Json(payload): Json<serde_json::Value>) -> impl IntoResponse {
             if payload.get("user").unwrap() == "eric"
                 && payload.get("password").unwrap() == "sandhole"
+                && payload.get("remote_address").unwrap() == "127.0.0.1:12345"
             {
                 (StatusCode::FORBIDDEN, "Success but rejected")
             } else {
@@ -196,7 +210,18 @@ mod api_login_tests {
         let listener = TcpListener::bind("127.0.0.1:28012").await.unwrap();
         let jh = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let api_login = ApiLogin::new("http://localhost:28012/authentication".into()).unwrap();
-        assert!(!api_login.authenticate("eric", "sandhole").await);
+        assert!(
+            !api_login
+                .authenticate(&AuthenticationRequest {
+                    user: "eric",
+                    password: "sandhole",
+                    remote_address: &SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                        12345
+                    )
+                })
+                .await
+        );
         jh.abort();
     }
 }

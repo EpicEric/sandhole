@@ -8,8 +8,9 @@
 
 ### Changed
 
+- Add `remote_address` field to API login request.
 - Bump MSRV to 1.79.0.
-- Update `russh` dependency to version `0.48.0`.
+- Update `russh` dependency to version `0.50.0-beta.1`.
 - Update `sysinfo` dependency to version `0.33.0`.
 
 ## 0.1.4 (2024-12-03)

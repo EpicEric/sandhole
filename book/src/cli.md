@@ -100,7 +100,7 @@ The root domain of the application
           If set, defines a URL against which password authentication requests
           will be validated. This is done by sending the following JSON payload:
 
-          `{&quot;user&quot;: &quot;...&quot;, &quot;password&quot;: &quot;...&quot;}`
+          `{&quot;user&quot;: &quot;...&quot;, &quot;password&quot;: &quot;...&quot;, &quot;remote_address&quot;: &quot;...&quot;}`
 
           Any 2xx response indicates that the credentials are authorized.
 

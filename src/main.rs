@@ -182,7 +182,7 @@ struct Args {
     /// If set, defines a URL against which password authentication requests will
     /// be validated. This is done by sending the following JSON payload:
     ///
-    /// `{"user": "...", "password": "..."}`
+    /// `{"user": "...", "password": "...", "remote_address": "..."}`
     ///
     /// Any 2xx response indicates that the credentials are authorized.
     #[arg(long, value_name = "URL")]
