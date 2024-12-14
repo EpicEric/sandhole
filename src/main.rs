@@ -3,11 +3,8 @@ use std::path::PathBuf;
 use clap::{command, Parser, ValueEnum};
 use humantime::Duration;
 use sandhole::{
-    config::{
-        ApplicationConfig, BindHostnames as BHConfig, LoadBalancing as LBConfig,
-        RandomSubdomainSeed as RSSConfig,
-    },
-    entrypoint,
+    entrypoint, ApplicationConfig, BindHostnames as BHConfig, LoadBalancing as LBConfig,
+    RandomSubdomainSeed as RSSConfig,
 };
 use webpki::types::DnsName;
 

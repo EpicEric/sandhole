@@ -3,7 +3,6 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt::Display,
     net::SocketAddr,
-    ops::Deref,
     sync::Arc,
 };
 
@@ -252,7 +251,7 @@ impl Handler for ServerHandler {
 
     // Authenticate users with a password if the API login service is available.
     async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
-        if let Some(api_login) = self.server.api_login.deref() {
+        if let Some(ref api_login) = self.server.api_login {
             if let Ok(is_authenticated) =
                 timeout(self.server.authentication_request_timeout, async {
                     api_login
@@ -521,23 +520,28 @@ impl Handler for ServerHandler {
                     );
                     return Ok(false);
                 }
-                if self
-                    .server
-                    .ssh
-                    .insert(
-                        assigned_host.clone(),
+                if let Err(err) = self.server.ssh.insert(
+                    assigned_host.clone(),
+                    self.peer,
+                    Arc::new(SshTunnelHandler::new(
+                        Arc::clone(&user_data.allow_fingerprint),
+                        handle,
+                        self.tx.clone(),
                         self.peer,
-                        Arc::new(SshTunnelHandler::new(
-                            Arc::clone(&user_data.allow_fingerprint),
-                            handle,
-                            self.tx.clone(),
-                            self.peer,
-                            address.to_string(),
-                            *port,
-                        )),
-                    )
-                    .is_ok()
-                {
+                        address.to_string(),
+                        *port,
+                    )),
+                ) {
+                    info!("Rejecting SSH for {} ({})", &assigned_host, self.peer);
+                    let _ = self.tx.send(
+                        format!(
+                            "Cannot listen to SSH on {}:{} ({})",
+                            &assigned_host, self.server.ssh_port, err,
+                        )
+                        .into_bytes(),
+                    );
+                    Ok(false)
+                } else {
                     info!("Serving SSH for {} ({})", &assigned_host, self.peer);
                     let _ = self.tx.send(
                         format!(
@@ -565,16 +569,6 @@ impl Handler for ServerHandler {
                         .host_addressing
                         .insert(TcpAlias(address.to_string(), *port as u16), assigned_host);
                     Ok(true)
-                } else {
-                    info!("Rejecting SSH for {} ({})", &assigned_host, self.peer);
-                    let _ = self.tx.send(
-                        format!(
-                            "Cannot listen on SSH {}:{} (already bound by another service)",
-                            &assigned_host, self.server.ssh_port,
-                        )
-                        .into_bytes(),
-                    );
-                    Ok(false)
                 }
             }
             80 | 443 => {
@@ -584,23 +578,33 @@ impl Handler for ServerHandler {
                     .address_delegator
                     .get_address(address, &self.user, &self.key_fingerprint, &self.peer)
                     .await;
-                if self
-                    .server
-                    .http
-                    .insert(
-                        assigned_host.clone(),
+                if let Err(err) = self.server.http.insert(
+                    assigned_host.clone(),
+                    self.peer,
+                    Arc::new(SshTunnelHandler::new(
+                        Arc::clone(&user_data.allow_fingerprint),
+                        handle,
+                        self.tx.clone(),
                         self.peer,
-                        Arc::new(SshTunnelHandler::new(
-                            Arc::clone(&user_data.allow_fingerprint),
-                            handle,
-                            self.tx.clone(),
-                            self.peer,
-                            address.to_string(),
-                            *port,
-                        )),
-                    )
-                    .is_ok()
-                {
+                        address.to_string(),
+                        *port,
+                    )),
+                ) {
+                    info!("Rejecting HTTP for {} ({})", &assigned_host, self.peer);
+                    let _ = self.tx.send(
+                        format!(
+                            "Cannot listen to HTTP on http://{}{} ({})",
+                            &assigned_host,
+                            match self.server.http_port {
+                                80 => "".into(),
+                                port => format!(":{}", port),
+                            },
+                            err,
+                        )
+                        .into_bytes(),
+                    );
+                    Ok(false)
+                } else {
                     info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
                     let _ = self.tx.send(
                         format!(
@@ -629,20 +633,6 @@ impl Handler for ServerHandler {
                         .host_addressing
                         .insert(TcpAlias(address.to_string(), *port as u16), assigned_host);
                     Ok(true)
-                } else {
-                    info!("Rejecting HTTP for {} ({})", &assigned_host, self.peer);
-                    let _ = self.tx.send(
-                        format!(
-                            "Cannot listen on HTTP on http://{}{} (already bound by another service)",
-                            &assigned_host,
-                            match self.server.http_port {
-                                80 => "".into(),
-                                port => format!(":{}", port),
-                            }
-                        )
-                        .into_bytes(),
-                    );
-                    Ok(false)
                 }
             }
             // Handle TCP
@@ -668,23 +658,45 @@ impl Handler for ServerHandler {
                 } else {
                     NO_ALIAS_HOST
                 };
-                if self
-                    .server
-                    .tcp
-                    .insert(
-                        TcpAlias(tcp_alias.to_string(), assigned_port),
+                if let Err(err) = self.server.tcp.insert(
+                    TcpAlias(tcp_alias.to_string(), assigned_port),
+                    self.peer,
+                    Arc::new(SshTunnelHandler::new(
+                        Arc::clone(&user_data.allow_fingerprint),
+                        handle,
+                        self.tx.clone(),
                         self.peer,
-                        Arc::new(SshTunnelHandler::new(
-                            Arc::clone(&user_data.allow_fingerprint),
-                            handle,
-                            self.tx.clone(),
-                            self.peer,
-                            address.to_string(),
-                            *port,
-                        )),
-                    )
-                    .is_ok()
-                {
+                        address.to_string(),
+                        *port,
+                    )),
+                ) {
+                    if is_alias(address) {
+                        info!(
+                            "Rejecting TCP port {} for alias {} ({})",
+                            &assigned_port, address, self.peer
+                        );
+                        let _ = self.tx.send(
+                            format!(
+                                "Cannot listen to TCP on port {} for alias {} ({})\r\n",
+                                &assigned_port, address, err,
+                            )
+                            .into_bytes(),
+                        );
+                    } else {
+                        info!(
+                            "Rejecting TCP for localhost:{} ({})",
+                            &assigned_port, self.peer
+                        );
+                        let _ = self.tx.send(
+                            format!(
+                                "Cannot listen to TCP on {}:{} ({})\r\n",
+                                self.server.domain, &assigned_port, err,
+                            )
+                            .into_bytes(),
+                        );
+                    }
+                    Ok(false)
+                } else {
                     user_data
                         .tcp_aliases
                         .insert(TcpAlias(tcp_alias.to_string(), assigned_port));
@@ -718,33 +730,6 @@ impl Handler for ServerHandler {
                         );
                     }
                     Ok(true)
-                } else {
-                    if is_alias(address) {
-                        info!(
-                            "Rejecting TCP port {} for alias {} ({})",
-                            &assigned_port, address, self.peer
-                        );
-                        let _ = self.tx.send(
-                            format!(
-                                "Cannot listen on TCP port {} for alias {} (already bound by another service)\r\n",
-                                &assigned_port, address,
-                            )
-                            .into_bytes(),
-                        );
-                    } else {
-                        info!(
-                            "Rejecting TCP for localhost:{} ({})",
-                            &assigned_port, self.peer
-                        );
-                        let _ = self.tx.send(
-                            format!(
-                                "Cannot listen on TCP port {}:{} (already bound by another service)\r\n",
-                                self.server.domain, &assigned_port,
-                            )
-                            .into_bytes(),
-                        );
-                    }
-                    Ok(false)
                 }
             }
         }
@@ -812,7 +797,7 @@ impl Handler for ServerHandler {
         }
     }
 
-    // Handle a local forwarding request (i.e. proxy tunnel or aliasing).
+    // Handle a local forwarding request (i.e. proxy tunnel for aliases).
     async fn channel_open_direct_tcpip(
         &mut self,
         channel: Channel<Msg>,

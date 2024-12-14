@@ -6,10 +6,7 @@ use russh::{
     Channel,
 };
 use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use sandhole::{
-    config::{ApplicationConfig, BindHostnames, LoadBalancing},
-    entrypoint,
-};
+use sandhole::{entrypoint, ApplicationConfig, BindHostnames, LoadBalancing};
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,

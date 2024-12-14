@@ -28,7 +28,8 @@ pub(crate) enum AuthenticationType {
 pub(crate) struct FingerprintsValidator {
     user_fingerprints: Arc<RwLock<BTreeSet<Fingerprint>>>,
     admin_fingerprints: Arc<RwLock<BTreeSet<Fingerprint>>>,
-    _join_handle: DroppableHandle<()>,
+    _user_join_handle: DroppableHandle<()>,
+    _admin_join_handle: DroppableHandle<()>,
     _watchers: [RecommendedWatcher; 2],
 }
 
@@ -39,109 +40,109 @@ impl FingerprintsValidator {
         admin_keys_directory: PathBuf,
     ) -> anyhow::Result<Self> {
         let user_fingerprints = Arc::new(RwLock::new(BTreeSet::new()));
-        let admin_fingerprints = Arc::new(RwLock::new(BTreeSet::new()));
         let (user_watcher, mut user_rx) =
             watch_directory::<RecommendedWatcher>(user_keys_directory.as_path())?;
+        user_rx.mark_changed();
+        let admin_fingerprints = Arc::new(RwLock::new(BTreeSet::new()));
         let (admin_watcher, mut admin_rx) =
             watch_directory::<RecommendedWatcher>(admin_keys_directory.as_path())?;
-        user_rx.mark_changed();
+        admin_rx.mark_changed();
+        // Populate user keys
         let user_fingerprints_clone = Arc::clone(&user_fingerprints);
-        let admin_fingerprints_clone = Arc::clone(&admin_fingerprints);
-        let (init_tx, init_rx) = oneshot::channel::<()>();
-        let join_handle = DroppableHandle(tokio::spawn(async move {
-            let mut init_tx = Some(init_tx);
+        let (user_init_tx, user_init_rx) = oneshot::channel::<()>();
+        let user_join_handle = DroppableHandle(tokio::spawn(async move {
+            let mut user_init_tx = Some(user_init_tx);
             loop {
-                if async {
-                    tokio::select! {
-                        change = user_rx.changed() => change.is_err(),
-                        change = admin_rx.changed() => change.is_err(),
-                    }
-                }
-                .await
-                {
+                if user_rx.changed().await.is_err() {
                     break;
                 }
-                tokio::join!(
-                    // Populate user keys
-                    async {
-                        let mut user_set = BTreeSet::new();
-                        match read_dir(user_keys_directory.as_path()).await {
-                            Ok(mut read_dir) => {
-                                while let Ok(Some(entry)) = read_dir.next_entry().await {
-                                    match read_to_string(entry.path()).await {
-                                        Ok(data) => {
-                                            user_set.extend(
-                                                data.lines()
-                                                    .flat_map(|line| {
-                                                        PublicKey::from_openssh(line).ok()
-                                                    })
-                                                    .map(|key| key.fingerprint(HashAlg::Sha256)),
-                                            );
-                                        }
-                                        Err(err) => {
-                                            warn!(
-                                                "Unable to load user key in {:?}: {}",
-                                                entry.file_name(),
-                                                err
-                                            );
-                                        }
-                                    }
+                let mut user_set = BTreeSet::new();
+                match read_dir(user_keys_directory.as_path()).await {
+                    Ok(mut read_dir) => {
+                        while let Ok(Some(entry)) = read_dir.next_entry().await {
+                            match read_to_string(entry.path()).await {
+                                Ok(data) => {
+                                    user_set.extend(
+                                        data.lines()
+                                            .flat_map(|line| PublicKey::from_openssh(line).ok())
+                                            .map(|key| key.fingerprint(HashAlg::Sha256)),
+                                    );
                                 }
-                                *user_fingerprints_clone.write().unwrap() = user_set;
-                            }
-                            Err(err) => {
-                                error!(
-                                    "Unable to read user keys directory {:?}: {}",
-                                    &user_keys_directory, err
-                                );
+                                Err(err) => {
+                                    warn!(
+                                        "Unable to load user key in {:?}: {}",
+                                        entry.file_name(),
+                                        err
+                                    );
+                                }
                             }
                         }
-                    },
-                    // Populate admin keys
-                    async {
-                        let mut admin_set = BTreeSet::new();
-                        match read_dir(admin_keys_directory.as_path()).await {
-                            Ok(mut read_dir) => {
-                                while let Ok(Some(entry)) = read_dir.next_entry().await {
-                                    match read_to_string(entry.path()).await {
-                                        Ok(data) => {
-                                            admin_set.extend(
-                                                data.lines()
-                                                    .flat_map(|line| {
-                                                        PublicKey::from_openssh(line).ok()
-                                                    })
-                                                    .map(|key| key.fingerprint(HashAlg::Sha256)),
-                                            );
-                                        }
-                                        Err(err) => {
-                                            warn!(
-                                                "Unable to load admin key in {:?}: {}",
-                                                entry.file_name(),
-                                                err
-                                            );
-                                        }
-                                    }
-                                }
-                                *admin_fingerprints_clone.write().unwrap() = admin_set;
-                            }
-                            Err(err) => {
-                                error!(
-                                    "Unable to read admin keys directory {:?}: {}",
-                                    &admin_keys_directory, err
-                                );
-                            }
-                        }
+                        *user_fingerprints_clone.write().unwrap() = user_set;
                     }
-                );
-                init_tx.take().map(|tx| tx.send(()));
+                    Err(err) => {
+                        error!(
+                            "Unable to read user keys directory {:?}: {}",
+                            &user_keys_directory, err
+                        );
+                    }
+                }
+                if let Some(tx) = user_init_tx.take() {
+                    let _ = tx.send(());
+                };
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }));
-        init_rx.await.unwrap();
+        // Populate admin keys
+        let admin_fingerprints_clone = Arc::clone(&admin_fingerprints);
+        let (admin_init_tx, admin_init_rx) = oneshot::channel::<()>();
+        let admin_join_handle = DroppableHandle(tokio::spawn(async move {
+            let mut admin_init_tx = Some(admin_init_tx);
+            loop {
+                if admin_rx.changed().await.is_err() {
+                    break;
+                }
+                let mut admin_set = BTreeSet::new();
+                match read_dir(admin_keys_directory.as_path()).await {
+                    Ok(mut read_dir) => {
+                        while let Ok(Some(entry)) = read_dir.next_entry().await {
+                            match read_to_string(entry.path()).await {
+                                Ok(data) => {
+                                    admin_set.extend(
+                                        data.lines()
+                                            .flat_map(|line| PublicKey::from_openssh(line).ok())
+                                            .map(|key| key.fingerprint(HashAlg::Sha256)),
+                                    );
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        "Unable to load admin key in {:?}: {}",
+                                        entry.file_name(),
+                                        err
+                                    );
+                                }
+                            }
+                        }
+                        *admin_fingerprints_clone.write().unwrap() = admin_set;
+                    }
+                    Err(err) => {
+                        error!(
+                            "Unable to read admin keys directory {:?}: {}",
+                            &admin_keys_directory, err
+                        );
+                    }
+                }
+                if let Some(tx) = admin_init_tx.take() {
+                    let _ = tx.send(());
+                };
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        }));
+        tokio::try_join!(user_init_rx, admin_init_rx)?;
         Ok(FingerprintsValidator {
             user_fingerprints,
             admin_fingerprints,
-            _join_handle: join_handle,
+            _user_join_handle: user_join_handle,
+            _admin_join_handle: admin_join_handle,
             _watchers: [user_watcher, admin_watcher],
         })
     }

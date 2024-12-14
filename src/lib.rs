@@ -33,7 +33,6 @@ use crate::{
     acme::AcmeResolver,
     addressing::{AddressDelegator, DnsResolver},
     certificates::{AlpnChallengeResolver, CertificateResolver, DummyAlpnChallengeResolver},
-    config::ApplicationConfig,
     connections::ConnectionMap,
     error::ServerError,
     fingerprints::FingerprintsValidator,
@@ -41,12 +40,14 @@ use crate::{
     ssh::{Server, SshTunnelHandler},
 };
 
+#[doc(hidden)]
+pub use crate::config::{ApplicationConfig, BindHostnames, LoadBalancing, RandomSubdomainSeed};
+
 mod acme;
 mod addressing;
 mod admin;
 mod certificates;
-#[doc(hidden)]
-pub mod config;
+mod config;
 mod connections;
 mod directory;
 mod droppable_handle;
@@ -83,7 +84,6 @@ struct SystemData {
     cpu_usage: f32,
 }
 
-#[derive(Clone)]
 pub(crate) struct SandholeServer {
     pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
     pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>>>,
@@ -92,8 +92,8 @@ pub(crate) struct SandholeServer {
     pub(crate) ssh_data: Arc<DataTable<String, BTreeSet<SocketAddr>>>,
     pub(crate) tcp_data: Arc<DataTable<TcpAlias, BTreeSet<SocketAddr>>>,
     pub(crate) system_data: Arc<RwLock<SystemData>>,
-    pub(crate) fingerprints_validator: Arc<FingerprintsValidator>,
-    pub(crate) api_login: Arc<Option<ApiLogin>>,
+    pub(crate) fingerprints_validator: FingerprintsValidator,
+    pub(crate) api_login: Option<ApiLogin>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
     pub(crate) tcp_handler: Arc<TcpHandler>,
     pub(crate) domain: String,
@@ -106,6 +106,7 @@ pub(crate) struct SandholeServer {
 }
 
 #[doc(hidden)]
+// Main entrypoint of the application.
 pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     // Initialize crypto and credentials
     rustls::crypto::aws_lc_rs::default_provider()
@@ -153,18 +154,16 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             .await
             .with_context(|| "Error creating admin keys directory")?;
     }
-    let fingerprints = Arc::new(
-        FingerprintsValidator::watch(
-            config.user_keys_directory.clone(),
-            config.admin_keys_directory.clone(),
-        )
-        .await
-        .with_context(|| "Error setting up public keys watcher")?,
-    );
-    let api_login = Arc::new(match config.password_authentication_url.as_deref() {
-        Some(url) => Some(ApiLogin::new(url)?),
+    let fingerprints = FingerprintsValidator::watch(
+        config.user_keys_directory.clone(),
+        config.admin_keys_directory.clone(),
+    )
+    .await
+    .with_context(|| "Error setting up public keys watcher")?;
+    let api_login = match config.password_authentication_url {
+        Some(ref url) => Some(ApiLogin::new(url)?),
         None => None,
-    });
+    };
     let alpn_resolver: Box<dyn AlpnChallengeResolver> = match config.acme_contact_email {
         Some(contact) => {
             if config.https_port == 443 {
@@ -226,7 +225,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         to: config.domain_redirect,
     });
 
-    // Telemetry
+    // Telemetry tasks
     let http_data = Arc::new(RwLock::default());
     let data_clone = Arc::clone(&http_data);
     let connections_clone = Arc::clone(&http_connections);

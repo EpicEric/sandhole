@@ -17,10 +17,7 @@ use rustls::{
     pki_types::{pem::PemObject, CertificateDer},
     RootCertStore,
 };
-use sandhole::{
-    config::{ApplicationConfig, BindHostnames, LoadBalancing},
-    entrypoint,
-};
+use sandhole::{entrypoint, ApplicationConfig, BindHostnames, LoadBalancing};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},

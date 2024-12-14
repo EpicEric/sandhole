@@ -24,9 +24,14 @@ impl<K> ConnectionMapReactor<K> for DummyConnectionMapReactor {
     fn call(&self, _: Vec<K>) {}
 }
 
+struct ConnectionMapEntry<H> {
+    address: SocketAddr,
+    handler: H,
+}
+
 pub(crate) struct ConnectionMap<K, H, R = DummyConnectionMapReactor> {
     load_balancing: LoadBalancing,
-    map: DashMap<K, Vec<(SocketAddr, H)>>,
+    map: DashMap<K, Vec<ConnectionMapEntry<H>>>,
     reactor: RwLock<Option<R>>,
 }
 
@@ -48,16 +53,21 @@ where
         let len = self.map.len();
         match self.load_balancing {
             LoadBalancing::Allow => {
-                self.map.entry(key).or_default().push((address, handler));
+                self.map
+                    .entry(key)
+                    .or_default()
+                    .push(ConnectionMapEntry { address, handler });
             }
             LoadBalancing::Replace => {
-                self.map.insert(key, vec![(address, handler)]);
+                self.map
+                    .insert(key, vec![ConnectionMapEntry { address, handler }]);
             }
             LoadBalancing::Deny => {
                 if self.map.contains_key(&key) {
-                    Err(ServerError::LoadBalancingRejected)?;
+                    Err(ServerError::LoadBalancingAlreadyBound)?;
                 }
-                self.map.insert(key, vec![(address, handler)]);
+                self.map
+                    .insert(key, vec![ConnectionMapEntry { address, handler }]);
             }
         }
         if self.map.len() > len {
@@ -79,7 +89,7 @@ where
                 .value()
                 .as_slice()
                 .choose(&mut rng)
-                .map(|(_, handler)| Clone::clone(handler))
+                .map(|ConnectionMapEntry { handler, .. }| Clone::clone(handler))
         })
     }
 
@@ -90,7 +100,7 @@ where
     {
         let len = self.map.len();
         self.map.remove_if_mut(key, |_, value| {
-            value.retain(|(addr, _)| addr != address);
+            value.retain(|ConnectionMapEntry { address: addr, .. }| addr != address);
             value.is_empty()
         });
         if self.map.len() < len {
@@ -103,7 +113,7 @@ where
     pub(crate) fn remove_by_address(&self, address: &SocketAddr) {
         let len = self.map.len();
         self.map.retain(|_, value| {
-            value.retain(|(addr, _)| addr != address);
+            value.retain(|ConnectionMapEntry { address: addr, .. }| addr != address);
             value.is_empty()
         });
         if self.map.len() < len {
@@ -126,7 +136,7 @@ where
                     entry
                         .value()
                         .iter()
-                        .map(|(peer, _)| peer)
+                        .map(|ConnectionMapEntry { address, .. }| address)
                         .copied()
                         .collect(),
                 )

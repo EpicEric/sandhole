@@ -12,6 +12,6 @@ pub(crate) enum ServerError {
     InvalidFilePath,
     #[error("Fingerprint denied")]
     FingerprintDenied,
-    #[error("Load balancing rejected")]
-    LoadBalancingRejected,
+    #[error("Already bound by another service")]
+    LoadBalancingAlreadyBound,
 }
