@@ -35,6 +35,7 @@ impl AcmeResolver {
 }
 
 impl AlpnChallengeResolver for AcmeResolver {
+    // Handle the new list of domains to manage certificates for with TLS-ALPN-01 challenges.
     fn update_domains(&mut self, domains: Vec<String>) {
         if domains.is_empty() {
             return;
@@ -61,6 +62,7 @@ impl AlpnChallengeResolver for AcmeResolver {
         })));
     }
 
+    // Return the appropriate certificate for the given TLS ClientHello.
     fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
         self.resolver
             .as_ref()

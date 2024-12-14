@@ -121,6 +121,7 @@ where
     pub(crate) _phantom_data: PhantomData<T>,
 }
 
+// Receive an HTTP request and appropriately proxy it, with a possible upgrade to WebSocket.
 pub(crate) async fn proxy_handler<B, H, T, R>(
     mut request: Request<B>,
     tcp_address: SocketAddr,

@@ -26,6 +26,7 @@ impl Counter {
         }
     }
 
+    // Add some amount to the given counter.
     fn add(&mut self, value: u64) {
         loop {
             let Some(element) = self.history.front() else {
@@ -45,6 +46,7 @@ impl Counter {
         self.count += value;
     }
 
+    // Measure the counter, taking the period and window into account.
     fn measure(&mut self) -> f64 {
         let delta = loop {
             let Some(element) = self.history.front() else {
@@ -111,6 +113,7 @@ impl Telemetry {
         }
     }
 
+    // Take into account an HTTP request to the given hostname.
     pub(crate) fn add_http_request(&self, hostname: String) {
         self.http_requests_per_minute
             .entry(hostname)
@@ -119,6 +122,7 @@ impl Telemetry {
             .add(1);
     }
 
+    // Return data on all HTTP requests per minute.
     pub(crate) fn get_http_requests_per_minute(&self) -> HashMap<String, f64> {
         self.http_requests_per_minute
             .iter_mut()
@@ -131,6 +135,7 @@ impl Telemetry {
 }
 
 impl ConnectionMapReactor<String> for Arc<Telemetry> {
+    // Handle hostnames being removed by clearing their data.
     fn call(&self, hostnames: Vec<String>) {
         let hostnames: HashSet<String> = hostnames.into_iter().collect();
         self.http_requests_per_minute

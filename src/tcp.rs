@@ -51,6 +51,7 @@ pub(crate) trait PortHandler {
 
 #[async_trait]
 impl PortHandler for Arc<TcpHandler> {
+    // Create a TCP listener on the given port.
     async fn create_port_listener(&self, port: u16) -> u16 {
         let listener = match TcpListener::bind((self.listen_address.as_ref(), port)).await {
             Ok(listener) => listener,
@@ -106,12 +107,14 @@ impl PortHandler for Arc<TcpHandler> {
         port
     }
 
+    // Create a TCP listener on a random open port, returning the port number.
     async fn get_free_port(&self) -> u16 {
         self.create_port_listener(0).await
     }
 }
 
 impl ConnectionMapReactor<TcpAlias> for Arc<TcpHandler> {
+    // Handle changes to the proxy ports, creating/deleting listeners as needed.
     fn call(&self, ports: Vec<TcpAlias>) {
         let mut ports: HashSet<u16> = ports
             .into_iter()

@@ -33,6 +33,7 @@ pub(crate) struct FingerprintsValidator {
 }
 
 impl FingerprintsValidator {
+    // Start watching on the directories, waiting for user/admin keys that get added or removed.
     pub(crate) async fn watch(
         user_keys_directory: PathBuf,
         admin_keys_directory: PathBuf,
@@ -61,6 +62,7 @@ impl FingerprintsValidator {
                     break;
                 }
                 tokio::join!(
+                    // Populate user keys
                     async {
                         let mut user_set = BTreeSet::new();
                         match read_dir(user_keys_directory.as_path()).await {
@@ -95,6 +97,7 @@ impl FingerprintsValidator {
                             }
                         }
                     },
+                    // Populate admin keys
                     async {
                         let mut admin_set = BTreeSet::new();
                         match read_dir(admin_keys_directory.as_path()).await {
@@ -143,6 +146,7 @@ impl FingerprintsValidator {
         })
     }
 
+    // Find the right authentication type for a given fingerprint
     pub(crate) fn authenticate_fingerprint(&self, fingerprint: &Fingerprint) -> AuthenticationType {
         if self
             .admin_fingerprints

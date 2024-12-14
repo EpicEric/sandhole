@@ -188,6 +188,7 @@ pub(crate) trait Server {
 }
 
 impl Server for Arc<SandholeServer> {
+    // Create a new handler for the SSH connection.
     fn new_client(
         &mut self,
         peer_address: Option<SocketAddr>,
@@ -218,6 +219,7 @@ impl Server for Arc<SandholeServer> {
 impl Handler for ServerHandler {
     type Error = russh::Error;
 
+    // Handle creation of a channel for sending and receiving logs to the client.
     async fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
@@ -241,12 +243,14 @@ impl Handler for ServerHandler {
         Ok(true)
     }
 
+    // Return the default authentication method.
     async fn auth_none(&mut self, _user: &str) -> Result<Auth, Self::Error> {
         Ok(Auth::Reject {
             proceed_with_methods: Some(MethodSet::PUBLICKEY),
         })
     }
 
+    // Authenticate users with a password if the API login service is available.
     async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
         if let Some(api_login) = self.server.api_login.deref() {
             if let Ok(is_authenticated) =
@@ -279,6 +283,8 @@ impl Handler for ServerHandler {
         })
     }
 
+    // Receive an authentication request and handle it by validating the fingerprint,
+    // marking the session as unauthenticated if unknown to potentially clean up if unproxied.
     async fn auth_publickey(
         &mut self,
         user: &str,
@@ -331,6 +337,7 @@ impl Handler for ServerHandler {
         }
     }
 
+    // Handle data received from the client such as key presses.
     async fn data(
         &mut self,
         _channel: ChannelId,
@@ -369,6 +376,7 @@ impl Handler for ServerHandler {
         Ok(())
     }
 
+    // Receive and handle any additional commands from the client where appropriate.
     async fn exec_request(
         &mut self,
         _channel: ChannelId,
@@ -422,6 +430,7 @@ impl Handler for ServerHandler {
         Ok(())
     }
 
+    // Set up data for the PTY in order to properly use the TUI.
     async fn pty_request(
         &mut self,
         channel: ChannelId,
@@ -445,6 +454,7 @@ impl Handler for ServerHandler {
         Ok(())
     }
 
+    // Handle changes to the client's window size.
     async fn window_change_request(
         &mut self,
         _channel: ChannelId,
@@ -471,6 +481,7 @@ impl Handler for ServerHandler {
         Ok(())
     }
 
+    // Handle a remote forwarding request for the client.
     async fn tcpip_forward(
         &mut self,
         address: &str,
@@ -739,6 +750,7 @@ impl Handler for ServerHandler {
         }
     }
 
+    // Handle closure of a remote forwarding request.
     async fn cancel_tcpip_forward(
         &mut self,
         address: &str,
@@ -763,7 +775,7 @@ impl Handler for ServerHandler {
                         .host_addressing
                         .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                 {
-                    self.server.ssh.remove(&assigned_host, self.peer);
+                    self.server.ssh.remove(&assigned_host, &self.peer);
                     user_data.ssh_hosts.remove(&assigned_host);
                     Ok(true)
                 } else {
@@ -776,7 +788,7 @@ impl Handler for ServerHandler {
                         .host_addressing
                         .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                 {
-                    self.server.http.remove(&assigned_host, self.peer);
+                    self.server.http.remove(&assigned_host, &self.peer);
                     user_data.http_hosts.remove(&assigned_host);
                     Ok(true)
                 } else {
@@ -790,7 +802,7 @@ impl Handler for ServerHandler {
                         .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                 {
                     let key: &dyn TcpAliasKey = assigned_alias.borrow();
-                    self.server.tcp.remove(key, self.peer);
+                    self.server.tcp.remove(key, &self.peer);
                     user_data.tcp_aliases.remove(key);
                     Ok(true)
                 } else {
@@ -800,6 +812,7 @@ impl Handler for ServerHandler {
         }
     }
 
+    // Handle a local forwarding request (i.e. proxy tunnel or aliasing).
     async fn channel_open_direct_tcpip(
         &mut self,
         channel: Channel<Msg>,
@@ -931,20 +944,18 @@ impl Handler for ServerHandler {
 
 impl Drop for ServerHandler {
     fn drop(&mut self) {
-        match &mut self.auth_data {
-            AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
-                for host in user_data.ssh_hosts.iter() {
-                    self.server.ssh.remove(host, self.peer);
-                }
-                for host in user_data.http_hosts.iter() {
-                    self.server.http.remove(host, self.peer);
-                }
-                for port in user_data.tcp_aliases.iter() {
-                    self.server.tcp.remove(port, self.peer);
-                }
+        info!("{} disconnected", self.peer);
+        match self.auth_data {
+            AuthenticatedData::User { .. } | AuthenticatedData::Admin { .. } => {
+                let server = Arc::clone(&self.server);
+                let peer = self.peer;
+                tokio::spawn(async move {
+                    server.ssh.remove_by_address(&peer);
+                    server.http.remove_by_address(&peer);
+                    server.tcp.remove_by_address(&peer);
+                });
             }
             AuthenticatedData::Proxy | AuthenticatedData::None { .. } => (),
         }
-        info!("{} disconnected", self.peer);
     }
 }

@@ -22,6 +22,7 @@ pub(crate) struct DnsResolver(TokioAsyncResolver);
 #[cfg_attr(test, automock)]
 #[async_trait]
 pub(crate) trait Resolver {
+    // Check if there is a TXT record for the provided fingerprint.
     async fn has_txt_record_for_fingerprint(
         &self,
         txt_record_prefix: &str,
@@ -29,6 +30,7 @@ pub(crate) trait Resolver {
         fingerprint: &Fingerprint,
     ) -> bool;
 
+    // Check if there is a CNAME record pointing to Sandhole's domain.
     async fn has_cname_record_for_domain(&self, requested_address: &str, domain: &str) -> bool;
 }
 
@@ -122,6 +124,7 @@ impl<R: Resolver> AddressDelegator<R> {
         }
     }
 
+    // Assign an address given the current configuration
     pub(crate) async fn get_address(
         &self,
         requested_address: &str,
@@ -187,6 +190,7 @@ impl<R: Resolver> AddressDelegator<R> {
         )
     }
 
+    // Generate a random subdomain based on the configured strategy
     fn get_random_subdomain(
         &self,
         requested_address: &str,

@@ -44,20 +44,20 @@ where
         }
     }
 
-    pub(crate) fn insert(&self, key: K, addr: SocketAddr, handler: H) -> anyhow::Result<()> {
+    pub(crate) fn insert(&self, key: K, address: SocketAddr, handler: H) -> anyhow::Result<()> {
         let len = self.map.len();
         match self.load_balancing {
             LoadBalancing::Allow => {
-                self.map.entry(key).or_default().push((addr, handler));
+                self.map.entry(key).or_default().push((address, handler));
             }
             LoadBalancing::Replace => {
-                self.map.insert(key, vec![(addr, handler)]);
+                self.map.insert(key, vec![(address, handler)]);
             }
             LoadBalancing::Deny => {
                 if self.map.contains_key(&key) {
                     Err(ServerError::LoadBalancingRejected)?;
                 }
-                self.map.insert(key, vec![(addr, handler)]);
+                self.map.insert(key, vec![(address, handler)]);
             }
         }
         if self.map.len() > len {
@@ -83,14 +83,27 @@ where
         })
     }
 
-    pub(crate) fn remove<Q>(&self, key: &Q, addr: SocketAddr)
+    pub(crate) fn remove<Q>(&self, key: &Q, address: &SocketAddr)
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         let len = self.map.len();
         self.map.remove_if_mut(key, |_, value| {
-            value.retain(|(address, _)| *address != addr);
+            value.retain(|(addr, _)| addr != address);
+            value.is_empty()
+        });
+        if self.map.len() < len {
+            if let Some(reactor) = self.reactor.read().unwrap().as_ref() {
+                reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
+            }
+        }
+    }
+
+    pub(crate) fn remove_by_address(&self, address: &SocketAddr) {
+        let len = self.map.len();
+        self.map.retain(|_, value| {
+            value.retain(|(addr, _)| addr != address);
             value.is_empty()
         });
         if self.map.len() < len {
@@ -138,8 +151,24 @@ mod connection_map_tests {
         map.insert("host".into(), "127.0.0.1:1".parse().unwrap(), 1)
             .unwrap();
         assert_eq!(map.get("host"), Some(1));
-        map.remove("host", "127.0.0.1:1".parse().unwrap());
+        map.remove("host", &"127.0.0.1:1".parse().unwrap());
         assert_eq!(map.get("host"), None);
+    }
+
+    #[test]
+    fn removes_all_handlers_from_address() {
+        let mut mock = MockConnectionMapReactor::new();
+        mock.expect_call().times(2).returning(|_| {});
+        let map = ConnectionMap::<String, usize, _>::new(LoadBalancing::Allow, Some(mock));
+        map.insert("host1".into(), "127.0.0.1:2".parse().unwrap(), 1)
+            .unwrap();
+        map.insert("host2".into(), "127.0.0.1:2".parse().unwrap(), 2)
+            .unwrap();
+        assert_eq!(map.get("host1"), Some(1));
+        assert_eq!(map.get("host2"), Some(2));
+        map.remove_by_address(&"127.0.0.1:2".parse().unwrap());
+        assert_eq!(map.get("host1"), None);
+        assert_eq!(map.get("host2"), None);
     }
 
     #[test]

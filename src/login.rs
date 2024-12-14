@@ -39,6 +39,7 @@ pub(crate) struct AuthenticationRequest<'a> {
 }
 
 impl ApiLogin {
+    // Create the login client with the shared configuration for HTTP requests.
     pub(crate) fn new(endpoint: &str) -> anyhow::Result<Self> {
         let url: Uri = endpoint
             .parse()
@@ -77,6 +78,7 @@ impl ApiLogin {
         })
     }
 
+    // Sends a POST request with the authentication body to the configured service, returning true if authenticated.
     pub(crate) async fn authenticate(&self, data: &AuthenticationRequest<'_>) -> bool {
         let tcp_stream = match TcpStream::connect(&self.address).await {
             Ok(tcp_stream) => tcp_stream,

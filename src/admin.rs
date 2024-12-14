@@ -103,6 +103,7 @@ fn to_socket_addr_string(addr: SocketAddr) -> String {
 }
 
 impl AdminState {
+    // Render the admin interface
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         if self.is_pty {
             let title = Line::from(" Sandhole admin ".bold());
@@ -144,6 +145,7 @@ impl AdminState {
         }
     }
 
+    // Render the selected tab's contents
     fn render_tab(&mut self, area: Rect, buf: &mut Buffer) {
         let color = self.tab.color();
         let table = match self.tab {
@@ -232,6 +234,7 @@ impl AdminState {
         );
     }
 
+    // Render the system information box
     fn render_system_data(&mut self, area: Rect, buf: &mut Buffer) {
         let SystemData {
             used_memory,
@@ -289,6 +292,7 @@ pub(crate) struct AdminInterface {
 }
 
 impl AdminInterface {
+    // Create an admin interface and send its output to the provided UnboundedSender
     pub(crate) fn new(tx: UnboundedSender<Vec<u8>>, server: Arc<SandholeServer>) -> Self {
         let backend = CrosstermBackend::new(BufferedSender {
             tx,
@@ -338,6 +342,7 @@ impl AdminInterface {
         }
     }
 
+    // Adjust to a window resize event
     pub(crate) fn resize(&mut self, width: u16, height: u16) -> anyhow::Result<()> {
         let rect = ratatui::prelude::Rect {
             x: 0,
@@ -355,6 +360,7 @@ impl AdminInterface {
         Ok(())
     }
 
+    // Advance one tab
     pub(crate) fn next_tab(&mut self) {
         {
             let mut interface = self.interface.lock().unwrap();
@@ -376,6 +382,7 @@ impl AdminInterface {
         let _ = self.change_notifier.send(());
     }
 
+    // Go back one tab
     pub(crate) fn previous_tab(&mut self) {
         {
             let mut interface = self.interface.lock().unwrap();
@@ -397,6 +404,7 @@ impl AdminInterface {
         let _ = self.change_notifier.send(());
     }
 
+    // Move down in the selected tab's table
     pub(crate) fn move_down(&mut self) {
         {
             let mut interface = self.interface.lock().unwrap();
@@ -407,6 +415,7 @@ impl AdminInterface {
         let _ = self.change_notifier.send(());
     }
 
+    // Move up in the selected tab's table
     pub(crate) fn move_up(&mut self) {
         {
             let mut interface = self.interface.lock().unwrap();
@@ -417,6 +426,7 @@ impl AdminInterface {
         let _ = self.change_notifier.send(());
     }
 
+    // Move left in the selected tab's table
     pub(crate) fn move_left(&mut self) {
         {
             let mut interface = self.interface.lock().unwrap();
@@ -426,6 +436,7 @@ impl AdminInterface {
         let _ = self.change_notifier.send(());
     }
 
+    // Move right in the selected tab's table
     pub(crate) fn move_right(&mut self) {
         {
             let mut interface = self.interface.lock().unwrap();

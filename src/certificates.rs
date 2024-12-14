@@ -57,6 +57,7 @@ pub(crate) struct CertificateResolver {
 }
 
 impl CertificateResolver {
+    // Start watching on the directory, waiting for certificates that get added or removed.
     pub(crate) async fn watch(
         directory: PathBuf,
         alpn_resolver: RwLock<Box<dyn AlpnChallengeResolver>>,
@@ -156,6 +157,7 @@ impl CertificateResolver {
         })
     }
 
+    // Find the certificate that matches the given server name
     fn resolve_server_name(&self, server_name: &str) -> Option<Arc<CertifiedKey>> {
         let Ok(dns_server_name) = DnsName::try_from(server_name).map(ServerName::DnsName) else {
             return None;
