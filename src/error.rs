@@ -14,4 +14,6 @@ pub(crate) enum ServerError {
     FingerprintDenied,
     #[error("Already bound by another service")]
     LoadBalancingAlreadyBound,
+    #[error("Quota reached for user")]
+    QuotaReached,
 }

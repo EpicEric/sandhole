@@ -10,8 +10,8 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 <b><u>Usage:</u></b> <b>sandhole</b> [OPTIONS] <b>--domain</b> &lt;DOMAIN&gt;
 
 <b><u>Options:</u></b>
-<b>--domain</b> &lt;DOMAIN&gt;
-The root domain of the application
+      <b>--domain</b> &lt;DOMAIN&gt;
+          The root domain of the application
 
       <b>--domain-redirect</b> &lt;URL&gt;
           Where to redirect requests to the root domain
@@ -32,8 +32,8 @@ The root domain of the application
 
       <b>--certificates-directory</b> &lt;DIRECTORY&gt;
           Directory containing SSL certificates and keys. Each sub-directory
-          inside of this one must contain a certificate chain in a
-          `fullchain.pem` file and its private key in a `privkey.pem` file
+          inside of this one must contain a certificate chain in a fullchain.pem
+          file and its private key in a privkey.pem file
 
           [default: ./deploy/certificates/]
 
@@ -100,7 +100,7 @@ The root domain of the application
           If set, defines a URL against which password authentication requests
           will be validated. This is done by sending the following JSON payload:
 
-          `{&quot;user&quot;: &quot;...&quot;, &quot;password&quot;: &quot;...&quot;, &quot;remote_address&quot;: &quot;...&quot;}`
+          {&quot;user&quot;: &quot;...&quot;, &quot;password&quot;: &quot;...&quot;, &quot;remote_address&quot;: &quot;...&quot;}
 
           Any 2xx response indicates that the credentials are authorized.
 
@@ -113,13 +113,13 @@ The root domain of the application
 
           Possible values:
           - <b>all</b>:   Allow any hostnames unconditionally, including the
-                   main domain
+                          main domain
           - <b>cname</b>: Allow any hostnames with a CNAME record pointing to
-                   the main domain
+                          the main domain
           - <b>txt</b>:   Allow any hostnames with a TXT record containing a
-                   fingerprint, including the main domain
+                          fingerprint, including the main domain
           - <b>none</b>:  Don&#39;t allow user-provided hostnames, enforce
-                   subdomains
+                          subdomains
 
       <b>--load-balancing</b> &lt;STRATEGY&gt;
           Strategy for load-balancing when multiple services request the same
@@ -133,16 +133,17 @@ The root domain of the application
           Possible values:
           - <b>allow</b>:   Load-balance with all available handlers
           - <b>replace</b>: Don&#39;t load-balance; When adding a new handler,
-                     replace the existing one
+                            replace the existing one
           - <b>deny</b>:    Don&#39;t load-balance; Deny the new handler if
-                     there&#39;s an existing one
+                            there&#39;s an existing one
 
       <b>--txt-record-prefix</b> &lt;PREFIX&gt;
           Prefix for TXT DNS records containing key fingerprints, for
           authorization to bind under a specific domain.
 
           In other words, valid records will be of the form:
-          `TXT prefix.custom-domain SHA256:...`
+
+          TXT prefix.custom-domain SHA256:...
 
           [default: _sandhole]
 
@@ -152,6 +153,15 @@ The root domain of the application
 
       <b>--allow-requested-ports</b>
           Allow user-requested ports. By default, ports are always random
+
+      <b>--quota-per-user</b> &lt;MAX&gt;
+          How many services can be exposed for a single user at once.
+          Doesn&#39;t apply to admin users.
+
+          Each user is distinguished by their key fingerprint or, in the case of
+          API logins, by their username.
+
+          By default, no limit is set.
 
       <b>--random-subdomain-seed</b> &lt;SEED&gt;
           Which value to seed with when generating random subdomains, for
@@ -164,11 +174,11 @@ The root domain of the application
 
           Possible values:
           - <b>ip-and-user</b>: From IP address, SSH user, and requested
-                         address. Recommended if unsure
+                                address. Recommended if unsure
           - <b>user</b>:        From SSH user and requested address
           - <b>fingerprint</b>: From SSH key fingerprint and requested address
           - <b>address</b>:     From SSH connection socket (address + port) and
-                         requested address
+                                requested address
 
       <b>--idle-connection-timeout</b> &lt;DURATION&gt;
           Grace period for dangling/unauthenticated SSH connections before they
@@ -196,10 +206,9 @@ The root domain of the application
 
           By default, these connections are not terminated by Sandhole.
 
-<b>-h</b>, <b>--help</b>
-Print help (see a summary with &#39;-h&#39;)
+  <b>-h</b>, <b>--help</b>
+          Print help (see a summary with &#39;-h&#39;)
 
-<b>-V</b>, <b>--version</b>
-Print version
-
+  <b>-V</b>, <b>--version</b>
+          Print version
 </pre>

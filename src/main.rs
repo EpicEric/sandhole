@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{num::NonZero, path::PathBuf};
 
 use clap::{command, Parser, ValueEnum};
 use humantime::Duration;
@@ -105,7 +105,7 @@ struct Args {
 
     /// Directory containing SSL certificates and keys.
     /// Each sub-directory inside of this one must contain a certificate chain in a
-    /// `fullchain.pem` file and its private key in a `privkey.pem` file.
+    /// fullchain.pem file and its private key in a privkey.pem file.
     #[arg(
         long,
         default_value_os = "./deploy/certificates/",
@@ -179,7 +179,7 @@ struct Args {
     /// If set, defines a URL against which password authentication requests will
     /// be validated. This is done by sending the following JSON payload:
     ///
-    /// `{"user": "...", "password": "...", "remote_address": "..."}`
+    /// {"user": "...", "password": "...", "remote_address": "..."}
     ///
     /// Any 2xx response indicates that the credentials are authorized.
     #[arg(long, value_name = "URL")]
@@ -199,7 +199,9 @@ struct Args {
 
     /// Prefix for TXT DNS records containing key fingerprints, for authorization to bind under a specific domain.
     ///
-    /// In other words, valid records will be of the form: `TXT prefix.custom-domain SHA256:...`
+    /// In other words, valid records will be of the form:
+    ///
+    /// TXT prefix.custom-domain SHA256:...
     #[arg(long, default_value_t = String::from("_sandhole"), value_parser = validate_txt_record_prefix, value_name = "PREFIX")]
     txt_record_prefix: String,
 
@@ -210,6 +212,14 @@ struct Args {
     /// Allow user-requested ports. By default, ports are always random.
     #[arg(long, default_value_t = false)]
     allow_requested_ports: bool,
+
+    /// How many services can be exposed for a single user at once. Doesn't apply to admin users.
+    ///
+    /// Each user is distinguished by their key fingerprint or, in the case of API logins, by their username.
+    ///
+    /// By default, no limit is set.
+    #[arg(long, value_name = "MAX")]
+    quota_per_user: Option<NonZero<usize>>,
 
     /// Which value to seed with when generating random subdomains, for determinism. This allows binding to the same
     /// random address until Sandhole is restarted.
@@ -270,6 +280,7 @@ async fn main() -> anyhow::Result<()> {
         txt_record_prefix: args.txt_record_prefix,
         allow_provided_subdomains: args.allow_provided_subdomains,
         allow_requested_ports: args.allow_requested_ports,
+        quota_per_user: args.quota_per_user,
         random_subdomain_seed: args.random_subdomain_seed.map(Into::into),
         idle_connection_timeout: args.idle_connection_timeout.into(),
         authentication_request_timeout: args.authentication_request_timeout.into(),

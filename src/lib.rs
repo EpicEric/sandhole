@@ -17,6 +17,7 @@ use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
 use hyper_util::rt::TokioIo;
 use log::{info, warn};
 use login::ApiLogin;
+use quota::{DummyQuotaHandler, QuotaHandler, QuotaMap};
 use rand::rngs::OsRng;
 use russh::server::Config;
 use russh_keys::decode_secret_key;
@@ -56,6 +57,7 @@ mod fingerprints;
 mod handler;
 mod http;
 mod login;
+mod quota;
 mod ssh;
 mod tcp;
 mod tcp_alias;
@@ -196,15 +198,28 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .with_context(|| "Error setting up certificates watcher")?,
     );
     let telemetry = Arc::new(Telemetry::new());
+    let quota_handler: Arc<Box<dyn QuotaHandler + Send + Sync>> = match config.quota_per_user {
+        Some(max_quota) => Arc::new(Box::new(Arc::new(QuotaMap::new(max_quota)))),
+        None => Arc::new(Box::new(DummyQuotaHandler)),
+    };
     let http_connections = Arc::new(ConnectionMap::new(
         config.load_balancing,
+        Arc::clone(&quota_handler),
         Some(HttpReactor {
             certificates: Arc::clone(&certificates),
             telemetry: Arc::clone(&telemetry),
         }),
     ));
-    let ssh_connections = Arc::new(ConnectionMap::new(config.load_balancing, None));
-    let tcp_connections = Arc::new(ConnectionMap::new(config.load_balancing, None));
+    let ssh_connections = Arc::new(ConnectionMap::new(
+        config.load_balancing,
+        Arc::clone(&quota_handler),
+        None,
+    ));
+    let tcp_connections = Arc::new(ConnectionMap::new(
+        config.load_balancing,
+        Arc::clone(&quota_handler),
+        None,
+    ));
     let tcp_handler: Arc<TcpHandler> = Arc::new(TcpHandler::new(
         config.listen_address,
         Arc::clone(&tcp_connections),

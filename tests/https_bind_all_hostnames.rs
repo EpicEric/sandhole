@@ -52,6 +52,7 @@ async fn https_bind_all_hostnames() {
         load_balancing: LoadBalancing::Allow,
         allow_provided_subdomains: false,
         allow_requested_ports: false,
+        quota_per_user: None,
         random_subdomain_seed: None,
         txt_record_prefix: "_sandhole".into(),
         idle_connection_timeout: Duration::from_secs(1),

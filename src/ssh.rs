@@ -148,6 +148,7 @@ enum AuthenticatedData {
     Proxy,
     User {
         user_data: Box<UserData>,
+        quota_key: String,
     },
     Admin {
         user_data: Box<UserData>,
@@ -265,8 +266,10 @@ impl Handler for ServerHandler {
                 .await
             {
                 if is_authenticated {
+                    self.user = Some(user.into());
                     self.auth_data = AuthenticatedData::User {
                         user_data: Box::default(),
+                        quota_key: format!("u:{}", user),
                     };
                     info!("{} connected with {} (password)", self.peer, self.auth_data);
                     return Ok(Auth::Accept);
@@ -290,7 +293,7 @@ impl Handler for ServerHandler {
         public_key: &PublicKey,
     ) -> Result<Auth, Self::Error> {
         let fingerprint = public_key.fingerprint(HashAlg::Sha256);
-        self.user = Some(user.to_string());
+        self.user = Some(user.into());
         self.key_fingerprint = Some(fingerprint);
         let authentication = self
             .server
@@ -323,6 +326,7 @@ impl Handler for ServerHandler {
             AuthenticationType::User => {
                 self.auth_data = AuthenticatedData::User {
                     user_data: Box::default(),
+                    quota_key: format!("f:{}", fingerprint),
                 };
                 Ok(Auth::Accept)
             }
@@ -404,7 +408,7 @@ impl Handler for ServerHandler {
                 }
                 (
                     command,
-                    AuthenticatedData::User { user_data }
+                    AuthenticatedData::User { user_data, .. }
                     | AuthenticatedData::Admin { user_data, .. },
                 ) if command.starts_with("allowed-fingerprints=") => {
                     let set: BTreeSet<Fingerprint> = command
@@ -443,7 +447,8 @@ impl Handler for ServerHandler {
     ) -> Result<(), Self::Error> {
         debug!("pty_request");
         match &mut self.auth_data {
-            AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
+            AuthenticatedData::User { user_data, .. }
+            | AuthenticatedData::Admin { user_data, .. } => {
                 user_data.col_width = Some(col_width);
                 user_data.row_height = Some(row_height);
                 session.channel_success(channel)?;
@@ -491,10 +496,12 @@ impl Handler for ServerHandler {
             return Err(russh::Error::Disconnect);
         }
         // Only allow remote forwarding for authorized keys
-        let user_data = match &mut self.auth_data {
-            AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
-                user_data
-            }
+        let (user_data, quota_key) = match &mut self.auth_data {
+            AuthenticatedData::User {
+                user_data,
+                quota_key,
+            } => (user_data, Some(quota_key.clone())),
+            AuthenticatedData::Admin { user_data, .. } => (user_data, None),
             AuthenticatedData::None { .. } | AuthenticatedData::Proxy => {
                 return Err(russh::Error::Disconnect)
             }
@@ -523,6 +530,7 @@ impl Handler for ServerHandler {
                 if let Err(err) = self.server.ssh.insert(
                     assigned_host.clone(),
                     self.peer,
+                    quota_key,
                     Arc::new(SshTunnelHandler::new(
                         Arc::clone(&user_data.allow_fingerprint),
                         handle,
@@ -581,6 +589,7 @@ impl Handler for ServerHandler {
                 if let Err(err) = self.server.http.insert(
                     assigned_host.clone(),
                     self.peer,
+                    quota_key,
                     Arc::new(SshTunnelHandler::new(
                         Arc::clone(&user_data.allow_fingerprint),
                         handle,
@@ -661,6 +670,7 @@ impl Handler for ServerHandler {
                 if let Err(err) = self.server.tcp.insert(
                     TcpAlias(tcp_alias.to_string(), assigned_port),
                     self.peer,
+                    quota_key,
                     Arc::new(SshTunnelHandler::new(
                         Arc::clone(&user_data.allow_fingerprint),
                         handle,
@@ -746,9 +756,8 @@ impl Handler for ServerHandler {
             return Err(russh::Error::Disconnect);
         }
         let user_data = match &mut self.auth_data {
-            AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
-                user_data
-            }
+            AuthenticatedData::User { user_data, .. }
+            | AuthenticatedData::Admin { user_data, .. } => user_data,
             AuthenticatedData::None { .. } | AuthenticatedData::Proxy => {
                 return Err(russh::Error::Disconnect)
             }
@@ -934,7 +943,7 @@ impl Drop for ServerHandler {
             AuthenticatedData::User { .. } | AuthenticatedData::Admin { .. } => {
                 let server = Arc::clone(&self.server);
                 let peer = self.peer;
-                tokio::spawn(async move {
+                tokio::task::spawn_blocking(move || {
                     server.ssh.remove_by_address(&peer);
                     server.http.remove_by_address(&peer);
                     server.tcp.remove_by_address(&peer);

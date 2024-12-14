@@ -1,7 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use rand::rngs::OsRng;
+use axum::{extract::Request, routing::get, Router};
+use hyper::{body::Incoming, service::service_fn};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto::Builder,
+};
 use russh::{
     client::{Msg, Session},
     Channel,
@@ -12,9 +17,10 @@ use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
 };
+use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn alias_aliasing_tunnel() {
+async fn quota_maximum_per_user() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),
@@ -39,8 +45,8 @@ async fn alias_aliasing_tunnel() {
         bind_hostnames: BindHostnames::None,
         load_balancing: LoadBalancing::Allow,
         allow_provided_subdomains: false,
-        allow_requested_ports: true,
-        quota_per_user: None,
+        allow_requested_ports: false,
+        quota_per_user: Some(1usize.try_into().unwrap()),
         random_subdomain_seed: None,
         txt_record_prefix: "_sandhole".into(),
         idle_connection_timeout: Duration::from_secs(1),
@@ -60,79 +66,89 @@ async fn alias_aliasing_tunnel() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
-        None,
-    )
-    .expect("Missing file key1");
+    // 2. Start SSH client that will reach quota
+    let key_1 = Arc::new(
+        load_secret_key(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+            None,
+        )
+        .expect("Missing file key1"),
+    );
     let ssh_client = SshClient;
-    let mut proxy_session =
-        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-            .await
-            .expect("Failed to connect to SSH server");
-    assert!(proxy_session
+    let mut session_1 = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
+    assert!(session_1
         .authenticate_publickey(
             "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            PrivateKeyWithHashAlg::new(Arc::clone(&key_1), None).unwrap()
         )
         .await
         .expect("SSH authentication failed"));
-    proxy_session
-        .tcpip_forward("my.tunnel", 42)
+    session_1
+        .tcpip_forward("some.random.hostname", 80)
         .await
         .expect("tcpip_forward failed");
-    assert!(
-        TcpStream::connect("127.0.0.1:42").await.is_err(),
-        "alias shouldn't create socket listener"
-    );
+    assert!(session_1
+        .tcpip_forward("another.random.hostname", 80)
+        .await
+        .is_err());
 
-    // 3. Establish a tunnel via aliasing
-    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
+    // 3. Try to connect via different client with same credentials and reach quota again
     let ssh_client = SshClient;
-    let mut client_session =
-        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-            .await
-            .expect("Failed to connect to SSH server");
-    assert!(client_session
+    let mut session_2 = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
+    assert!(session_2
         .authenticate_publickey(
             "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            PrivateKeyWithHashAlg::new(Arc::clone(&key_1), None).unwrap()
         )
         .await
         .expect("SSH authentication failed"));
-    let mut channel = client_session
-        .channel_open_direct_tcpip("my.tunnel", 42, "::1", 23456)
-        .await
-        .expect("Local forwarding failed");
-    if timeout(Duration::from_secs(5), async {
-        match &mut channel.wait().await.unwrap() {
-            russh::ChannelMsg::Data { data } => {
-                assert_eq!(
-                    String::from_utf8(data.to_vec()).unwrap(),
-                    "Poor man's VPN..."
-                );
-            }
-            msg => panic!("Unexpected message {:?}", msg),
-        }
-    })
-    .await
-    .is_err()
-    {
-        panic!("Timeout waiting for proxy server to reply.")
-    };
-
-    // 4. Cancel the port forwarding
-    proxy_session
-        .cancel_tcpip_forward("my.tunnel", 42)
-        .await
-        .expect("cancel_tcpip_forward failed");
-    assert!(client_session
-        .channel_open_direct_tcpip("my.tunnel", 42, "::1", 23456)
+    assert!(session_2
+        .tcpip_forward("sneaky.random.hostname", 80)
         .await
         .is_err());
-    assert!(!proxy_session.is_closed());
-    assert!(!client_session.is_closed());
+
+    // 4. Cancel first forwarding, then succeed on new one
+    session_1
+        .cancel_tcpip_forward("some.random.hostname", 80)
+        .await
+        .expect("cancel_tcpip_forward failed");
+    session_2
+        .tcpip_forward("new.random.hostname", 80)
+        .await
+        .expect("tcpip_forward failed");
+
+    // 5. Admin user doesn't have quota limit
+    let admin_key = Arc::new(
+        load_secret_key(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/admin"),
+            None,
+        )
+        .expect("Missing file admin"),
+    );
+    let ssh_client = SshClient;
+    let mut session_admin =
+        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+            .await
+            .expect("Failed to connect to SSH server");
+    assert!(session_admin
+        .authenticate_publickey(
+            "admin",
+            PrivateKeyWithHashAlg::new(Arc::clone(&admin_key), None).unwrap()
+        )
+        .await
+        .expect("SSH authentication failed"));
+    session_admin
+        .tcpip_forward("some.random.hostname", 80)
+        .await
+        .expect("tcpip_forward failed");
+    session_admin
+        .tcpip_forward("another.random.hostname", 80)
+        .await
+        .expect("tcpip_forward failed");
 }
 
 struct SshClient;
@@ -154,8 +170,19 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        channel.data(&b"Poor man's VPN..."[..]).await.unwrap();
-        channel.eof().await.unwrap();
+        let router = Router::new()
+            .route(
+                "/",
+                get(|| async move { format!("Max quota shenanigans.") }),
+            )
+            .into_service();
+        let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
+        tokio::spawn(async move {
+            Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(TokioIo::new(channel.into_stream()), service)
+                .await
+                .expect("Invalid request");
+        });
         Ok(())
     }
 }

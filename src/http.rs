@@ -346,6 +346,7 @@ mod proxy_handler_tests {
         connections::MockConnectionMapReactor,
         handler::MockConnectionHandler,
         http::{ProxyData, Telemetry},
+        quota::DummyQuotaHandler,
     };
 
     use super::{proxy_handler, ConnectionMap, DomainRedirect, Protocol};
@@ -358,7 +359,11 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
+        > = Arc::new(ConnectionMap::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(DummyQuotaHandler)),
+            None,
+        ));
         let request = Request::builder()
             .method("GET")
             .uri("/index.html")
@@ -393,7 +398,11 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
+        > = Arc::new(ConnectionMap::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(DummyQuotaHandler)),
+            None,
+        ));
         let request = Request::builder()
             .method("GET")
             .uri("/index.html")
@@ -431,7 +440,11 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
+        > = Arc::new(ConnectionMap::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(DummyQuotaHandler)),
+            None,
+        ));
         let request = Request::builder()
             .method("GET")
             .uri("/index.html")
@@ -473,7 +486,11 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
+        > = Arc::new(ConnectionMap::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(DummyQuotaHandler)),
+            None,
+        ));
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel().never();
         mock.expect_tunneling_channel().never();
@@ -481,6 +498,7 @@ mod proxy_handler_tests {
             .insert(
                 "with.handler".into(),
                 "127.0.0.1:12345".parse().unwrap(),
+                None,
                 Arc::new(mock),
             )
             .unwrap();
@@ -525,7 +543,11 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
+        > = Arc::new(ConnectionMap::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(DummyQuotaHandler)),
+            None,
+        ));
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel().never();
         mock.expect_tunneling_channel().never();
@@ -533,6 +555,7 @@ mod proxy_handler_tests {
             .insert(
                 "non.standard".into(),
                 "127.0.0.1:12345".parse().unwrap(),
+                None,
                 Arc::new(mock),
             )
             .unwrap();
@@ -577,7 +600,11 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
+        > = Arc::new(ConnectionMap::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(DummyQuotaHandler)),
+            None,
+        ));
         let (server, handler) = tokio::io::duplex(1024);
         let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let mut mock = MockConnectionHandler::new();
@@ -591,6 +618,7 @@ mod proxy_handler_tests {
             .insert(
                 "with.handler".into(),
                 "127.0.0.1:12345".parse().unwrap(),
+                None,
                 Arc::new(mock),
             )
             .unwrap();
@@ -659,7 +687,11 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
+        > = Arc::new(ConnectionMap::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(DummyQuotaHandler)),
+            None,
+        ));
         let (server, handler) = tokio::io::duplex(1024);
         let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let mut mock = MockConnectionHandler::new();
@@ -673,6 +705,7 @@ mod proxy_handler_tests {
             .insert(
                 "root.domain".into(),
                 "127.0.0.1:12345".parse().unwrap(),
+                None,
                 Arc::new(mock),
             )
             .unwrap();
@@ -741,7 +774,11 @@ mod proxy_handler_tests {
                 Arc<MockConnectionHandler<DuplexStream>>,
                 MockConnectionMapReactor<String>,
             >,
-        > = Arc::new(ConnectionMap::new(LoadBalancing::Allow, None));
+        > = Arc::new(ConnectionMap::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(DummyQuotaHandler)),
+            None,
+        ));
         let (server, handler) = tokio::io::duplex(1024);
         let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let mut mock = MockConnectionHandler::new();
@@ -755,6 +792,7 @@ mod proxy_handler_tests {
             .insert(
                 "with.websocket".into(),
                 "127.0.0.1:12345".parse().unwrap(),
+                None,
                 Arc::new(mock),
             )
             .unwrap();

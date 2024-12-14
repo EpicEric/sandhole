@@ -8,7 +8,7 @@ In order to do anything useful with Sandhole, connections must be authenticated.
 
 By default, this will be `./deploy/user_keys/`, but it can be configured with the `--user-keys-directory` option. Once you add a public key, Sandhole will automatically pick up on the change, and allow that user to create remote port forwardings.
 
-Similarly, there is a `./deploy/admin_keys/` directory (set by `--admin-keys-directory`), for users who should also have access to the [admin interface](./admin_interface.md).
+Similarly, there is a `./deploy/admin_keys/` directory (set by `--admin-keys-directory`), for users who should also have access to the [admin interface](./admin_interface.md) and [no quota restrictions](#restricting-resources-for-users).
 
 ## Default ports
 
@@ -42,7 +42,16 @@ For such use cases, you can provide a URL to `--password-authentication-url`. Th
 
 ```json
 {
-  "user": "...",
-  "password": "..."
+  "user": "eric",
+  "password": "super$ecret123",
+  "remote_address": "[::ffff:10.0.5.32]:12703"
 }
 ```
+
+## Restricting resources for users
+
+By default, users are able to bind as many services as they want. In order to limit this amount, Sandhole provides the `--quota-per-user` option, set by specifying a number greater than 0. The user's quota includes all services across HTTP, SSH, and TCP.
+
+To enforce this quota across multiple connections, a user is established to be any forwardings sharing the same public key. In the case of [password-authenticated users](#alternative-authentication-with-password), their username will be considered instead.
+
+The quota is not enforced for admin users.

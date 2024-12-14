@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::{num::NonZero, path::PathBuf, time::Duration};
 
 #[doc(hidden)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -52,6 +52,7 @@ pub struct ApplicationConfig {
     pub txt_record_prefix: String,
     pub allow_provided_subdomains: bool,
     pub allow_requested_ports: bool,
+    pub quota_per_user: Option<NonZero<usize>>,
     pub random_subdomain_seed: Option<RandomSubdomainSeed>,
     pub idle_connection_timeout: Duration,
     pub authentication_request_timeout: Duration,

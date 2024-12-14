@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     hash::Hash,
     net::SocketAddr,
-    sync::RwLock,
+    sync::{Arc, RwLock},
 };
 
 use dashmap::DashMap;
@@ -11,7 +11,11 @@ use dashmap::DashMap;
 use mockall::automock;
 use rand::seq::SliceRandom;
 
-use crate::{config::LoadBalancing, error::ServerError};
+use crate::{
+    config::LoadBalancing,
+    error::ServerError,
+    quota::{QuotaHandler, QuotaToken},
+};
 
 #[cfg_attr(test, automock)]
 pub(crate) trait ConnectionMapReactor<K> {
@@ -27,11 +31,13 @@ impl<K> ConnectionMapReactor<K> for DummyConnectionMapReactor {
 struct ConnectionMapEntry<H> {
     address: SocketAddr,
     handler: H,
+    _token: QuotaToken,
 }
 
 pub(crate) struct ConnectionMap<K, H, R = DummyConnectionMapReactor> {
     load_balancing: LoadBalancing,
     map: DashMap<K, Vec<ConnectionMapEntry<H>>>,
+    quota_handler: Arc<Box<dyn QuotaHandler + Send + Sync>>,
     reactor: RwLock<Option<R>>,
 }
 
@@ -41,33 +47,74 @@ where
     H: Clone,
     R: ConnectionMapReactor<K> + Send + 'static,
 {
-    pub(crate) fn new(load_balancing: LoadBalancing, reactor: Option<R>) -> Self {
+    pub(crate) fn new(
+        load_balancing: LoadBalancing,
+        quota_handler: Arc<Box<dyn QuotaHandler + Send + Sync>>,
+        reactor: Option<R>,
+    ) -> Self {
         ConnectionMap {
             load_balancing,
             map: DashMap::new(),
+            quota_handler,
             reactor: RwLock::new(reactor),
         }
     }
 
-    pub(crate) fn insert(&self, key: K, address: SocketAddr, handler: H) -> anyhow::Result<()> {
+    pub(crate) fn insert(
+        &self,
+        key: K,
+        address: SocketAddr,
+        holder: Option<String>,
+        handler: H,
+    ) -> anyhow::Result<()> {
         let len = self.map.len();
         match self.load_balancing {
             LoadBalancing::Allow => {
-                self.map
-                    .entry(key)
-                    .or_default()
-                    .push(ConnectionMapEntry { address, handler });
+                let Some(token) = self.quota_handler.get_token(holder) else {
+                    return Err(ServerError::QuotaReached.into());
+                };
+                self.map.entry(key).or_default().push(ConnectionMapEntry {
+                    address,
+                    handler,
+                    _token: token,
+                });
             }
             LoadBalancing::Replace => {
-                self.map
-                    .insert(key, vec![ConnectionMapEntry { address, handler }]);
+                let removed_entry = if self.map.contains_key(&key) {
+                    self.map.remove(&key)
+                } else {
+                    None
+                };
+                let Some(token) = self.quota_handler.get_token(holder) else {
+                    if let Some((key, value)) = removed_entry {
+                        self.map.insert(key, value);
+                    }
+                    return Err(ServerError::QuotaReached.into());
+                };
+                self.map.insert(
+                    key,
+                    vec![ConnectionMapEntry {
+                        address,
+                        handler,
+                        _token: token,
+                    }],
+                );
             }
             LoadBalancing::Deny => {
                 if self.map.contains_key(&key) {
-                    Err(ServerError::LoadBalancingAlreadyBound)?;
+                    return Err(ServerError::LoadBalancingAlreadyBound.into());
                 }
-                self.map
-                    .insert(key, vec![ConnectionMapEntry { address, handler }]);
+                let Some(token) = self.quota_handler.get_token(holder) else {
+                    return Err(ServerError::QuotaReached.into());
+                };
+                self.map.insert(
+                    key,
+                    vec![ConnectionMapEntry {
+                        address,
+                        handler,
+                        _token: token,
+                    }],
+                );
             }
         }
         if self.map.len() > len {
@@ -114,7 +161,7 @@ where
         let len = self.map.len();
         self.map.retain(|_, value| {
             value.retain(|ConnectionMapEntry { address: addr, .. }| addr != address);
-            value.is_empty()
+            !value.is_empty()
         });
         if self.map.len() < len {
             if let Some(reactor) = self.reactor.read().unwrap().as_ref() {
@@ -147,19 +194,38 @@ where
 
 #[cfg(test)]
 mod connection_map_tests {
+    use std::sync::Arc;
+
     use mockall::predicate::eq;
 
-    use crate::config::LoadBalancing;
+    use crate::{
+        config::LoadBalancing,
+        quota::{DummyQuotaHandler, MockQuotaHandler, QuotaHandler},
+    };
 
     use super::{ConnectionMap, MockConnectionMapReactor};
 
     #[test]
     fn inserts_and_removes_one_handler() {
-        let mut mock = MockConnectionMapReactor::new();
-        mock.expect_call().times(2).returning(|_| {});
-        let map = ConnectionMap::<String, usize, _>::new(LoadBalancing::Allow, Some(mock));
-        map.insert("host".into(), "127.0.0.1:1".parse().unwrap(), 1)
-            .unwrap();
+        let mut mock_reactor = MockConnectionMapReactor::new();
+        mock_reactor.expect_call().times(2).returning(|_| {});
+        let mut mock_quota = MockQuotaHandler::new();
+        mock_quota
+            .expect_get_token()
+            .once()
+            .returning(|_| DummyQuotaHandler.get_token(None));
+        let map = ConnectionMap::<String, usize, _>::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(mock_quota)),
+            Some(mock_reactor),
+        );
+        map.insert(
+            "host".into(),
+            "127.0.0.1:1".parse().unwrap(),
+            Some("1".into()),
+            1,
+        )
+        .unwrap();
         assert_eq!(map.get("host"), Some(1));
         map.remove("host", &"127.0.0.1:1".parse().unwrap());
         assert_eq!(map.get("host"), None);
@@ -167,13 +233,32 @@ mod connection_map_tests {
 
     #[test]
     fn removes_all_handlers_from_address() {
-        let mut mock = MockConnectionMapReactor::new();
-        mock.expect_call().times(2).returning(|_| {});
-        let map = ConnectionMap::<String, usize, _>::new(LoadBalancing::Allow, Some(mock));
-        map.insert("host1".into(), "127.0.0.1:2".parse().unwrap(), 1)
-            .unwrap();
-        map.insert("host2".into(), "127.0.0.1:2".parse().unwrap(), 2)
-            .unwrap();
+        let mut mock_reactor = MockConnectionMapReactor::new();
+        mock_reactor.expect_call().times(3).returning(|_| {});
+        let mut mock_quota = MockQuotaHandler::new();
+        mock_quota
+            .expect_get_token()
+            .times(2)
+            .returning(|_| DummyQuotaHandler.get_token(None));
+        let map = ConnectionMap::<String, usize, _>::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(mock_quota)),
+            Some(mock_reactor),
+        );
+        map.insert(
+            "host1".into(),
+            "127.0.0.1:2".parse().unwrap(),
+            Some("1".into()),
+            1,
+        )
+        .unwrap();
+        map.insert(
+            "host2".into(),
+            "127.0.0.1:2".parse().unwrap(),
+            Some("2".into()),
+            2,
+        )
+        .unwrap();
         assert_eq!(map.get("host1"), Some(1));
         assert_eq!(map.get("host2"), Some(2));
         map.remove_by_address(&"127.0.0.1:2".parse().unwrap());
@@ -182,31 +267,123 @@ mod connection_map_tests {
     }
 
     #[test]
+    fn removes_only_handlers_from_specific_address() {
+        let mut mock_reactor = MockConnectionMapReactor::new();
+        mock_reactor.expect_call().times(4).returning(|_| {});
+        let mut mock_quota = MockQuotaHandler::new();
+        mock_quota
+            .expect_get_token()
+            .times(4)
+            .returning(|_| DummyQuotaHandler.get_token(None));
+        let map = ConnectionMap::<String, usize, _>::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(mock_quota)),
+            Some(mock_reactor),
+        );
+        map.insert(
+            "host1".into(),
+            "127.0.0.1:2".parse().unwrap(),
+            Some("1".into()),
+            1,
+        )
+        .unwrap();
+        map.insert(
+            "host2".into(),
+            "127.0.0.1:2".parse().unwrap(),
+            Some("1".into()),
+            2,
+        )
+        .unwrap();
+        map.insert(
+            "host2".into(),
+            "127.0.0.1:3".parse().unwrap(),
+            Some("2".into()),
+            3,
+        )
+        .unwrap();
+        map.insert(
+            "host3".into(),
+            "127.0.0.1:3".parse().unwrap(),
+            Some("2".into()),
+            4,
+        )
+        .unwrap();
+        map.remove_by_address(&"127.0.0.1:2".parse().unwrap());
+        assert_eq!(map.get("host1"), None);
+        assert_eq!(map.get("host2"), Some(3));
+        assert_eq!(map.get("host3"), Some(4));
+    }
+
+    #[test]
     fn returns_none_for_missing_host() {
-        let mut mock = MockConnectionMapReactor::new();
-        mock.expect_call().times(2).returning(|_| {});
-        let map = ConnectionMap::<String, usize, _>::new(LoadBalancing::Allow, Some(mock));
-        map.insert("host".into(), "127.0.0.1:1".parse().unwrap(), 1)
-            .unwrap();
-        map.insert("other".into(), "127.0.0.1:2".parse().unwrap(), 2)
-            .unwrap();
+        let mut mock_reactor = MockConnectionMapReactor::new();
+        mock_reactor.expect_call().times(2).returning(|_| {});
+        let mut mock_quota = MockQuotaHandler::new();
+        mock_quota
+            .expect_get_token()
+            .times(2)
+            .returning(|_| DummyQuotaHandler.get_token(None));
+        let map = ConnectionMap::<String, usize, _>::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(mock_quota)),
+            Some(mock_reactor),
+        );
+        map.insert(
+            "host".into(),
+            "127.0.0.1:1".parse().unwrap(),
+            Some("1".into()),
+            1,
+        )
+        .unwrap();
+        map.insert(
+            "other".into(),
+            "127.0.0.1:2".parse().unwrap(),
+            Some("2".into()),
+            2,
+        )
+        .unwrap();
         assert_eq!(map.get("unknown"), None);
     }
 
     #[test]
     fn returns_one_of_several_load_balanced_handlers() {
-        let mut mock = MockConnectionMapReactor::new();
-        mock.expect_call()
+        let mut mock_reactor = MockConnectionMapReactor::new();
+        mock_reactor
+            .expect_call()
             .times(1)
             .with(eq(vec![String::from("host")]))
             .returning(|_| {});
-        let map = ConnectionMap::<String, usize, _>::new(LoadBalancing::Allow, Some(mock));
-        map.insert("host".into(), "127.0.0.1:1".parse().unwrap(), 1)
-            .unwrap();
-        map.insert("host".into(), "127.0.0.1:2".parse().unwrap(), 2)
-            .unwrap();
-        map.insert("host".into(), "127.0.0.1:3".parse().unwrap(), 3)
-            .unwrap();
+        let mut mock_quota = MockQuotaHandler::new();
+        mock_quota
+            .expect_get_token()
+            .times(3)
+            .returning(|_| DummyQuotaHandler.get_token(None));
+        let map = ConnectionMap::<String, usize, _>::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(mock_quota)),
+            Some(mock_reactor),
+        );
+        map.insert(
+            "host".into(),
+            "127.0.0.1:1".parse().unwrap(),
+            Some("1".into()),
+            1,
+        )
+        .unwrap();
+        map.insert(
+            "host".into(),
+            "127.0.0.1:2".parse().unwrap(),
+            Some("2".into()),
+            2,
+        )
+        .unwrap();
+        map.insert(
+            "host".into(),
+            "127.0.0.1:3".parse().unwrap(),
+            Some("3".into()),
+            3,
+        )
+        .unwrap();
         let mut results: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
         for _ in 0..10_000 {
             let map_item = map.get("host");
@@ -222,17 +399,52 @@ mod connection_map_tests {
             results.into_iter().fold(0usize, |acc, (_, i)| acc + i),
             10_000
         );
+        map.remove("host", &"127.0.0.1:2".parse().unwrap());
+        let mut results: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for _ in 0..10_000 {
+            let map_item = map.get("host");
+            match map_item {
+                Some(key @ 1) | Some(key @ 3) => {
+                    *results.entry(key).or_default() += 1;
+                }
+                unknown => panic!("Unexpected {:?}", unknown),
+            }
+        }
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            results.into_iter().fold(0usize, |acc, (_, i)| acc + i),
+            10_000
+        );
     }
 
     #[test]
     fn returns_single_host_when_replacing() {
-        let mut mock = MockConnectionMapReactor::new();
-        mock.expect_call().times(1).returning(|_| {});
-        let map = ConnectionMap::<String, usize, _>::new(LoadBalancing::Replace, Some(mock));
-        map.insert("host".into(), "127.0.0.1:1".parse().unwrap(), 1)
-            .unwrap();
-        map.insert("host".into(), "127.0.0.1:2".parse().unwrap(), 2)
-            .unwrap();
+        let mut mock_reactor = MockConnectionMapReactor::new();
+        mock_reactor.expect_call().times(1).returning(|_| {});
+        let mut mock_quota = MockQuotaHandler::new();
+        mock_quota
+            .expect_get_token()
+            .times(2)
+            .returning(|_| DummyQuotaHandler.get_token(None));
+        let map = ConnectionMap::<String, usize, _>::new(
+            LoadBalancing::Replace,
+            Arc::new(Box::new(mock_quota)),
+            Some(mock_reactor),
+        );
+        map.insert(
+            "host".into(),
+            "127.0.0.1:1".parse().unwrap(),
+            Some("1".into()),
+            1,
+        )
+        .unwrap();
+        map.insert(
+            "host".into(),
+            "127.0.0.1:2".parse().unwrap(),
+            Some("2".into()),
+            2,
+        )
+        .unwrap();
         for _ in 0..1_000 {
             assert_eq!(map.get("host"), Some(2));
         }
@@ -240,16 +452,203 @@ mod connection_map_tests {
 
     #[test]
     fn errors_when_rejecting_new_host() {
-        let mut mock = MockConnectionMapReactor::new();
-        mock.expect_call().times(1).returning(|_| {});
-        let map = ConnectionMap::<String, usize, _>::new(LoadBalancing::Deny, Some(mock));
-        map.insert("host".into(), "127.0.0.1:1".parse().unwrap(), 1)
-            .unwrap();
+        let mut mock_reactor = MockConnectionMapReactor::new();
+        mock_reactor.expect_call().times(1).returning(|_| {});
+        let mut mock_quota = MockQuotaHandler::new();
+        mock_quota
+            .expect_get_token()
+            .once()
+            .returning(|_| DummyQuotaHandler.get_token(None));
+        let map = ConnectionMap::<String, usize, _>::new(
+            LoadBalancing::Deny,
+            Arc::new(Box::new(mock_quota)),
+            Some(mock_reactor),
+        );
+        map.insert(
+            "host".into(),
+            "127.0.0.1:1".parse().unwrap(),
+            Some("1".into()),
+            1,
+        )
+        .unwrap();
         assert!(map
-            .insert("host".into(), "127.0.0.1:2".parse().unwrap(), 2)
+            .insert(
+                "host".into(),
+                "127.0.0.1:2".parse().unwrap(),
+                Some("2".into()),
+                2
+            )
             .is_err());
         for _ in 0..1_000 {
             assert_eq!(map.get("host"), Some(1));
+        }
+    }
+
+    #[test]
+    fn reaching_quota_limits_load_balancing() {
+        let mut mock_reactor = MockConnectionMapReactor::new();
+        mock_reactor
+            .expect_call()
+            .times(1)
+            .with(eq(vec![String::from("host")]))
+            .returning(|_| {});
+        let mut mock_quota = MockQuotaHandler::new();
+        let mut quota_count = 0usize;
+        mock_quota
+            .expect_get_token()
+            .times(3)
+            .returning(move |holder| {
+                assert_eq!(holder, Some("1".into()));
+                if quota_count < 2 {
+                    quota_count += 1;
+                    DummyQuotaHandler.get_token(None)
+                } else {
+                    None
+                }
+            });
+        let map = ConnectionMap::<String, usize, _>::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(mock_quota)),
+            Some(mock_reactor),
+        );
+        // Accepted
+        map.insert(
+            "host".into(),
+            "127.0.0.1:1".parse().unwrap(),
+            Some("1".into()),
+            1,
+        )
+        .unwrap();
+        // Accepted and load-balanced
+        map.insert(
+            "host".into(),
+            "127.0.0.1:2".parse().unwrap(),
+            Some("1".into()),
+            2,
+        )
+        .unwrap();
+        // Denied by quota
+        assert!(map
+            .insert(
+                "host".into(),
+                "127.0.0.1:3".parse().unwrap(),
+                Some("1".into()),
+                3,
+            )
+            .is_err());
+        let mut results: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for _ in 0..10_000 {
+            let map_item = map.get("host");
+            match map_item {
+                Some(key @ 1) | Some(key @ 2) => {
+                    *results.entry(key).or_default() += 1;
+                }
+                unknown => panic!("Unexpected {:?}", unknown),
+            }
+        }
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            results.into_iter().fold(0usize, |acc, (_, i)| acc + i),
+            10_000
+        );
+    }
+
+    #[test]
+    fn reaching_quota_prevents_replacing() {
+        let mut mock_reactor = MockConnectionMapReactor::new();
+        mock_reactor.expect_call().times(1).returning(|_| {});
+        let mut mock_quota = MockQuotaHandler::new();
+        let mut quota_count = 0usize;
+        mock_quota
+            .expect_get_token()
+            .times(2)
+            .returning(move |holder| {
+                assert_eq!(holder, Some("1".into()));
+                if quota_count < 1 {
+                    quota_count += 1;
+                    DummyQuotaHandler.get_token(None)
+                } else {
+                    None
+                }
+            });
+        let map = ConnectionMap::<String, usize, _>::new(
+            LoadBalancing::Replace,
+            Arc::new(Box::new(mock_quota)),
+            Some(mock_reactor),
+        );
+        // Accepted
+        map.insert(
+            "host".into(),
+            "127.0.0.1:1".parse().unwrap(),
+            Some("1".into()),
+            1,
+        )
+        .unwrap();
+        // Denied by quota
+        assert!(map
+            .insert(
+                "host".into(),
+                "127.0.0.1:2".parse().unwrap(),
+                Some("1".into()),
+                2,
+            )
+            .is_err());
+        for _ in 0..1_000 {
+            assert_eq!(map.get("host"), Some(1));
+        }
+    }
+
+    #[test]
+    fn reaching_quota_doesnt_deny() {
+        let mut mock_reactor = MockConnectionMapReactor::new();
+        mock_reactor.expect_call().times(1).returning(|_| {});
+        let mut mock_quota = MockQuotaHandler::new();
+        let mut quota_count = 0usize;
+        mock_quota
+            .expect_get_token()
+            .times(2)
+            .returning(move |holder| {
+                assert_eq!(holder, Some("1".into()));
+                if quota_count < 1 {
+                    quota_count += 1;
+                    None
+                } else {
+                    DummyQuotaHandler.get_token(None)
+                }
+            });
+        let map = ConnectionMap::<String, usize, _>::new(
+            LoadBalancing::Deny,
+            Arc::new(Box::new(mock_quota)),
+            Some(mock_reactor),
+        );
+        // Denied by quota
+        assert!(map
+            .insert(
+                "host".into(),
+                "127.0.0.1:1".parse().unwrap(),
+                Some("1".into()),
+                1,
+            )
+            .is_err());
+        // Accepted
+        map.insert(
+            "host".into(),
+            "127.0.0.1:2".parse().unwrap(),
+            Some("1".into()),
+            2,
+        )
+        .unwrap();
+        // Denied by policy (shouldn't invoke quota handler)
+        assert!(map
+            .insert(
+                "host".into(),
+                "127.0.0.1:3".parse().unwrap(),
+                Some("1".into()),
+                3
+            )
+            .is_err());
+        for _ in 0..1_000 {
+            assert_eq!(map.get("host"), Some(2));
         }
     }
 }

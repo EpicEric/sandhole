@@ -2,13 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- Add user forwarding quotas via the `--quota-per-user` option.
+- Add `remote_address` field to API login request.
+
 ### Fixed
 
 - Better handling of initial value and windowing for telemetry counters.
 
 ### Changed
 
-- Add `remote_address` field to API login request.
 - Bump MSRV to 1.79.0.
 - Modify exports to live within `lib.rs`.
 - Update `russh` dependency to version `0.50.0-beta.1`.
