@@ -94,7 +94,7 @@ impl ApiLogin {
             .header(CONTENT_TYPE, "application/json; charset=UTF-8")
             .body(serde_json::to_string(data).unwrap())
             .unwrap();
-        let (response, _jh) = match self.scheme {
+        let (response, _join_handle) = match self.scheme {
             ApiScheme::Http => {
                 let (mut sender, conn) =
                     match hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream)).await {
@@ -104,13 +104,13 @@ impl ApiLogin {
                             return false;
                         }
                     };
-                let _jh = DroppableHandle(tokio::spawn(async move {
+                let _join_handle = DroppableHandle(tokio::spawn(async move {
                     if let Err(err) = conn.await {
                         warn!("API login TCP connection errored: {:?}", err);
                     }
                 }));
                 match sender.send_request(request).await {
-                    Ok(response) => (response, _jh),
+                    Ok(response) => (response, _join_handle),
                     Err(err) => {
                         error!("API login HTTP request failed: {}", err);
                         return false;
@@ -137,13 +137,13 @@ impl ApiLogin {
                             return false;
                         }
                     };
-                let _jh = DroppableHandle(tokio::spawn(async move {
+                let _join_handle = DroppableHandle(tokio::spawn(async move {
                     if let Err(err) = conn.await {
                         warn!("API login TCP connection errored: {:?}", err);
                     }
                 }));
                 match sender.send_request(request).await {
-                    Ok(response) => (response, _jh),
+                    Ok(response) => (response, _join_handle),
                     Err(err) => {
                         error!("API login HTTP request failed: {}", err);
                         return false;

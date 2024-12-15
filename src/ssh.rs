@@ -97,15 +97,16 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
         port: u16,
         fingerprint: Option<&'a Fingerprint>,
     ) -> anyhow::Result<ChannelStream<Msg>> {
-        if !(self.allow_fingerprint.read().await)(fingerprint) {
-            Err(ServerError::FingerprintDenied)?
+        if (self.allow_fingerprint.read().await)(fingerprint) {
+            let channel = self
+                .handle
+                .channel_open_forwarded_tcpip(self.address.clone(), self.port, ip, port.into())
+                .await?
+                .into_stream();
+            Ok(channel)
+        } else {
+            Err(ServerError::FingerprintDenied.into())
         }
-        let channel = self
-            .handle
-            .channel_open_forwarded_tcpip(self.address.clone(), self.port, ip, port.into())
-            .await?
-            .into_stream();
-        Ok(channel)
     }
 }
 
@@ -282,10 +283,13 @@ impl Handler for ServerHandler {
                             user
                         )))),
                     };
-                    info!("{} connected with {} (password)", self.peer, self.auth_data);
+                    info!(
+                        "{} ({}) connected with {} (password)",
+                        user, self.peer, self.auth_data
+                    );
                     return Ok(Auth::Accept);
                 } else {
-                    warn!("{} failed password authentication", self.peer);
+                    warn!("{} ({}) failed password authentication", user, self.peer);
                 }
             } else {
                 warn!("Authentication request timed out");
@@ -311,15 +315,15 @@ impl Handler for ServerHandler {
             .fingerprints_validator
             .authenticate_fingerprint(self.key_fingerprint.as_ref().unwrap());
         info!(
-            "{} connected with {} (public key)",
-            self.peer, self.auth_data
+            "{} ({}) connected with {} (public key)",
+            user, self.peer, self.auth_data
         );
         match authentication {
             AuthenticationType::None => {
                 // Start timer for user to do local port forwarding.
                 // Otherwise, the connection will be canceled upon expiration
                 let AuthenticatedData::None { ref cancelation_tx } = self.auth_data else {
-                    warn!("{} is already authenticated", self.peer);
+                    warn!("{} ({}) is already authenticated", user, self.peer);
                     return Ok(Auth::Reject {
                         proceed_with_methods: None,
                     });
@@ -521,8 +525,8 @@ impl Handler for ServerHandler {
         };
         let handle = session.handle();
         match *port {
+            // Assign SSH host through config
             22 => {
-                // Assign SSH host through config
                 let assigned_host = self
                     .server
                     .address_delegator
@@ -534,7 +538,7 @@ impl Handler for ServerHandler {
                         self.peer
                     );
                     let _ = self.tx.send(
-                        "Error: Alias is required for SSH host"
+                        "Error: Alias is required for SSH host\r\n"
                             .to_string()
                             .into_bytes(),
                     );
@@ -553,10 +557,13 @@ impl Handler for ServerHandler {
                         *port,
                     )),
                 ) {
-                    info!("Rejecting SSH for {} ({})", &assigned_host, self.peer);
+                    info!(
+                        "Rejecting SSH for {} ({}) - {}",
+                        &assigned_host, self.peer, err
+                    );
                     let _ = self.tx.send(
                         format!(
-                            "Cannot listen to SSH on {}:{} ({})",
+                            "Cannot listen to SSH on {}:{} ({})\r\n",
                             &assigned_host, self.server.ssh_port, err,
                         )
                         .into_bytes(),
@@ -592,8 +599,8 @@ impl Handler for ServerHandler {
                     Ok(true)
                 }
             }
+            // Assign HTTP host through config
             80 | 443 => {
-                // Assign HTTP host through config
                 let assigned_host = self
                     .server
                     .address_delegator
@@ -612,10 +619,13 @@ impl Handler for ServerHandler {
                         *port,
                     )),
                 ) {
-                    info!("Rejecting HTTP for {} ({})", &assigned_host, self.peer);
+                    info!(
+                        "Rejecting HTTP for {} ({}) - {}",
+                        &assigned_host, self.peer, err
+                    );
                     let _ = self.tx.send(
                         format!(
-                            "Cannot listen to HTTP on http://{}{} ({})",
+                            "Cannot listen to HTTP on http://{}{} ({})\r\n",
                             &assigned_host,
                             match self.server.http_port {
                                 80 => "".into(),
@@ -663,15 +673,54 @@ impl Handler for ServerHandler {
                     "Failed to bind TCP port {} ({}): port too low",
                     port, self.peer
                 );
+                let _ = self.tx.send(
+                    format!(
+                        "Cannot listen to TCP on port {}:{} (port too low)\r\n",
+                        &self.server.domain, port,
+                    )
+                    .into_bytes(),
+                );
                 Ok(false)
             }
             _ => {
                 let assigned_port = if *port == 0 {
-                    let assigned_port = self.server.tcp_handler.get_free_port().await;
+                    let assigned_port = match self.server.tcp_handler.get_free_port().await {
+                        Ok(port) => port,
+                        Err(err) => {
+                            info!(
+                                "Failed to bind random TCP port for alias {} ({}) - {}",
+                                address, self.peer, err,
+                            );
+                            let _ = self.tx.send(
+                                format!(
+                                    "Cannot listen to TCP on random port of {} ({})\r\n",
+                                    port, err,
+                                )
+                                .into_bytes(),
+                            );
+                            return Ok(false);
+                        }
+                    };
                     *port = assigned_port.into();
                     assigned_port
                 } else if self.server.force_random_ports {
-                    self.server.tcp_handler.get_free_port().await
+                    match self.server.tcp_handler.get_free_port().await {
+                        Ok(port) => port,
+                        Err(err) => {
+                            info!(
+                                "Failed to bind random TCP port for alias {} ({}) - {}",
+                                address, self.peer, err,
+                            );
+                            let _ = self.tx.send(
+                                format!(
+                                    "Cannot listen to TCP on random port of {} ({})\r\n",
+                                    port, err
+                                )
+                                .into_bytes(),
+                            );
+                            return Ok(false);
+                        }
+                    }
                 } else {
                     *port as u16
                 };
@@ -695,8 +744,8 @@ impl Handler for ServerHandler {
                 ) {
                     if is_alias(address) {
                         info!(
-                            "Rejecting TCP port {} for alias {} ({})",
-                            &assigned_port, address, self.peer
+                            "Rejecting TCP port {} for alias {} ({}) - {}",
+                            &assigned_port, address, self.peer, err,
                         );
                         let _ = self.tx.send(
                             format!(
@@ -707,8 +756,8 @@ impl Handler for ServerHandler {
                         );
                     } else {
                         info!(
-                            "Rejecting TCP for localhost:{} ({})",
-                            &assigned_port, self.peer
+                            "Rejecting TCP for localhost:{} ({}) - {}",
+                            &assigned_port, self.peer, err,
                         );
                         let _ = self.tx.send(
                             format!(
@@ -734,7 +783,7 @@ impl Handler for ServerHandler {
                         );
                         let _ = self.tx.send(
                             format!(
-                                "Serving TCP port {} for alias {}\r\n",
+                                "Tunneling TCP port {} for alias {}\r\n",
                                 &assigned_port, address,
                             )
                             .into_bytes(),
@@ -782,6 +831,10 @@ impl Handler for ServerHandler {
                         .host_addressing
                         .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                 {
+                    info!(
+                        "Stopped SSH forwarding for {} ({})",
+                        &assigned_host, self.peer
+                    );
                     self.server.ssh.remove(&assigned_host, &self.peer);
                     user_data.ssh_hosts.remove(&assigned_host);
                     Ok(true)
@@ -795,6 +848,10 @@ impl Handler for ServerHandler {
                         .host_addressing
                         .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                 {
+                    info!(
+                        "Stopped HTTP forwarding for {} ({})",
+                        &assigned_host, self.peer
+                    );
                     self.server.http.remove(&assigned_host, &self.peer);
                     user_data.http_hosts.remove(&assigned_host);
                     Ok(true)
@@ -808,6 +865,10 @@ impl Handler for ServerHandler {
                         .port_addressing
                         .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                 {
+                    info!(
+                        "Stopped TCP forwarding for {}:{} ({})",
+                        &assigned_alias.0, assigned_alias.1, self.peer
+                    );
                     let key: &dyn TcpAliasKey = assigned_alias.borrow();
                     self.server.tcp.remove(key, &self.peer);
                     user_data.tcp_aliases.remove(key);
@@ -849,7 +910,7 @@ impl Handler for ServerHandler {
                     }
                     let _ = handler.log_channel().send(
                         format!(
-                            "New HTTP proxy from {}:{} => http://{}",
+                            "New HTTP proxy from {}:{} => http://{}\r\n",
                             originator_address, originator_port, host_to_connect
                         )
                         .into_bytes(),
@@ -884,7 +945,7 @@ impl Handler for ServerHandler {
                     }
                     let _ = handler.log_channel().send(
                         format!(
-                            "New SSH proxy from {}:{} => {}:{}",
+                            "New SSH proxy from {}:{} => {}:{}\r\n",
                             originator_address, originator_port, host_to_connect, port_to_connect
                         )
                         .into_bytes(),
@@ -922,7 +983,7 @@ impl Handler for ServerHandler {
                 }
                 let _ = handler.log_channel().send(
                     format!(
-                        "New TCP proxy from {}:{} => {}:{}",
+                        "New TCP proxy from {}:{} => {}:{}\r\n",
                         originator_address, originator_port, host_to_connect, port_to_connect
                     )
                     .into_bytes(),
@@ -951,7 +1012,8 @@ impl Handler for ServerHandler {
 
 impl Drop for ServerHandler {
     fn drop(&mut self) {
-        info!("{} disconnected", self.peer);
+        let user = self.user.as_ref().map(String::as_ref).unwrap_or("unknown");
+        info!("{} ({}) disconnected", user, self.peer);
         match self.auth_data {
             AuthenticatedData::User { .. } | AuthenticatedData::Admin { .. } => {
                 let server = Arc::clone(&self.server);

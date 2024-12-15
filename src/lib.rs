@@ -162,25 +162,24 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     )
     .await
     .with_context(|| "Error setting up public keys watcher")?;
-    let api_login = match config.password_authentication_url {
-        Some(ref url) => Some(ApiLogin::new(url)?),
-        None => None,
-    };
+    let api_login = config
+        .password_authentication_url
+        .as_ref()
+        .map(|url| ApiLogin::new(url))
+        .transpose()
+        .with_context(|| "Error intializing login API")?;
     let alpn_resolver: Box<dyn AlpnChallengeResolver> = match config.acme_contact_email {
-        Some(contact) => {
-            if config.https_port == 443 {
-                Box::new(AcmeResolver::new(
-                    config.acme_cache_directory,
-                    contact,
-                    config.acme_use_staging,
-                ))
-            } else {
-                warn!(
-                    "ACME challenges are only supported on HTTPS port 443 (currently {}). Disabling.",
-                    config.https_port
-                );
-                Box::new(DummyAlpnChallengeResolver)
-            }
+        Some(contact) if config.https_port == 443 => Box::new(AcmeResolver::new(
+            config.acme_cache_directory,
+            contact,
+            config.acme_use_staging,
+        )),
+        Some(_) => {
+            warn!(
+                "ACME challenges are only supported on HTTPS port 443 (currently {}). Disabling.",
+                config.https_port
+            );
+            Box::new(DummyAlpnChallengeResolver)
         }
         None => Box::new(DummyAlpnChallengeResolver),
     };
@@ -314,7 +313,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     // HTTP handlers
     let http_listener = TcpListener::bind((listen_address, config.http_port))
         .await
-        .with_context(|| "Error listening to HTTP port and address")?;
+        .with_context(|| "Error listening to HTTP port")?;
     let http_map = Arc::clone(&http_connections);
     let redirect = Arc::clone(&domain_redirect);
     let telemetry_http = Arc::clone(&telemetry);
@@ -362,7 +361,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     // HTTPS handlers
     let https_listener = TcpListener::bind((listen_address, config.https_port))
         .await
-        .with_context(|| "Error listening to HTTP port and address")?;
+        .with_context(|| "Error listening to HTTPS port")?;
     let certificates_clone = Arc::clone(&certificates);
     let tls_server_config = Arc::new(
         ServerConfig::builder()
@@ -467,7 +466,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     });
     let ssh_listener = TcpListener::bind((listen_address, config.ssh_port))
         .await
-        .with_context(|| "Error listening to SSH port and address")?;
+        .with_context(|| "Error listening to SSH port")?;
     info!("sandhole is now running.");
     loop {
         let (stream, address) = match ssh_listener.accept().await {

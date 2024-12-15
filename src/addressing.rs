@@ -249,8 +249,7 @@ impl<R: Resolver> AddressDelegator<R> {
         String::from_utf8(
             (0..6)
                 .flat_map(|_| {
-                    "0123456789abcdefghijklmnopqrstuvwxyz"
-                        .as_bytes()
+                    b"0123456789abcdefghijklmnopqrstuvwxyz"
                         .choose(&mut rng)
                         .copied()
                 })

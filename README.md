@@ -20,7 +20,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
 ## Status
 
-This is still in early development. Contributions are welcome, but try it in production at your own risk.
+Sandhole is in early stages, but is actively developed. Contributions are welcome, but try it in production at your own risk.
 
 ## Alternatives
 

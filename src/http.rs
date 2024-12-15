@@ -159,10 +159,11 @@ where
     let Some(handler) = conn_manager.get(&host) else {
         if domain_redirect.from == host {
             let elapsed_time = timer.elapsed();
+            let response = Redirect::to(&domain_redirect.to).into_response();
             http_log(
                 HttpLog {
                     ip: &ip,
-                    status: StatusCode::SEE_OTHER.as_u16(),
+                    status: response.status().as_u16(),
                     method: request.method().as_str(),
                     host: &host,
                     uri: request.uri().path(),
@@ -171,48 +172,47 @@ where
                 None,
                 disable_http_logs,
             );
-            return Ok(Redirect::to(&domain_redirect.to).into_response());
+            return Ok(response);
         }
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
-    if let Protocol::TlsRedirect { to: to_port, .. } = protocol {
-        let elapsed_time = timer.elapsed();
-        let response = Redirect::permanent(
-            format!(
-                "https://{}{}{}",
-                host,
-                if to_port == 443 {
-                    "".into()
-                } else {
-                    format!(":{to_port}")
-                },
-                request
-                    .uri()
-                    .path_and_query()
-                    .map(|path| path.as_str())
-                    .unwrap_or("/"),
-            )
-            .as_str(),
-        )
-        .into_response();
-        http_log(
-            HttpLog {
-                ip: &ip,
-                status: response.status().as_u16(),
-                method: request.method().as_str(),
-                host: &host,
-                uri: request.uri().path(),
-                elapsed_time,
-            },
-            None,
-            disable_http_logs,
-        );
-        return Ok(response);
-    }
     let (proto, port) = match protocol {
         Protocol::Http { port } => ("http", port.to_string()),
         Protocol::Https { port } => ("https", port.to_string()),
-        Protocol::TlsRedirect { .. } => unreachable!(),
+        Protocol::TlsRedirect { to: to_port, .. } => {
+            let elapsed_time = timer.elapsed();
+            let response = Redirect::permanent(
+                format!(
+                    "https://{}{}{}",
+                    host,
+                    if to_port == 443 {
+                        "".into()
+                    } else {
+                        format!(":{to_port}")
+                    },
+                    request
+                        .uri()
+                        .path_and_query()
+                        .map(|path| path.as_str())
+                        .unwrap_or("/"),
+                )
+                .as_str(),
+            )
+            .into_response();
+            http_log(
+                HttpLog {
+                    ip: &ip,
+                    status: response.status().as_u16(),
+                    method: request.method().as_str(),
+                    host: &host,
+                    uri: request.uri().path(),
+                    elapsed_time,
+                },
+                None,
+                disable_http_logs,
+            );
+            return Ok(response);
+        }
     };
     request
         .headers_mut()

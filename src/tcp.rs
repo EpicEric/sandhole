@@ -45,17 +45,17 @@ impl TcpHandler {
 
 #[async_trait]
 pub(crate) trait PortHandler {
-    async fn create_port_listener(&self, port: u16) -> u16;
-    async fn get_free_port(&self) -> u16;
+    async fn create_port_listener(&self, port: u16) -> anyhow::Result<u16>;
+    async fn get_free_port(&self) -> anyhow::Result<u16>;
 }
 
 #[async_trait]
 impl PortHandler for Arc<TcpHandler> {
     // Create a TCP listener on the given port.
-    async fn create_port_listener(&self, port: u16) -> u16 {
+    async fn create_port_listener(&self, port: u16) -> anyhow::Result<u16> {
         let listener = match TcpListener::bind((self.listen_address.as_ref(), port)).await {
             Ok(listener) => listener,
-            Err(err) => panic!("Error listening to TCP port {}: {}", port, err),
+            Err(err) => return Err(err.into()),
         };
         let port = listener.local_addr().unwrap().port();
         let clone = Arc::clone(self);
@@ -104,11 +104,11 @@ impl PortHandler for Arc<TcpHandler> {
             }
         }));
         self.sockets.insert(port, join_handle);
-        port
+        Ok(port)
     }
 
     // Create a TCP listener on a random open port, returning the port number.
-    async fn get_free_port(&self) -> u16 {
+    async fn get_free_port(&self) -> anyhow::Result<u16> {
         self.create_port_listener(0).await
     }
 }
@@ -132,7 +132,7 @@ impl ConnectionMapReactor<TcpAlias> for Arc<TcpHandler> {
             let clone = Arc::clone(self);
             tokio::spawn(async move {
                 for port in ports.into_iter() {
-                    clone.create_port_listener(port).await;
+                    let _ = clone.create_port_listener(port).await;
                 }
             });
         }
