@@ -3,7 +3,7 @@
 //!
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     marker::PhantomData,
     net::{IpAddr, SocketAddr},
     sync::{Arc, RwLock},
@@ -90,9 +90,9 @@ pub(crate) struct SandholeServer {
     pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
     pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>>>,
     pub(crate) tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
-    pub(crate) http_data: Arc<DataTable<String, (BTreeSet<SocketAddr>, f64)>>,
-    pub(crate) ssh_data: Arc<DataTable<String, BTreeSet<SocketAddr>>>,
-    pub(crate) tcp_data: Arc<DataTable<TcpAlias, BTreeSet<SocketAddr>>>,
+    pub(crate) http_data: Arc<DataTable<String, (BTreeMap<SocketAddr, String>, f64)>>,
+    pub(crate) ssh_data: Arc<DataTable<String, BTreeMap<SocketAddr, String>>>,
+    pub(crate) tcp_data: Arc<DataTable<TcpAlias, BTreeMap<SocketAddr, String>>>,
     pub(crate) system_data: Arc<RwLock<SystemData>>,
     pub(crate) fingerprints_validator: FingerprintsValidator,
     pub(crate) api_login: Option<ApiLogin>,

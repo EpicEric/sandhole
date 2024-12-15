@@ -346,7 +346,7 @@ mod proxy_handler_tests {
         connections::MockConnectionMapReactor,
         handler::MockConnectionHandler,
         http::{ProxyData, Telemetry},
-        quota::DummyQuotaHandler,
+        quota::{DummyQuotaHandler, TokenHolder},
     };
 
     use super::{proxy_handler, ConnectionMap, DomainRedirect, Protocol};
@@ -498,7 +498,7 @@ mod proxy_handler_tests {
             .insert(
                 "with.handler".into(),
                 "127.0.0.1:12345".parse().unwrap(),
-                None,
+                TokenHolder::User("a".into()),
                 Arc::new(mock),
             )
             .unwrap();
@@ -555,7 +555,7 @@ mod proxy_handler_tests {
             .insert(
                 "non.standard".into(),
                 "127.0.0.1:12345".parse().unwrap(),
-                None,
+                TokenHolder::User("a".into()),
                 Arc::new(mock),
             )
             .unwrap();
@@ -618,7 +618,7 @@ mod proxy_handler_tests {
             .insert(
                 "with.handler".into(),
                 "127.0.0.1:12345".parse().unwrap(),
-                None,
+                TokenHolder::User("a".into()),
                 Arc::new(mock),
             )
             .unwrap();
@@ -705,7 +705,7 @@ mod proxy_handler_tests {
             .insert(
                 "root.domain".into(),
                 "127.0.0.1:12345".parse().unwrap(),
-                None,
+                TokenHolder::User("a".into()),
                 Arc::new(mock),
             )
             .unwrap();
@@ -792,7 +792,7 @@ mod proxy_handler_tests {
             .insert(
                 "with.websocket".into(),
                 "127.0.0.1:12345".parse().unwrap(),
-                None,
+                TokenHolder::User("a".into()),
                 Arc::new(mock),
             )
             .unwrap();

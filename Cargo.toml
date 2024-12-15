@@ -16,7 +16,7 @@ exclude = [".github", "book", "docker-compose-example", "tests/data"]
 [dependencies]
 anyhow = "1.0.93"
 async-trait = "0.1.83"
-axum = "0.7.7"
+axum = { version = "0.7.7", default-features = false }
 bytes = "1.8.0"
 chrono = "0.4.38"
 clap = { version = "4.5.20", features = ["derive", "string"] }
@@ -58,6 +58,7 @@ trie-rs = "0.4.2"
 [dev-dependencies]
 axum = { version = "0.7.7", features = ["macros", "ws"] }
 futures-util = "0.3.31"
+insta = { version = "1.41.1", features = ["yaml"] }
 mockall = "0.13.0"
 regex = "1.11.1"
 tokio-tungstenite = "0.24.0"

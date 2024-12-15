@@ -4,8 +4,9 @@
 
 ### Added
 
+- **BREAKING**: Add `remote_address` field to API login request.
 - Add user forwarding quotas via the `--quota-per-user` option.
-- Add `remote_address` field to API login request.
+- Add user IDs to admin interface.
 
 ### Fixed
 
@@ -13,7 +14,7 @@
 
 ### Changed
 
-- Bump MSRV to 1.79.0.
+- **BREAKING**: Bump MSRV to 1.79.0.
 - Modify exports to live within `lib.rs`.
 - Update `russh` dependency to version `0.50.0-beta.1`.
 - Update `sysinfo` dependency to version `0.33.0`.

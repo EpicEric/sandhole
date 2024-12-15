@@ -1,6 +1,6 @@
 use std::{
     borrow::Borrow,
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     hash::Hash,
     net::SocketAddr,
     sync::{Arc, RwLock},
@@ -14,7 +14,7 @@ use rand::seq::SliceRandom;
 use crate::{
     config::LoadBalancing,
     error::ServerError,
-    quota::{QuotaHandler, QuotaToken},
+    quota::{QuotaHandler, QuotaToken, TokenHolder},
 };
 
 #[cfg_attr(test, automock)]
@@ -29,6 +29,7 @@ impl<K> ConnectionMapReactor<K> for DummyConnectionMapReactor {
 }
 
 struct ConnectionMapEntry<H> {
+    user: String,
     address: SocketAddr,
     handler: H,
     _token: QuotaToken,
@@ -64,16 +65,18 @@ where
         &self,
         key: K,
         address: SocketAddr,
-        holder: Option<String>,
+        holder: TokenHolder,
         handler: H,
     ) -> anyhow::Result<()> {
         let len = self.map.len();
+        let user = holder.get_user();
         match self.load_balancing {
             LoadBalancing::Allow => {
                 let Some(token) = self.quota_handler.get_token(holder) else {
                     return Err(ServerError::QuotaReached.into());
                 };
                 self.map.entry(key).or_default().push(ConnectionMapEntry {
+                    user,
                     address,
                     handler,
                     _token: token,
@@ -94,6 +97,7 @@ where
                 self.map.insert(
                     key,
                     vec![ConnectionMapEntry {
+                        user,
                         address,
                         handler,
                         _token: token,
@@ -110,6 +114,7 @@ where
                 self.map.insert(
                     key,
                     vec![ConnectionMapEntry {
+                        user,
                         address,
                         handler,
                         _token: token,
@@ -174,7 +179,7 @@ where
         *self.reactor.write().unwrap() = reactor;
     }
 
-    pub(crate) fn data(&self) -> BTreeMap<K, BTreeSet<SocketAddr>> {
+    pub(crate) fn data(&self) -> BTreeMap<K, BTreeMap<SocketAddr, String>> {
         self.map
             .iter()
             .map(|entry| {
@@ -183,8 +188,7 @@ where
                     entry
                         .value()
                         .iter()
-                        .map(|ConnectionMapEntry { address, .. }| address)
-                        .copied()
+                        .map(|ConnectionMapEntry { address, user, .. }| (*address, user.clone()))
                         .collect(),
                 )
             })
@@ -200,7 +204,7 @@ mod connection_map_tests {
 
     use crate::{
         config::LoadBalancing,
-        quota::{DummyQuotaHandler, MockQuotaHandler, QuotaHandler},
+        quota::{DummyQuotaHandler, MockQuotaHandler, QuotaHandler, TokenHolder},
     };
 
     use super::{ConnectionMap, MockConnectionMapReactor};
@@ -213,7 +217,7 @@ mod connection_map_tests {
         mock_quota
             .expect_get_token()
             .once()
-            .returning(|_| DummyQuotaHandler.get_token(None));
+            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -222,13 +226,20 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            Some("1".into()),
+            TokenHolder::User("user1".into()),
             1,
         )
         .unwrap();
         assert_eq!(map.get("host"), Some(1));
+        let data = map.data();
+        insta::assert_yaml_snapshot!(data, @r###"
+        host:
+          "127.0.0.1:1": user1
+        "###);
         map.remove("host", &"127.0.0.1:1".parse().unwrap());
         assert_eq!(map.get("host"), None);
+        let data = map.data();
+        assert!(data.is_empty());
     }
 
     #[test]
@@ -239,7 +250,7 @@ mod connection_map_tests {
         mock_quota
             .expect_get_token()
             .times(2)
-            .returning(|_| DummyQuotaHandler.get_token(None));
+            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -248,22 +259,31 @@ mod connection_map_tests {
         map.insert(
             "host1".into(),
             "127.0.0.1:2".parse().unwrap(),
-            Some("1".into()),
+            TokenHolder::User("user1".into()),
             1,
         )
         .unwrap();
         map.insert(
             "host2".into(),
             "127.0.0.1:2".parse().unwrap(),
-            Some("2".into()),
+            TokenHolder::User("user2".into()),
             2,
         )
         .unwrap();
         assert_eq!(map.get("host1"), Some(1));
         assert_eq!(map.get("host2"), Some(2));
+        let data = map.data();
+        insta::assert_yaml_snapshot!(data, @r###"
+        host1:
+          "127.0.0.1:2": user1
+        host2:
+          "127.0.0.1:2": user2
+        "###);
         map.remove_by_address(&"127.0.0.1:2".parse().unwrap());
         assert_eq!(map.get("host1"), None);
         assert_eq!(map.get("host2"), None);
+        let data = map.data();
+        assert!(data.is_empty());
     }
 
     #[test]
@@ -274,7 +294,7 @@ mod connection_map_tests {
         mock_quota
             .expect_get_token()
             .times(4)
-            .returning(|_| DummyQuotaHandler.get_token(None));
+            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -283,28 +303,28 @@ mod connection_map_tests {
         map.insert(
             "host1".into(),
             "127.0.0.1:2".parse().unwrap(),
-            Some("1".into()),
+            TokenHolder::User("user1".into()),
             1,
         )
         .unwrap();
         map.insert(
             "host2".into(),
             "127.0.0.1:2".parse().unwrap(),
-            Some("1".into()),
+            TokenHolder::User("user1".into()),
             2,
         )
         .unwrap();
         map.insert(
             "host2".into(),
             "127.0.0.1:3".parse().unwrap(),
-            Some("2".into()),
+            TokenHolder::User("user2".into()),
             3,
         )
         .unwrap();
         map.insert(
             "host3".into(),
             "127.0.0.1:3".parse().unwrap(),
-            Some("2".into()),
+            TokenHolder::User("user2".into()),
             4,
         )
         .unwrap();
@@ -312,6 +332,13 @@ mod connection_map_tests {
         assert_eq!(map.get("host1"), None);
         assert_eq!(map.get("host2"), Some(3));
         assert_eq!(map.get("host3"), Some(4));
+        let data = map.data();
+        insta::assert_yaml_snapshot!(data, @r###"
+        host2:
+          "127.0.0.1:3": user2
+        host3:
+          "127.0.0.1:3": user2
+        "###);
     }
 
     #[test]
@@ -322,7 +349,7 @@ mod connection_map_tests {
         mock_quota
             .expect_get_token()
             .times(2)
-            .returning(|_| DummyQuotaHandler.get_token(None));
+            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -331,14 +358,14 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            Some("1".into()),
+            TokenHolder::User("user1".into()),
             1,
         )
         .unwrap();
         map.insert(
             "other".into(),
             "127.0.0.1:2".parse().unwrap(),
-            Some("2".into()),
+            TokenHolder::User("user2".into()),
             2,
         )
         .unwrap();
@@ -357,7 +384,7 @@ mod connection_map_tests {
         mock_quota
             .expect_get_token()
             .times(3)
-            .returning(|_| DummyQuotaHandler.get_token(None));
+            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -366,21 +393,21 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            Some("1".into()),
+            TokenHolder::User("user1".into()),
             1,
         )
         .unwrap();
         map.insert(
             "host".into(),
             "127.0.0.1:2".parse().unwrap(),
-            Some("2".into()),
+            TokenHolder::User("user2".into()),
             2,
         )
         .unwrap();
         map.insert(
             "host".into(),
             "127.0.0.1:3".parse().unwrap(),
-            Some("3".into()),
+            TokenHolder::User("user3".into()),
             3,
         )
         .unwrap();
@@ -399,6 +426,13 @@ mod connection_map_tests {
             results.into_iter().fold(0usize, |acc, (_, i)| acc + i),
             10_000
         );
+        let data = map.data();
+        insta::assert_yaml_snapshot!(data, @r###"
+        host:
+          "127.0.0.1:1": user1
+          "127.0.0.1:2": user2
+          "127.0.0.1:3": user3
+        "###);
         map.remove("host", &"127.0.0.1:2".parse().unwrap());
         let mut results: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
         for _ in 0..10_000 {
@@ -415,6 +449,12 @@ mod connection_map_tests {
             results.into_iter().fold(0usize, |acc, (_, i)| acc + i),
             10_000
         );
+        let data = map.data();
+        insta::assert_yaml_snapshot!(data, @r###"
+        host:
+          "127.0.0.1:1": user1
+          "127.0.0.1:3": user3
+        "###);
     }
 
     #[test]
@@ -425,7 +465,7 @@ mod connection_map_tests {
         mock_quota
             .expect_get_token()
             .times(2)
-            .returning(|_| DummyQuotaHandler.get_token(None));
+            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Replace,
             Arc::new(Box::new(mock_quota)),
@@ -434,20 +474,25 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            Some("1".into()),
+            TokenHolder::User("user1".into()),
             1,
         )
         .unwrap();
         map.insert(
             "host".into(),
             "127.0.0.1:2".parse().unwrap(),
-            Some("2".into()),
+            TokenHolder::User("user2".into()),
             2,
         )
         .unwrap();
         for _ in 0..1_000 {
             assert_eq!(map.get("host"), Some(2));
         }
+        let data = map.data();
+        insta::assert_yaml_snapshot!(data, @r###"
+        host:
+          "127.0.0.1:2": user2
+        "###);
     }
 
     #[test]
@@ -458,7 +503,7 @@ mod connection_map_tests {
         mock_quota
             .expect_get_token()
             .once()
-            .returning(|_| DummyQuotaHandler.get_token(None));
+            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Deny,
             Arc::new(Box::new(mock_quota)),
@@ -467,7 +512,7 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            Some("1".into()),
+            TokenHolder::User("user1".into()),
             1,
         )
         .unwrap();
@@ -475,13 +520,18 @@ mod connection_map_tests {
             .insert(
                 "host".into(),
                 "127.0.0.1:2".parse().unwrap(),
-                Some("2".into()),
+                TokenHolder::User("user2".into()),
                 2
             )
             .is_err());
         for _ in 0..1_000 {
             assert_eq!(map.get("host"), Some(1));
         }
+        let data = map.data();
+        insta::assert_yaml_snapshot!(data, @r###"
+        host:
+          "127.0.0.1:1": user1
+        "###);
     }
 
     #[test]
@@ -498,10 +548,10 @@ mod connection_map_tests {
             .expect_get_token()
             .times(3)
             .returning(move |holder| {
-                assert_eq!(holder, Some("1".into()));
+                assert_eq!(holder, TokenHolder::User("user1".into()));
                 if quota_count < 2 {
                     quota_count += 1;
-                    DummyQuotaHandler.get_token(None)
+                    DummyQuotaHandler.get_token(TokenHolder::Admin("".into()))
                 } else {
                     None
                 }
@@ -511,11 +561,11 @@ mod connection_map_tests {
             Arc::new(Box::new(mock_quota)),
             Some(mock_reactor),
         );
-        // Accepted
+        // Accepted and added
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            Some("1".into()),
+            TokenHolder::User("user1".into()),
             1,
         )
         .unwrap();
@@ -523,7 +573,7 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:2".parse().unwrap(),
-            Some("1".into()),
+            TokenHolder::User("user1".into()),
             2,
         )
         .unwrap();
@@ -532,7 +582,7 @@ mod connection_map_tests {
             .insert(
                 "host".into(),
                 "127.0.0.1:3".parse().unwrap(),
-                Some("1".into()),
+                TokenHolder::User("user1".into()),
                 3,
             )
             .is_err());
@@ -551,6 +601,12 @@ mod connection_map_tests {
             results.into_iter().fold(0usize, |acc, (_, i)| acc + i),
             10_000
         );
+        let data = map.data();
+        insta::assert_yaml_snapshot!(data, @r###"
+        host:
+          "127.0.0.1:1": user1
+          "127.0.0.1:2": user1
+        "###);
     }
 
     #[test]
@@ -563,10 +619,10 @@ mod connection_map_tests {
             .expect_get_token()
             .times(2)
             .returning(move |holder| {
-                assert_eq!(holder, Some("1".into()));
+                assert_eq!(holder, TokenHolder::User("user1".into()));
                 if quota_count < 1 {
                     quota_count += 1;
-                    DummyQuotaHandler.get_token(None)
+                    DummyQuotaHandler.get_token(TokenHolder::Admin("".into()))
                 } else {
                     None
                 }
@@ -576,11 +632,11 @@ mod connection_map_tests {
             Arc::new(Box::new(mock_quota)),
             Some(mock_reactor),
         );
-        // Accepted
+        // Accepted and added
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            Some("1".into()),
+            TokenHolder::User("user1".into()),
             1,
         )
         .unwrap();
@@ -589,17 +645,22 @@ mod connection_map_tests {
             .insert(
                 "host".into(),
                 "127.0.0.1:2".parse().unwrap(),
-                Some("1".into()),
+                TokenHolder::User("user1".into()),
                 2,
             )
             .is_err());
         for _ in 0..1_000 {
             assert_eq!(map.get("host"), Some(1));
         }
+        let data = map.data();
+        insta::assert_yaml_snapshot!(data, @r###"
+        host:
+          "127.0.0.1:1": user1
+        "###);
     }
 
     #[test]
-    fn reaching_quota_doesnt_deny() {
+    fn reaching_quota_doesnt_deny_by_policy() {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(1).returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
@@ -608,12 +669,12 @@ mod connection_map_tests {
             .expect_get_token()
             .times(2)
             .returning(move |holder| {
-                assert_eq!(holder, Some("1".into()));
+                assert_eq!(holder, TokenHolder::User("user1".into()));
                 if quota_count < 1 {
                     quota_count += 1;
                     None
                 } else {
-                    DummyQuotaHandler.get_token(None)
+                    DummyQuotaHandler.get_token(TokenHolder::Admin("".into()))
                 }
             });
         let map = ConnectionMap::<String, usize, _>::new(
@@ -626,7 +687,7 @@ mod connection_map_tests {
             .insert(
                 "host".into(),
                 "127.0.0.1:1".parse().unwrap(),
-                Some("1".into()),
+                TokenHolder::User("user1".into()),
                 1,
             )
             .is_err());
@@ -634,7 +695,7 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:2".parse().unwrap(),
-            Some("1".into()),
+            TokenHolder::User("user1".into()),
             2,
         )
         .unwrap();
@@ -643,12 +704,17 @@ mod connection_map_tests {
             .insert(
                 "host".into(),
                 "127.0.0.1:3".parse().unwrap(),
-                Some("1".into()),
+                TokenHolder::User("user1".into()),
                 3
             )
             .is_err());
         for _ in 0..1_000 {
             assert_eq!(map.get("host"), Some(2));
         }
+        let data = map.data();
+        insta::assert_yaml_snapshot!(data, @r###"
+        host:
+          "127.0.0.1:2": user1
+        "###);
     }
 }

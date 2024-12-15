@@ -33,12 +33,12 @@ async fn https_bind_all_hostnames() {
         domain_redirect: "https://tokio.rs/".into(),
         user_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys").into(),
         admin_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys").into(),
-        password_authentication_url: None,
         certificates_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates")
             .into(),
         private_key_file: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh").into(),
         disable_directory_creation: true,
         listen_address: "127.0.0.1".into(),
+        password_authentication_url: None,
         ssh_port: 18022,
         http_port: 18080,
         https_port: 18443,

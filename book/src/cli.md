@@ -113,13 +113,13 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           Possible values:
           - <b>all</b>:   Allow any hostnames unconditionally, including the
-                          main domain
+                   main domain
           - <b>cname</b>: Allow any hostnames with a CNAME record pointing to
-                          the main domain
+                   the main domain
           - <b>txt</b>:   Allow any hostnames with a TXT record containing a
-                          fingerprint, including the main domain
+                   fingerprint, including the main domain
           - <b>none</b>:  Don&#39;t allow user-provided hostnames, enforce
-                          subdomains
+                   subdomains
 
       <b>--load-balancing</b> &lt;STRATEGY&gt;
           Strategy for load-balancing when multiple services request the same
@@ -133,9 +133,9 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           Possible values:
           - <b>allow</b>:   Load-balance with all available handlers
           - <b>replace</b>: Don&#39;t load-balance; When adding a new handler,
-                            replace the existing one
+                     replace the existing one
           - <b>deny</b>:    Don&#39;t load-balance; Deny the new handler if
-                            there&#39;s an existing one
+                     there&#39;s an existing one
 
       <b>--txt-record-prefix</b> &lt;PREFIX&gt;
           Prefix for TXT DNS records containing key fingerprints, for
@@ -174,11 +174,11 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           Possible values:
           - <b>ip-and-user</b>: From IP address, SSH user, and requested
-                                address. Recommended if unsure
+                         address. Recommended if unsure
           - <b>user</b>:        From SSH user and requested address
           - <b>fingerprint</b>: From SSH key fingerprint and requested address
           - <b>address</b>:     From SSH connection socket (address + port) and
-                                requested address
+                         requested address
 
       <b>--idle-connection-timeout</b> &lt;DURATION&gt;
           Grace period for dangling/unauthenticated SSH connections before they

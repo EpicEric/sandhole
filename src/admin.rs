@@ -90,7 +90,11 @@ struct AdminState {
     is_pty: bool,
     tab: Tab,
     table_state: TableState,
-    scroll_state: ScrollbarState,
+    vertical_scroll: ScrollbarState,
+}
+
+fn remove_user_namespace(user: &str) -> &str {
+    &user[2..]
 }
 
 fn to_socket_addr_string(addr: SocketAddr) -> String {
@@ -151,23 +155,29 @@ impl AdminState {
         let table = match self.tab {
             Tab::Http => {
                 let data = self.server.http_data.read().unwrap().clone();
-                self.scroll_state = self.scroll_state.content_length(data.len());
-                let rows = data.into_iter().map(|(host, (peers, req_per_min))| {
-                    let len = peers.len() as u16;
+                self.vertical_scroll = self.vertical_scroll.content_length(data.len());
+                let rows = data.into_iter().map(|(host, (connections, req_per_min))| {
+                    let len = connections.len() as u16;
+                    let (peers, users): (Vec<_>, Vec<_>) = connections.into_iter().unzip();
                     Row::new(vec![
                         host,
-                        peers.into_iter().map(to_socket_addr_string).join("\n"),
                         req_per_min.to_string(),
+                        users
+                            .iter()
+                            .map(|user| remove_user_namespace(user))
+                            .join("\n"),
+                        peers.into_iter().map(to_socket_addr_string).join("\n"),
                     ])
                     .height(len)
                 });
                 let constraints = [
                     Constraint::Min(25),
-                    Constraint::Length(47),
                     Constraint::Min(7),
+                    Constraint::Length(50),
+                    Constraint::Length(47),
                 ];
-                let header =
-                    Row::new(["Host", "Peer(s)", "Req/min"]).add_modifier(Modifier::UNDERLINED);
+                let header = Row::new(["Host", "Req/min", "User(s)", "Peer(s)"])
+                    .add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("HTTP services".fg(color).bold()).centered());
                 Table::new(rows, constraints)
@@ -178,17 +188,27 @@ impl AdminState {
             }
             Tab::Ssh => {
                 let data = self.server.ssh_data.read().unwrap().clone();
-                self.scroll_state = self.scroll_state.content_length(data.len());
-                let rows = data.into_iter().map(|(host, peers)| {
-                    let len = peers.len() as u16;
+                self.vertical_scroll = self.vertical_scroll.content_length(data.len());
+                let rows = data.into_iter().map(|(host, connections)| {
+                    let len = connections.len() as u16;
+                    let (peers, users): (Vec<_>, Vec<_>) = connections.into_iter().unzip();
                     Row::new(vec![
                         host,
+                        users
+                            .iter()
+                            .map(|user| remove_user_namespace(user))
+                            .join("\n"),
                         peers.into_iter().map(to_socket_addr_string).join("\n"),
                     ])
                     .height(len)
                 });
-                let constraints = [Constraint::Min(25), Constraint::Length(47)];
-                let header = Row::new(["Host", "Peer(s)"]).add_modifier(Modifier::UNDERLINED);
+                let constraints = [
+                    Constraint::Min(25),
+                    Constraint::Length(50),
+                    Constraint::Length(47),
+                ];
+                let header =
+                    Row::new(["Host", "User(s)", "Peer(s)"]).add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("SSH services".fg(color).bold()).centered());
                 Table::new(rows, constraints)
@@ -199,19 +219,27 @@ impl AdminState {
             }
             Tab::Tcp => {
                 let data = self.server.tcp_data.read().unwrap().clone();
-                self.scroll_state = self.scroll_state.content_length(data.len());
-                let rows = data.into_iter().map(|(TcpAlias(alias, port), peers)| {
-                    let len = peers.len() as u16;
-                    Row::new(vec![
-                        alias,
-                        port.to_string(),
-                        peers.into_iter().map(to_socket_addr_string).join("\n"),
-                    ])
-                    .height(len)
-                });
+                self.vertical_scroll = self.vertical_scroll.content_length(data.len());
+                let rows = data
+                    .into_iter()
+                    .map(|(TcpAlias(alias, port), connections)| {
+                        let len = connections.len() as u16;
+                        let (peers, users): (Vec<_>, Vec<_>) = connections.into_iter().unzip();
+                        Row::new(vec![
+                            alias,
+                            port.to_string(),
+                            users
+                                .iter()
+                                .map(|user| remove_user_namespace(user))
+                                .join("\n"),
+                            peers.into_iter().map(to_socket_addr_string).join("\n"),
+                        ])
+                        .height(len)
+                    });
                 let constraints = [
                     Constraint::Min(25),
                     Constraint::Length(5),
+                    Constraint::Length(50),
                     Constraint::Length(47),
                 ];
                 let header =
@@ -228,9 +256,9 @@ impl AdminState {
         StatefulWidget::render(table, area, buf, &mut self.table_state);
         StatefulWidget::render(
             Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-            area.inner(Margin::new(0, 1)),
+            area.inner(Margin::new(0, 2)),
             buf,
-            &mut self.scroll_state,
+            &mut self.vertical_scroll,
         );
     }
 
@@ -309,7 +337,7 @@ impl AdminInterface {
                 tab: Tab::Http,
                 is_pty: false,
                 table_state: Default::default(),
-                scroll_state: Default::default(),
+                vertical_scroll: Default::default(),
             },
         }));
         let interface_clone = Arc::clone(&interface);
@@ -376,7 +404,7 @@ impl AdminInterface {
                 }
             }
             interface.state.table_state = Default::default();
-            interface.state.scroll_state = Default::default();
+            interface.state.vertical_scroll = Default::default();
             drop(interface);
         }
         let _ = self.change_notifier.send(());
@@ -398,7 +426,7 @@ impl AdminInterface {
                 }
             }
             interface.state.table_state = Default::default();
-            interface.state.scroll_state = Default::default();
+            interface.state.vertical_scroll = Default::default();
             drop(interface);
         }
         let _ = self.change_notifier.send(());
@@ -409,7 +437,7 @@ impl AdminInterface {
         {
             let mut interface = self.interface.lock().unwrap();
             interface.state.table_state.select_next();
-            interface.state.scroll_state.next();
+            interface.state.vertical_scroll.next();
             drop(interface);
         }
         let _ = self.change_notifier.send(());
@@ -420,7 +448,7 @@ impl AdminInterface {
         {
             let mut interface = self.interface.lock().unwrap();
             interface.state.table_state.select_previous();
-            interface.state.scroll_state.prev();
+            interface.state.vertical_scroll.prev();
             drop(interface);
         }
         let _ = self.change_notifier.send(());

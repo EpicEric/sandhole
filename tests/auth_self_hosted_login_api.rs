@@ -1,20 +1,27 @@
-use std::{sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use axum::{extract::Request, response::IntoResponse, routing::post, Json, Router};
+use hyper::{body::Incoming, service::service_fn, StatusCode};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto::Builder,
+};
 use russh::{
     client::{Msg, Session},
     Channel,
 };
 use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig, BindHostnames, LoadBalancing};
+use serde::Deserialize;
 use tokio::{
-    io::AsyncReadExt,
     net::TcpStream,
     time::{sleep, timeout},
 };
+use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn tcp_bind_random_ports() {
+async fn auth_self_hosted_login_api() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),
@@ -26,7 +33,7 @@ async fn tcp_bind_random_ports() {
         private_key_file: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh").into(),
         disable_directory_creation: true,
         listen_address: "127.0.0.1".into(),
-        password_authentication_url: None,
+        password_authentication_url: Some("http://localhost:38080/authenticate".into()),
         ssh_port: 18022,
         http_port: 18080,
         https_port: 18443,
@@ -39,7 +46,7 @@ async fn tcp_bind_random_ports() {
         bind_hostnames: BindHostnames::None,
         load_balancing: LoadBalancing::Allow,
         allow_provided_subdomains: false,
-        allow_requested_ports: false,
+        allow_requested_ports: true,
         quota_per_user: None,
         random_subdomain_seed: None,
         txt_record_prefix: "_sandhole".into(),
@@ -60,7 +67,7 @@ async fn tcp_bind_random_ports() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied
+    // 2. Start SSH client that will start the login API
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
@@ -77,44 +84,30 @@ async fn tcp_bind_random_ports() {
         )
         .await
         .expect("SSH authentication failed"));
-    let mut channel = session
-        .channel_open_session()
-        .await
-        .expect("channel_open_session failed");
     session
-        .tcpip_forward("", 12345)
+        .tcpip_forward("localhost", 38080)
         .await
         .expect("tcpip_forward failed");
-    let regex = regex::Regex::new(r"foobar.tld:(\d+)").unwrap();
-    let Ok(port) = timeout(Duration::from_secs(3), async move {
-        while let Some(message) = channel.wait().await {
-            match message {
-                russh::ChannelMsg::Data { data } => {
-                    let data =
-                        String::from_utf8(data.to_vec()).expect("Invalid UTF-8 from message");
-                    if let Some(captures) = regex.captures(&data) {
-                        let port = captures.get(1).unwrap().as_str().to_string();
-                        return port;
-                    }
-                }
-                message => panic!("Unexpected message {:?}", message),
-            }
-        }
-        panic!("Unexpected end of channel");
-    })
-    .await
-    else {
-        panic!("Timed out waiting for port allocation.");
-    };
-    assert!(port.parse::<u16>().expect("should be a valid port number") > 1024);
 
-    // 3. Connect to the TCP port of our proxy
-    let mut tcp_stream = TcpStream::connect(format!("127.0.0.1:{port}"))
+    // 3. Succeed in user+password login
+    let new_ssh_client = SshClient;
+    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", new_ssh_client)
         .await
-        .expect("TCP connection failed");
-    let mut buf = String::with_capacity(13);
-    tcp_stream.read_to_string(&mut buf).await.unwrap();
-    assert_eq!(buf, "Hello, world!");
+        .expect("Failed to connect to SSH server");
+    assert!(session
+        .authenticate_password("eric", "sandhole")
+        .await
+        .expect("password authentication failed"));
+
+    // 4. Fail in user+password login
+    let new_ssh_client = SshClient;
+    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", new_ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
+    assert!(!session
+        .authenticate_password("eric", "invalid_password")
+        .await
+        .expect("password authentication failed"));
 }
 
 struct SshClient;
@@ -136,8 +129,35 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        channel.data(&b"Hello, world!"[..]).await.unwrap();
-        channel.eof().await.unwrap();
+        #[derive(Debug, Deserialize)]
+        struct AuthenticationRequest {
+            user: String,
+            password: String,
+            remote_address: SocketAddr,
+        }
+        async fn authentication_route(
+            Json(body): Json<AuthenticationRequest>,
+        ) -> impl IntoResponse {
+            dbg!(&body);
+            if body.user == "eric"
+                && body.password == "sandhole"
+                && body.remote_address.ip().is_loopback()
+            {
+                StatusCode::OK
+            } else {
+                StatusCode::FORBIDDEN
+            }
+        }
+        let router = Router::new()
+            .route("/authenticate", post(authentication_route))
+            .into_service();
+        let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
+        tokio::spawn(async move {
+            Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(TokioIo::new(channel.into_stream()), service)
+                .await
+                .expect("Invalid request");
+        });
         Ok(())
     }
 }
