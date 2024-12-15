@@ -63,7 +63,7 @@ mod tcp;
 mod tcp_alias;
 mod telemetry;
 
-type DataTable<K, V> = RwLock<BTreeMap<K, V>>;
+type DataTable<K, V> = Arc<RwLock<BTreeMap<K, V>>>;
 
 struct HttpReactor {
     certificates: Arc<CertificateResolver>,
@@ -90,9 +90,9 @@ pub(crate) struct SandholeServer {
     pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
     pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>>>,
     pub(crate) tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
-    pub(crate) http_data: Arc<DataTable<String, (BTreeMap<SocketAddr, String>, f64)>>,
-    pub(crate) ssh_data: Arc<DataTable<String, BTreeMap<SocketAddr, String>>>,
-    pub(crate) tcp_data: Arc<DataTable<TcpAlias, BTreeMap<SocketAddr, String>>>,
+    pub(crate) http_data: DataTable<String, (BTreeMap<SocketAddr, String>, f64)>,
+    pub(crate) ssh_data: DataTable<String, BTreeMap<SocketAddr, String>>,
+    pub(crate) tcp_data: DataTable<TcpAlias, BTreeMap<SocketAddr, String>>,
     pub(crate) system_data: Arc<RwLock<SystemData>>,
     pub(crate) fingerprints_validator: FingerprintsValidator,
     pub(crate) api_login: Option<ApiLogin>,
