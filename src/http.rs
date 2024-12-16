@@ -3,8 +3,8 @@ use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 use std::{net::SocketAddr, sync::Arc};
 
+use crate::connection_handler::ConnectionHandler;
 use crate::connections::ConnectionMapReactor;
-use crate::handler::ConnectionHandler;
 use crate::telemetry::Telemetry;
 
 use super::{connections::ConnectionMap, error::ServerError};
@@ -343,8 +343,8 @@ mod proxy_handler_tests {
 
     use crate::{
         config::LoadBalancing,
+        connection_handler::MockConnectionHandler,
         connections::MockConnectionMapReactor,
-        handler::MockConnectionHandler,
         http::{ProxyData, Telemetry},
         quota::{DummyQuotaHandler, TokenHolder},
     };
@@ -387,7 +387,7 @@ mod proxy_handler_tests {
             },
         )
         .await;
-        assert!(response.is_err());
+        assert!(response.is_err(), "should error on missing host header");
     }
 
     #[tokio::test]
@@ -427,7 +427,7 @@ mod proxy_handler_tests {
             },
         )
         .await;
-        assert!(response.is_ok());
+        assert!(response.is_ok(), "should return response when not found");
         let response = response.unwrap();
         assert_eq!(response.status(), hyper::StatusCode::NOT_FOUND);
     }
@@ -469,7 +469,7 @@ mod proxy_handler_tests {
             },
         )
         .await;
-        assert!(response.is_ok());
+        assert!(response.is_ok(), "should return response when redirect");
         let response = response.unwrap();
         assert_eq!(response.status(), hyper::StatusCode::SEE_OTHER);
         assert_eq!(
@@ -526,7 +526,10 @@ mod proxy_handler_tests {
             },
         )
         .await;
-        assert!(response.is_ok());
+        assert!(
+            response.is_ok(),
+            "should return response when HTTPS redirect"
+        );
         let response = response.unwrap();
         assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
         assert_eq!(
@@ -583,7 +586,10 @@ mod proxy_handler_tests {
             },
         )
         .await;
-        assert!(response.is_ok());
+        assert!(
+            response.is_ok(),
+            "should return response whyen HTTPS redirect to non-standard port"
+        );
         let response = response.unwrap();
         assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
         assert_eq!(
@@ -650,7 +656,10 @@ mod proxy_handler_tests {
                 .await
                 .expect("Invalid request");
         });
-        assert!(logging_rx.is_empty());
+        assert!(
+            logging_rx.is_empty(),
+            "shouldn't log before handling request"
+        );
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
@@ -669,8 +678,8 @@ mod proxy_handler_tests {
             },
         )
         .await;
-        assert!(!logging_rx.is_empty());
-        assert!(response.is_ok());
+        assert!(!logging_rx.is_empty(), "should log after proxying request");
+        assert!(response.is_ok(), "should return response after proxy");
         let response = response.unwrap();
         assert_eq!(response.status(), hyper::StatusCode::OK);
         let body = response.into_body();
@@ -737,7 +746,10 @@ mod proxy_handler_tests {
                 .await
                 .expect("Invalid request");
         });
-        assert!(logging_rx.is_empty());
+        assert!(
+            logging_rx.is_empty(),
+            "shouldn't log before handling request"
+        );
         let response = proxy_handler(
             request,
             "192.168.0.1:12345".parse().unwrap(),
@@ -756,8 +768,11 @@ mod proxy_handler_tests {
             },
         )
         .await;
-        assert!(!logging_rx.is_empty());
-        assert!(response.is_ok());
+        assert!(!logging_rx.is_empty(), "should log after proxying request");
+        assert!(
+            response.is_ok(),
+            "should return response after proxying request"
+        );
         let response = response.unwrap();
         assert_eq!(response.status(), hyper::StatusCode::OK);
         let body = response.into_body();
@@ -817,7 +832,7 @@ mod proxy_handler_tests {
                 .await
                 .expect("Invalid request");
         });
-        assert!(logging_rx.is_empty());
+        assert!(logging_rx.is_empty(), "shouldn't log before request");
         let proxy_service = service_fn(move |request| {
             proxy_handler(
                 request,
@@ -846,15 +861,13 @@ mod proxy_handler_tests {
         let (mut websocket, response) = client_async("ws://with.websocket/ws", stream)
             .await
             .unwrap();
+        assert!(
+            !logging_rx.is_empty(),
+            "should log after upgrade proxying request"
+        );
         assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
         assert_eq!(
-            websocket
-                .next()
-                .await
-                .unwrap()
-                .unwrap()
-                .into_text()
-                .unwrap(),
+            websocket.next().await.unwrap().unwrap().to_text().unwrap(),
             "Success."
         );
         jh.abort();

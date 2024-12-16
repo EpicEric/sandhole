@@ -8,6 +8,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
+use regex::Regex;
 use russh::{
     client::{Msg, Session},
     Channel,
@@ -50,7 +51,7 @@ async fn https_force_random_subdomains() {
         acme_use_staging: true,
         bind_hostnames: BindHostnames::None,
         load_balancing: LoadBalancing::Allow,
-        allow_provided_subdomains: false,
+        allow_requested_subdomains: false,
         allow_requested_ports: false,
         quota_per_user: None,
         random_subdomain_seed: None,
@@ -82,13 +83,16 @@ async fn https_force_random_subdomains() {
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
-    assert!(session
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
+    assert!(
+        session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     let mut channel = session
         .channel_open_session()
         .await
@@ -126,8 +130,12 @@ async fn https_force_random_subdomains() {
     else {
         panic!("Timed out waiting for subdomain allocation.");
     };
-    assert!(hostname.ends_with(".foobar.tld"));
-    assert_ne!(hostname, "something.foobar.tld");
+    assert!(
+        Regex::new(r"^[0-9a-z]{6}\.foobar\.tld$")
+            .unwrap()
+            .is_match(&hostname),
+        "should create hostname with random subdomain"
+    );
 
     // 3. Connect to the HTTPS port of our proxy
     let mut root_store = RootCertStore::empty();

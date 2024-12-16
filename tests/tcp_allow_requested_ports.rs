@@ -38,7 +38,7 @@ async fn tcp_allow_requested_ports() {
         acme_use_staging: true,
         bind_hostnames: BindHostnames::None,
         load_balancing: LoadBalancing::Allow,
-        allow_provided_subdomains: false,
+        allow_requested_subdomains: false,
         allow_requested_ports: true,
         quota_per_user: None,
         random_subdomain_seed: None,
@@ -70,13 +70,16 @@ async fn tcp_allow_requested_ports() {
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
-    assert!(session
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
+    assert!(
+        session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     session
         .tcpip_forward("localhost", 12345)
         .await

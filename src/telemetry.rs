@@ -152,7 +152,10 @@ mod telemetry_tests {
     #[test]
     fn includes_data_for_requests_on_http_domains() {
         let telemetry = Telemetry::new();
-        assert!(telemetry.get_http_requests_per_minute().is_empty());
+        assert!(
+            telemetry.get_http_requests_per_minute().is_empty(),
+            "shouldn't have data for newly created telemtry"
+        );
         telemetry.add_http_request("foo".into());
         telemetry.add_http_request("bar".into());
         telemetry.add_http_request("qux".into());
@@ -169,14 +172,23 @@ mod telemetry_tests {
         let reactor: &dyn ConnectionMapReactor<String> = &telemetry;
         reactor.call(vec!["host1".into(), "host2".into(), "host3".into()]);
         let data = telemetry.get_http_requests_per_minute();
-        assert!(data.is_empty());
+        assert!(
+            data.is_empty(),
+            "shouldn't have data for newly created telemetry"
+        );
         telemetry.add_http_request("host1".into());
         telemetry.add_http_request("host3".into());
         telemetry.add_http_request("host4".into());
         reactor.call(vec!["host1".into(), "host4".into(), "host5".into()]);
         let data = telemetry.get_http_requests_per_minute();
         assert_eq!(data.len(), 2);
-        assert!(*data.get("host1").unwrap() > 0.0);
-        assert!(*data.get("host4").unwrap() > 0.0);
+        assert!(
+            *data.get("host1").unwrap() > 0.0,
+            "should have data for host1"
+        );
+        assert!(
+            *data.get("host4").unwrap() > 0.0,
+            "should have data for host4"
+        );
     }
 }

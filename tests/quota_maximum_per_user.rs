@@ -44,7 +44,7 @@ async fn quota_maximum_per_user() {
         acme_use_staging: true,
         bind_hostnames: BindHostnames::None,
         load_balancing: LoadBalancing::Allow,
-        allow_provided_subdomains: false,
+        allow_requested_subdomains: false,
         allow_requested_ports: false,
         quota_per_user: Some(1usize.try_into().unwrap()),
         random_subdomain_seed: None,
@@ -78,38 +78,50 @@ async fn quota_maximum_per_user() {
     let mut session_1 = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
-    assert!(session_1
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::clone(&key_1), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
+    assert!(
+        session_1
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::clone(&key_1), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     session_1
         .tcpip_forward("some.random.hostname", 80)
         .await
         .expect("tcpip_forward failed");
-    assert!(session_1
-        .tcpip_forward("another.random.hostname", 80)
-        .await
-        .is_err());
+    assert!(
+        session_1
+            .tcpip_forward("another.random.hostname", 80)
+            .await
+            .is_err(),
+        "shouldn't allow exceeding remote forwarding quota"
+    );
 
     // 3. Try to connect via different client with same credentials and reach quota again
     let ssh_client = SshClient;
     let mut session_2 = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
-    assert!(session_2
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::clone(&key_1), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
-    assert!(session_2
-        .tcpip_forward("sneaky.random.hostname", 80)
-        .await
-        .is_err());
+    assert!(
+        session_2
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::clone(&key_1), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
+    assert!(
+        session_2
+            .tcpip_forward("sneaky.random.hostname", 80)
+            .await
+            .is_err(),
+        "shouldn't allow exceeding remote forwarding quota over multiple sessions"
+    );
 
     // 4. Cancel first forwarding, then succeed on new one
     session_1
@@ -134,13 +146,16 @@ async fn quota_maximum_per_user() {
         russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
             .await
             .expect("Failed to connect to SSH server");
-    assert!(session_admin
-        .authenticate_publickey(
-            "admin",
-            PrivateKeyWithHashAlg::new(Arc::clone(&admin_key), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
+    assert!(
+        session_admin
+            .authenticate_publickey(
+                "admin",
+                PrivateKeyWithHashAlg::new(Arc::clone(&admin_key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     session_admin
         .tcpip_forward("some.random.hostname", 80)
         .await

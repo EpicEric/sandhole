@@ -49,12 +49,12 @@ mod addressing;
 mod admin;
 mod certificates;
 mod config;
+mod connection_handler;
 mod connections;
 mod directory;
 mod droppable_handle;
 mod error;
 mod fingerprints;
-mod handler;
 mod http;
 mod login;
 mod quota;
@@ -231,7 +231,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         config.txt_record_prefix.trim_matches('.').to_string(),
         config.domain.trim_matches('.').to_string(),
         config.bind_hostnames,
-        !config.allow_provided_subdomains,
+        !config.allow_requested_subdomains,
         config.random_subdomain_seed,
     ));
     let domain_redirect = Arc::new(DomainRedirect {
@@ -314,6 +314,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let http_listener = TcpListener::bind((listen_address, config.http_port))
         .await
         .with_context(|| "Error listening to HTTP port")?;
+    info!(
+        "Listening for HTTP connections on port {}",
+        config.http_port
+    );
     let http_map = Arc::clone(&http_connections);
     let redirect = Arc::clone(&domain_redirect);
     let telemetry_http = Arc::clone(&telemetry);
@@ -362,6 +366,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let https_listener = TcpListener::bind((listen_address, config.https_port))
         .await
         .with_context(|| "Error listening to HTTPS port")?;
+    info!(
+        "Listening for HTTPS connections on port {}",
+        config.https_port
+    );
     let certificates_clone = Arc::clone(&certificates);
     let tls_server_config = Arc::new(
         ServerConfig::builder()
@@ -467,6 +475,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let ssh_listener = TcpListener::bind((listen_address, config.ssh_port))
         .await
         .with_context(|| "Error listening to SSH port")?;
+    info!("Listening for SSH connections on port {}", config.ssh_port);
     info!("sandhole is now running.");
     loop {
         let (stream, address) = match ssh_listener.accept().await {

@@ -8,10 +8,10 @@ If you're compiling from a separate workstation than the one that will be runnin
 git clone https://github.com/EpicEric/sandhole
 cd sandhole
 cargo build --release
-scp target/release/sandhole you@server.com:
+scp target/release/sandhole you@server.com:/usr/local/bin/sandhole
 ```
 
-If you're compiling on the machine that's running Sandhole, you can install it directly. This will also add `sandhole` to your `PATH`:
+If you're compiling on the machine that's running Sandhole, you can install it directly with `cargo install`. This should also add `sandhole` to your `PATH`:
 
 ```bash
 cargo install --git https://github.com/EpicEric/sandhole
@@ -32,6 +32,9 @@ By default, this will expose ports 80 (for HTTP), 443 (for HTTPS), and 2222 (for
 
 ```log
 [2024-11-23T13:10:51Z INFO  sandhole] Key file not found. Creating...
+[2024-11-23T13:10:51Z INFO  sandhole] Listening for HTTP connections on port 80
+[2024-11-23T13:10:51Z INFO  sandhole] Listening for HTTPS connections on port 443
+[2024-11-23T13:10:51Z INFO  sandhole] Listening for SSH connections on port 2222
 [2024-11-23T13:10:51Z INFO  sandhole] sandhole is now running.
 ```
 

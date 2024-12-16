@@ -37,7 +37,7 @@ async fn tcp_reject_low_ports() {
         acme_use_staging: true,
         bind_hostnames: BindHostnames::None,
         load_balancing: LoadBalancing::Allow,
-        allow_provided_subdomains: false,
+        allow_requested_subdomains: false,
         allow_requested_ports: true,
         quota_per_user: None,
         random_subdomain_seed: None,
@@ -69,18 +69,28 @@ async fn tcp_reject_low_ports() {
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
-    assert!(session
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
+    assert!(
+        session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     session
         .tcpip_forward("localhost", 42000)
         .await
         .expect("should allow binding on high port");
-    assert!(session.tcpip_forward("localhost", 42).await.is_err());
+    assert!(
+        session.tcpip_forward("localhost", 1024).await.is_ok(),
+        "should allow binding ports greater than or equal to 1024"
+    );
+    assert!(
+        session.tcpip_forward("localhost", 1023).await.is_err(),
+        "shouldn't allow binding ports under 1024"
+    );
 }
 
 struct SshClient;

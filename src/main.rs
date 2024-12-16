@@ -14,7 +14,7 @@ enum RandomSubdomainSeed {
     IpAndUser,
     /// From SSH user and requested address.
     User,
-    /// From SSH key fingerprint and requested address.
+    /// From SSH user, key fingerprint, and requested address.
     Fingerprint,
     /// From SSH connection socket (address + port) and requested address.
     Address,
@@ -25,7 +25,7 @@ impl From<RandomSubdomainSeed> for RSSConfig {
         match value {
             RandomSubdomainSeed::User => RSSConfig::User,
             RandomSubdomainSeed::IpAndUser => RSSConfig::IpAndUser,
-            RandomSubdomainSeed::Fingerprint => RSSConfig::KeyFingerprint,
+            RandomSubdomainSeed::Fingerprint => RSSConfig::UserAndFingerprint,
             RandomSubdomainSeed::Address => RSSConfig::SocketAddress,
         }
     }
@@ -176,8 +176,8 @@ struct Args {
     #[arg(long, default_value_t = false)]
     acme_use_staging: bool,
 
-    /// If set, defines a URL against which password authentication requests will
-    /// be validated. This is done by sending the following JSON payload:
+    /// If set, defines a URL which password authentication requests will be validated against.
+    /// This is done by sending the following JSON payload via a POST request:
     ///
     /// {"user": "...", "password": "...", "remote_address": "..."}
     ///
@@ -205,9 +205,9 @@ struct Args {
     #[arg(long, default_value_t = String::from("_sandhole"), value_parser = validate_txt_record_prefix, value_name = "PREFIX")]
     txt_record_prefix: String,
 
-    /// Allow user-provided subdomains. By default, subdomains are always random.
+    /// Allow user-requested subdomains. By default, subdomains are always random.
     #[arg(long, default_value_t = false)]
-    allow_provided_subdomains: bool,
+    allow_requested_subdomains: bool,
 
     /// Allow user-requested ports. By default, ports are always random.
     #[arg(long, default_value_t = false)]
@@ -278,7 +278,7 @@ async fn main() -> anyhow::Result<()> {
         bind_hostnames: args.bind_hostnames.into(),
         load_balancing: args.load_balancing.into(),
         txt_record_prefix: args.txt_record_prefix,
-        allow_provided_subdomains: args.allow_provided_subdomains,
+        allow_requested_subdomains: args.allow_requested_subdomains,
         allow_requested_ports: args.allow_requested_ports,
         quota_per_user: args.quota_per_user,
         random_subdomain_seed: args.random_subdomain_seed.map(Into::into),

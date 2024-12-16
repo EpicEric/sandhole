@@ -5,7 +5,7 @@ use std::{num::NonZero, path::PathBuf, time::Duration};
 pub enum RandomSubdomainSeed {
     User,
     IpAndUser,
-    KeyFingerprint,
+    UserAndFingerprint,
     SocketAddress,
 }
 
@@ -50,7 +50,7 @@ pub struct ApplicationConfig {
     pub bind_hostnames: BindHostnames,
     pub load_balancing: LoadBalancing,
     pub txt_record_prefix: String,
-    pub allow_provided_subdomains: bool,
+    pub allow_requested_subdomains: bool,
     pub allow_requested_ports: bool,
     pub quota_per_user: Option<NonZero<usize>>,
     pub random_subdomain_seed: Option<RandomSubdomainSeed>,

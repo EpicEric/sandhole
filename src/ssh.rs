@@ -8,10 +8,10 @@ use std::{
 
 use crate::{
     admin::AdminInterface,
+    connection_handler::ConnectionHandler,
     droppable_handle::DroppableHandle,
     error::ServerError,
     fingerprints::AuthenticationType,
-    handler::ConnectionHandler,
     login::AuthenticationRequest,
     quota::TokenHolder,
     tcp::{is_alias, PortHandler, NO_ALIAS_HOST},
@@ -668,7 +668,7 @@ impl Handler for ServerHandler {
                 }
             }
             // Handle TCP
-            1..=1024 if !is_alias(address) => {
+            1..1024 if !is_alias(address) => {
                 info!(
                     "Failed to bind TCP port {} ({}): port too low",
                     port, self.peer

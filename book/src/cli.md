@@ -97,8 +97,9 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           certificates (default is production). Only set this option for testing
 
       <b>--password-authentication-url</b> &lt;URL&gt;
-          If set, defines a URL against which password authentication requests
-          will be validated. This is done by sending the following JSON payload:
+          If set, defines a URL which password authentication requests will be
+          validated against. This is done by sending the following JSON payload
+          via a POST request:
 
           {&quot;user&quot;: &quot;...&quot;, &quot;password&quot;: &quot;...&quot;, &quot;remote_address&quot;: &quot;...&quot;}
 
@@ -147,8 +148,8 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           [default: _sandhole]
 
-      <b>--allow-provided-subdomains</b>
-          Allow user-provided subdomains. By default, subdomains are always
+      <b>--allow-requested-subdomains</b>
+          Allow user-requested subdomains. By default, subdomains are always
           random
 
       <b>--allow-requested-ports</b>
@@ -176,7 +177,8 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           - <b>ip-and-user</b>: From IP address, SSH user, and requested
                          address. Recommended if unsure
           - <b>user</b>:        From SSH user and requested address
-          - <b>fingerprint</b>: From SSH key fingerprint and requested address
+          - <b>fingerprint</b>: From SSH user, key fingerprint, and requested
+                         address.
           - <b>address</b>:     From SSH connection socket (address + port) and
                          requested address
 

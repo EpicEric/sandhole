@@ -516,14 +516,16 @@ mod connection_map_tests {
             1,
         )
         .unwrap();
-        assert!(map
-            .insert(
+        assert!(
+            map.insert(
                 "host".into(),
                 "127.0.0.1:2".parse().unwrap(),
                 TokenHolder::User("user2".into()),
                 2
             )
-            .is_err());
+            .is_err(),
+            "shouldn't be allowed to add connection with deny policy"
+        );
         for _ in 0..1_000 {
             assert_eq!(map.get("host"), Some(1));
         }
@@ -578,14 +580,16 @@ mod connection_map_tests {
         )
         .unwrap();
         // Denied by quota
-        assert!(map
-            .insert(
+        assert!(
+            map.insert(
                 "host".into(),
                 "127.0.0.1:3".parse().unwrap(),
                 TokenHolder::User("user1".into()),
                 3,
             )
-            .is_err());
+            .is_err(),
+            "shouldn't be allowed to add connection denied by quota"
+        );
         let mut results: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
         for _ in 0..10_000 {
             let map_item = map.get("host");
@@ -641,14 +645,16 @@ mod connection_map_tests {
         )
         .unwrap();
         // Denied by quota
-        assert!(map
-            .insert(
+        assert!(
+            map.insert(
                 "host".into(),
                 "127.0.0.1:2".parse().unwrap(),
                 TokenHolder::User("user1".into()),
                 2,
             )
-            .is_err());
+            .is_err(),
+            "shouldn't be allowed to add connection denied by quota"
+        );
         for _ in 0..1_000 {
             assert_eq!(map.get("host"), Some(1));
         }
@@ -683,14 +689,16 @@ mod connection_map_tests {
             Some(mock_reactor),
         );
         // Denied by quota
-        assert!(map
-            .insert(
+        assert!(
+            map.insert(
                 "host".into(),
                 "127.0.0.1:1".parse().unwrap(),
                 TokenHolder::User("user1".into()),
                 1,
             )
-            .is_err());
+            .is_err(),
+            "shouldn't be allowed to add connection denied by quota"
+        );
         // Accepted
         map.insert(
             "host".into(),
@@ -700,14 +708,16 @@ mod connection_map_tests {
         )
         .unwrap();
         // Denied by policy (shouldn't invoke quota handler)
-        assert!(map
-            .insert(
+        assert!(
+            map.insert(
                 "host".into(),
                 "127.0.0.1:3".parse().unwrap(),
                 TokenHolder::User("user1".into()),
                 3
             )
-            .is_err());
+            .is_err(),
+            "shouldn't be allowed to add connection with deny policy"
+        );
         for _ in 0..1_000 {
             assert_eq!(map.get("host"), Some(2));
         }

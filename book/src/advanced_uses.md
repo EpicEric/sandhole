@@ -36,7 +36,7 @@ For the former, you can run `ssh-keygen -lf /path/to/private/key` and take note 
 SHA256:bwf4FDtNeZzFv8xHBzHJwRpDRxssCll8w2tCHFC9n1o
 ```
 
-Then, add the following entries to your DNS (assuming that your domain is `my.domain.net`):
+Then, add the following entries to your DNS (assuming that your custom domain is `my.domain.net`):
 
 | Type  | Domain                              | Data                                                          |
 | ----- | ----------------------------------- | ------------------------------------------------------------- |

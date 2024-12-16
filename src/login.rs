@@ -191,7 +191,8 @@ mod api_login_tests {
                         12345
                     )
                 })
-                .await
+                .await,
+            "should authenticated valid user"
         );
         jh.abort();
     }
@@ -222,7 +223,8 @@ mod api_login_tests {
                         12345
                     )
                 })
-                .await
+                .await,
+            "shouldn't authenticate expected user"
         );
         jh.abort();
     }

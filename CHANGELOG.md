@@ -11,10 +11,13 @@
 ### Fixed
 
 - Better handling of initial value and windowing for telemetry counters.
+- Improve random addressing to avoid most collisions.
 
 ### Changed
 
 - **BREAKING**: Bump MSRV to 1.79.0.
+- **BREAKING**: Rename `--allow-provided-subdomains` to `--allow-requested-subdomains`.
+- Change `--random-subdomain-seed=fingerprint` to also take user into account.
 - Modify exports to live within `lib.rs`.
 - Update `russh` dependency to version `0.50.0-beta.1`.
 - Update `sysinfo` dependency to version `0.33.0`.

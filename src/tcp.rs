@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::Arc, time::Duration};
 use crate::{
     connections::{ConnectionMap, ConnectionMapReactor},
     droppable_handle::DroppableHandle,
-    handler::ConnectionHandler,
+    connection_handler::ConnectionHandler,
     ssh::SshTunnelHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
 };

@@ -10,8 +10,6 @@ services:
   sandhole:
     image: docker.io/epiceric/sandhole:latest
     container_name: sandhole
-    depends_on:
-      - letsencrypt
     volumes:
       - ./deploy:/deploy
       - ./letsencrypt:/letsencrypt:ro

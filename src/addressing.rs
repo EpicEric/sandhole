@@ -1,12 +1,13 @@
-use std::{hash::Hash, net::SocketAddr};
+use std::{hash::Hash, net::SocketAddr, sync::Mutex};
 
 use async_trait::async_trait;
+use block_id::{Alphabet, BlockId};
 use hickory_resolver::{proto::rr::RecordType, TokioAsyncResolver};
 use itertools::Itertools;
 use log::{debug, warn};
 #[cfg(test)]
 use mockall::automock;
-use rand::{seq::SliceRandom, thread_rng, Rng, RngCore, SeedableRng};
+use rand::{seq::SliceRandom, thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rand_seeder::SipHasher;
 use ssh_key::Fingerprint;
@@ -97,6 +98,8 @@ pub(crate) struct AddressDelegator<R> {
     txt_record_prefix: String,
     root_domain: String,
     seed: u64,
+    block_id: BlockId<char>,
+    block_rng: Mutex<u64>,
     random_subdomain_seed: Option<RandomSubdomainSeed>,
     bind_hostnames: BindHostnames,
     force_random_subdomains: bool,
@@ -113,6 +116,7 @@ impl<R: Resolver> AddressDelegator<R> {
     ) -> Self {
         debug_assert!(!txt_record_prefix.is_empty());
         debug_assert!(!root_domain.is_empty());
+        let mut rng = thread_rng();
         AddressDelegator {
             resolver,
             txt_record_prefix,
@@ -120,7 +124,9 @@ impl<R: Resolver> AddressDelegator<R> {
             bind_hostnames,
             force_random_subdomains,
             random_subdomain_seed,
-            seed: thread_rng().next_u64(),
+            seed: rng.gen(),
+            block_id: BlockId::new(Alphabet::lowercase_alphanumeric(), rng.gen(), 6),
+            block_rng: Mutex::new(0),
         }
     }
 
@@ -201,7 +207,7 @@ impl<R: Resolver> AddressDelegator<R> {
         let mut hasher = SipHasher::default();
         self.seed.hash(&mut hasher);
         let mut hash_initialized = false;
-        if let Some(strategy) = self.random_subdomain_seed {
+        if let Some(ref strategy) = self.random_subdomain_seed {
             match strategy {
                 RandomSubdomainSeed::User => {
                     if let Some(user) = user {
@@ -212,14 +218,21 @@ impl<R: Resolver> AddressDelegator<R> {
                         warn!("No SSH user when assigning subdomain. Defaulting to random.")
                     }
                 }
-                RandomSubdomainSeed::KeyFingerprint => {
-                    if let Some(fingerprint) = fingerprint {
+                RandomSubdomainSeed::UserAndFingerprint => {
+                    if let Some(user) = user {
+                        requested_address.hash(&mut hasher);
+                        user.hash(&mut hasher);
+                        hash_initialized = true;
+                        if let Some(fingerprint) = fingerprint {
+                            fingerprint.as_bytes().hash(&mut hasher);
+                        }
+                    } else if let Some(fingerprint) = fingerprint {
                         requested_address.hash(&mut hasher);
                         fingerprint.as_bytes().hash(&mut hasher);
                         hash_initialized = true;
                     } else {
                         warn!(
-                            "No SSH key fingerprint when assigning subdomain. Defaulting to random."
+                            "No SSH user or key fingerprint when assigning subdomain. Defaulting to random."
                         )
                     }
                 }
@@ -238,24 +251,29 @@ impl<R: Resolver> AddressDelegator<R> {
                 }
             }
         }
-        if !hash_initialized {
+        if hash_initialized {
+            // Generate random subdomain from hashed state
+            let mut seed: <ChaCha20Rng as SeedableRng>::Seed = Default::default();
+            hasher.into_rng().fill(&mut seed);
+            let mut rng = ChaCha20Rng::from_seed(seed);
+            String::from_utf8(
+                (0..6)
+                    .flat_map(|_| {
+                        b"0123456789abcdefghijklmnopqrstuvwxyz"
+                            .choose(&mut rng)
+                            .copied()
+                    })
+                    .collect(),
+            )
+            .unwrap()
+        } else {
             // Random seed
-            thread_rng().next_u64().hash(&mut hasher);
+            let mut block_rng = self.block_rng.lock().unwrap();
+            let mut string = self.block_id.encode_string(*block_rng).unwrap();
+            string.drain(6..);
+            *block_rng = block_rng.wrapping_add(1);
+            string
         }
-        // Generate random subdomain from hashed state
-        let mut seed: <ChaCha20Rng as SeedableRng>::Seed = Default::default();
-        hasher.into_rng().fill(&mut seed);
-        let mut rng = ChaCha20Rng::from_seed(seed);
-        String::from_utf8(
-            (0..6)
-                .flat_map(|_| {
-                    b"0123456789abcdefghijklmnopqrstuvwxyz"
-                        .choose(&mut rng)
-                        .copied()
-                })
-                .collect(),
-        )
-        .unwrap()
     }
 }
 
@@ -292,7 +310,11 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "some.address");
-        assert!(DnsName::try_from(address).is_ok());
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address
+        );
     }
 
     #[tokio::test]
@@ -316,7 +338,11 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "root.tld");
-        assert!(DnsName::try_from(address).is_ok());
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address
+        );
     }
 
     #[tokio::test]
@@ -343,7 +369,11 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "some.address");
-        assert!(DnsName::try_from(address).is_ok());
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address
+        );
     }
 
     #[tokio::test]
@@ -380,7 +410,11 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "some.address");
-        assert!(DnsName::try_from(address).is_ok());
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address
+        );
     }
 
     #[tokio::test]
@@ -414,7 +448,11 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "some.address");
-        assert!(DnsName::try_from(address).is_ok());
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address
+        );
     }
 
     #[tokio::test]
@@ -440,7 +478,11 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "subdomain.root.tld");
-        assert!(DnsName::try_from(address).is_ok());
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address
+        );
     }
 
     #[tokio::test]
@@ -470,7 +512,11 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "something.root.tld");
-        assert!(DnsName::try_from(address).is_ok());
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address
+        );
     }
 
     #[tokio::test]
@@ -494,7 +540,11 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "prefix.root.tld");
-        assert!(DnsName::try_from(address).is_ok());
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address
+        );
     }
 
     #[tokio::test]
@@ -524,7 +574,11 @@ mod address_delegator_tests {
             )
             .await;
         assert_eq!(address, "root.tld");
-        assert!(DnsName::try_from(address).is_ok());
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address
+        );
     }
 
     #[tokio::test]
@@ -554,13 +608,17 @@ mod address_delegator_tests {
             )
             .await;
         assert!(
-            Regex::new(r"^[0-9a-z]+\.root\.tld$")
+            Regex::new(r"^[0-9a-z]{6}\.root\.tld$")
                 .unwrap()
                 .is_match(&address),
             "invalid address {}",
             address
         );
-        assert!(DnsName::try_from(address).is_ok());
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address
+        );
     }
 
     #[tokio::test]
@@ -590,13 +648,17 @@ mod address_delegator_tests {
             )
             .await;
         assert!(
-            Regex::new(r"^[0-9a-z]+\.root\.tld$")
+            Regex::new(r"^[0-9a-z]{6}\.root\.tld$")
                 .unwrap()
                 .is_match(&address),
             "invalid address {}",
             address
         );
-        assert!(DnsName::try_from(address).is_ok());
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address
+        );
     }
 
     #[tokio::test]
@@ -624,13 +686,17 @@ mod address_delegator_tests {
             )
             .await;
         assert!(
-            Regex::new(r"^[0-9a-z]+\.root\.tld$")
+            Regex::new(r"^[0-9a-z]{6}\.root\.tld$")
                 .unwrap()
                 .is_match(&address),
             "invalid address {}",
             address
         );
-        assert!(DnsName::try_from(address).is_ok());
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address
+        );
     }
 
     #[tokio::test]
@@ -650,8 +716,9 @@ mod address_delegator_tests {
             None,
         );
         let mut set = std::collections::HashSet::new();
-        let regex = Regex::new(r"^[0-9a-z]+\.root\.tld$").unwrap();
-        for _ in 0..100 {
+        let regex = Regex::new(r"^[0-9a-z]{6}\.root\.tld$").unwrap();
+        // 99.99% chance of collision with naïve implementation
+        for _ in 0..200_000 {
             let address = delegator
                 .get_address(
                     "some.address",
@@ -661,8 +728,16 @@ mod address_delegator_tests {
                 )
                 .await;
             assert!(regex.is_match(&address), "invalid address {}", address);
-            assert!(DnsName::try_from(address.clone()).is_ok());
-            assert!(!set.contains(&address));
+            assert!(
+                DnsName::try_from(address.clone()).is_ok(),
+                "non DNS-compatible address {}",
+                address
+            );
+            assert!(
+                !set.contains(&address),
+                "generated non-unique address: {}",
+                address
+            );
             set.insert(address);
         }
     }
@@ -684,7 +759,7 @@ mod address_delegator_tests {
                 "a1",
                 &Some("u1".into()),
                 &None,
-                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+                &"127.0.0.1:12301".parse::<SocketAddr>().unwrap(),
             )
             .await;
         let address2_u1_a1 = delegator
@@ -692,7 +767,7 @@ mod address_delegator_tests {
                 "a1",
                 &Some("u1".into()),
                 &None,
-                &"127.0.0.1:12342".parse::<SocketAddr>().unwrap(),
+                &"127.0.0.1:12302".parse::<SocketAddr>().unwrap(),
             )
             .await;
         let address3_u2_a1 = delegator
@@ -700,7 +775,7 @@ mod address_delegator_tests {
                 "a1",
                 &Some("u2".into()),
                 &None,
-                &"127.0.0.1:12343".parse::<SocketAddr>().unwrap(),
+                &"127.0.0.1:12303".parse::<SocketAddr>().unwrap(),
             )
             .await;
         let address4_u1_a2 = delegator
@@ -708,21 +783,37 @@ mod address_delegator_tests {
                 "a2",
                 &Some("u1".into()),
                 &None,
-                &"127.0.0.1:12344".parse::<SocketAddr>().unwrap(),
+                &"127.0.0.1:12304".parse::<SocketAddr>().unwrap(),
             )
             .await;
         assert_eq!(address1_u1_a1, address2_u1_a1);
         assert_ne!(address1_u1_a1, address3_u2_a1);
         assert_ne!(address1_u1_a1, address4_u1_a2);
         assert_ne!(address3_u2_a1, address4_u1_a2);
-        assert!(DnsName::try_from(address1_u1_a1).is_ok());
-        assert!(DnsName::try_from(address2_u1_a1).is_ok());
-        assert!(DnsName::try_from(address3_u2_a1).is_ok());
-        assert!(DnsName::try_from(address4_u1_a2).is_ok());
+        assert!(
+            DnsName::try_from(address1_u1_a1.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address1_u1_a1
+        );
+        assert!(
+            DnsName::try_from(address2_u1_a1.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address2_u1_a1
+        );
+        assert!(
+            DnsName::try_from(address3_u2_a1.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address3_u2_a1
+        );
+        assert!(
+            DnsName::try_from(address4_u1_a2.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address4_u1_a2
+        );
     }
 
     #[tokio::test]
-    async fn returns_unique_random_subdomains_per_fingerprint_and_address_if_forced() {
+    async fn returns_unique_random_subdomains_per_fingerprint_user_and_address_if_forced() {
         let f1 = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519)
             .unwrap()
             .fingerprint(HashAlg::Sha256);
@@ -737,48 +828,184 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::None,
             true,
-            Some(crate::config::RandomSubdomainSeed::KeyFingerprint),
+            Some(crate::config::RandomSubdomainSeed::UserAndFingerprint),
         );
-        let address1_f1_a1 = delegator
+        let address1_f1_a1_u0 = delegator
             .get_address(
                 "a1",
                 &None,
                 &Some(f1.clone()),
-                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+                &"127.0.0.1:12301".parse::<SocketAddr>().unwrap(),
             )
             .await;
-        let address2_f1_a1 = delegator
+        let address2_f1_a1_u0 = delegator
             .get_address(
                 "a1",
                 &None,
                 &Some(f1.clone()),
-                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+                &"127.0.0.1:12302".parse::<SocketAddr>().unwrap(),
             )
             .await;
-        let address3_f2_a1 = delegator
+        let address3_f2_a1_u0 = delegator
             .get_address(
                 "a1",
                 &None,
                 &Some(f2.clone()),
-                &"127.0.0.1:12342".parse::<SocketAddr>().unwrap(),
+                &"127.0.0.1:12303".parse::<SocketAddr>().unwrap(),
             )
             .await;
-        let address4_f1_a2 = delegator
+        let address4_f1_a2_u0 = delegator
             .get_address(
                 "a2",
                 &None,
                 &Some(f1.clone()),
-                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+                &"127.0.0.1:12304".parse::<SocketAddr>().unwrap(),
             )
             .await;
-        assert_eq!(address1_f1_a1, address2_f1_a1);
-        assert_ne!(address1_f1_a1, address3_f2_a1);
-        assert_ne!(address1_f1_a1, address4_f1_a2);
-        assert_ne!(address3_f2_a1, address4_f1_a2);
-        assert!(DnsName::try_from(address1_f1_a1).is_ok());
-        assert!(DnsName::try_from(address2_f1_a1).is_ok());
-        assert!(DnsName::try_from(address3_f2_a1).is_ok());
-        assert!(DnsName::try_from(address4_f1_a2).is_ok());
+        let address5_f1_a1_u1 = delegator
+            .get_address(
+                "a1",
+                &Some("u1".into()),
+                &Some(f1.clone()),
+                &"127.0.0.1:12305".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address6_f1_a1_u1 = delegator
+            .get_address(
+                "a1",
+                &Some("u1".into()),
+                &Some(f1.clone()),
+                &"127.0.0.1:12306".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address7_f2_a1_u1 = delegator
+            .get_address(
+                "a1",
+                &Some("u1".into()),
+                &Some(f2.clone()),
+                &"127.0.0.1:12307".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address8_f1_a2_u1 = delegator
+            .get_address(
+                "a2",
+                &Some("u1".into()),
+                &Some(f1.clone()),
+                &"127.0.0.1:12308".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address9_f1_a1_u2 = delegator
+            .get_address(
+                "a1",
+                &Some("u2".into()),
+                &Some(f1.clone()),
+                &"127.0.0.1:12309".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address10_f1_a1_u2 = delegator
+            .get_address(
+                "a1",
+                &Some("u2".into()),
+                &Some(f1.clone()),
+                &"127.0.0.1:12310".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address11_f2_a1_u2 = delegator
+            .get_address(
+                "a1",
+                &Some("u2".into()),
+                &Some(f2.clone()),
+                &"127.0.0.1:12311".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address12_f1_a2_u2 = delegator
+            .get_address(
+                "a2",
+                &Some("u2".into()),
+                &Some(f1.clone()),
+                &"127.0.0.1:12312".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+
+        assert_eq!(address1_f1_a1_u0, address2_f1_a1_u0);
+        assert_ne!(address1_f1_a1_u0, address3_f2_a1_u0);
+        assert_ne!(address1_f1_a1_u0, address4_f1_a2_u0);
+        assert_ne!(address3_f2_a1_u0, address4_f1_a2_u0);
+
+        assert_eq!(address5_f1_a1_u1, address6_f1_a1_u1);
+        assert_ne!(address5_f1_a1_u1, address7_f2_a1_u1);
+        assert_ne!(address5_f1_a1_u1, address8_f1_a2_u1);
+        assert_ne!(address7_f2_a1_u1, address8_f1_a2_u1);
+
+        assert_eq!(address9_f1_a1_u2, address10_f1_a1_u2);
+        assert_ne!(address9_f1_a1_u2, address11_f2_a1_u2);
+        assert_ne!(address9_f1_a1_u2, address12_f1_a2_u2);
+        assert_ne!(address11_f2_a1_u2, address12_f1_a2_u2);
+
+        assert_ne!(address1_f1_a1_u0, address5_f1_a1_u1);
+        assert_ne!(address1_f1_a1_u0, address9_f1_a1_u2);
+        assert_ne!(address5_f1_a1_u1, address9_f1_a1_u2);
+
+        assert!(
+            DnsName::try_from(address1_f1_a1_u0.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address1_f1_a1_u0
+        );
+        assert!(
+            DnsName::try_from(address2_f1_a1_u0.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address2_f1_a1_u0
+        );
+        assert!(
+            DnsName::try_from(address3_f2_a1_u0.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address3_f2_a1_u0
+        );
+        assert!(
+            DnsName::try_from(address4_f1_a2_u0.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address4_f1_a2_u0
+        );
+        assert!(
+            DnsName::try_from(address5_f1_a1_u1.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address5_f1_a1_u1
+        );
+        assert!(
+            DnsName::try_from(address6_f1_a1_u1.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address6_f1_a1_u1
+        );
+        assert!(
+            DnsName::try_from(address7_f2_a1_u1.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address7_f2_a1_u1
+        );
+        assert!(
+            DnsName::try_from(address8_f1_a2_u1.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address8_f1_a2_u1
+        );
+        assert!(
+            DnsName::try_from(address9_f1_a1_u2.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address9_f1_a1_u2
+        );
+        assert!(
+            DnsName::try_from(address10_f1_a1_u2.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address10_f1_a1_u2
+        );
+        assert!(
+            DnsName::try_from(address11_f2_a1_u2.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address11_f2_a1_u2
+        );
+        assert!(
+            DnsName::try_from(address12_f1_a2_u2.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address12_f1_a2_u2
+        );
     }
 
     #[tokio::test]
@@ -798,7 +1025,7 @@ mod address_delegator_tests {
                 "a1",
                 &None,
                 &None,
-                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+                &"127.0.0.1:12301".parse::<SocketAddr>().unwrap(),
             )
             .await;
         let address2_s1_a1 = delegator
@@ -806,7 +1033,7 @@ mod address_delegator_tests {
                 "a1",
                 &None,
                 &None,
-                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+                &"127.0.0.1:12301".parse::<SocketAddr>().unwrap(),
             )
             .await;
         let address3_s2_a1 = delegator
@@ -814,7 +1041,7 @@ mod address_delegator_tests {
                 "a1",
                 &None,
                 &None,
-                &"127.0.0.1:12342".parse::<SocketAddr>().unwrap(),
+                &"127.0.0.1:12302".parse::<SocketAddr>().unwrap(),
             )
             .await;
         let address4_s1_a2 = delegator
@@ -822,16 +1049,32 @@ mod address_delegator_tests {
                 "a2",
                 &None,
                 &None,
-                &"127.0.0.1:12341".parse::<SocketAddr>().unwrap(),
+                &"127.0.0.1:12301".parse::<SocketAddr>().unwrap(),
             )
             .await;
         assert_eq!(address1_s1_a1, address2_s1_a1);
         assert_ne!(address1_s1_a1, address3_s2_a1);
         assert_ne!(address1_s1_a1, address4_s1_a2);
         assert_ne!(address3_s2_a1, address4_s1_a2);
-        assert!(DnsName::try_from(address1_s1_a1).is_ok());
-        assert!(DnsName::try_from(address2_s1_a1).is_ok());
-        assert!(DnsName::try_from(address3_s2_a1).is_ok());
-        assert!(DnsName::try_from(address4_s1_a2).is_ok());
+        assert!(
+            DnsName::try_from(address1_s1_a1.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address1_s1_a1
+        );
+        assert!(
+            DnsName::try_from(address2_s1_a1.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address2_s1_a1
+        );
+        assert!(
+            DnsName::try_from(address3_s2_a1.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address3_s2_a1
+        );
+        assert!(
+            DnsName::try_from(address4_s1_a2.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address4_s1_a2
+        );
     }
 }

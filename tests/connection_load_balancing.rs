@@ -39,7 +39,7 @@ async fn tcp_load_balancing() {
         acme_use_staging: true,
         bind_hostnames: BindHostnames::None,
         load_balancing: LoadBalancing::Allow,
-        allow_provided_subdomains: false,
+        allow_requested_subdomains: false,
         allow_requested_ports: true,
         quota_per_user: None,
         random_subdomain_seed: None,
@@ -71,13 +71,16 @@ async fn tcp_load_balancing() {
     let mut session_a = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client_a)
         .await
         .expect("Failed to connect to SSH server");
-    assert!(session_a
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key_1), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
+    assert!(
+        session_a
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key_1), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     session_a
         .tcpip_forward("localhost", 12345)
         .await
@@ -91,13 +94,16 @@ async fn tcp_load_balancing() {
     let mut session_b = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client_b)
         .await
         .expect("Failed to connect to SSH server");
-    assert!(session_b
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key_2), Some(HashAlg::Sha512)).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
+    assert!(
+        session_b
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key_2), Some(HashAlg::Sha512)).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     session_b
         .tcpip_forward("localhost", 12345)
         .await
@@ -110,7 +116,10 @@ async fn tcp_load_balancing() {
             .expect("TCP connection failed");
         let mut buf = Vec::with_capacity(3);
         tcp_stream.read_to_end(&mut buf).await.unwrap();
-        assert!(matches!(&buf[..], b"A" | b"B"));
+        assert!(
+            matches!(&buf[..], b"A" | b"B"),
+            "received data didn't match expectation"
+        );
     }
 }
 

@@ -38,7 +38,7 @@ async fn alias_aliasing_tunnel() {
         acme_use_staging: true,
         bind_hostnames: BindHostnames::None,
         load_balancing: LoadBalancing::Allow,
-        allow_provided_subdomains: false,
+        allow_requested_subdomains: false,
         allow_requested_ports: true,
         quota_per_user: None,
         random_subdomain_seed: None,
@@ -71,13 +71,16 @@ async fn alias_aliasing_tunnel() {
         russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
             .await
             .expect("Failed to connect to SSH server");
-    assert!(proxy_session
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
+    assert!(
+        proxy_session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     proxy_session
         .tcpip_forward("my.tunnel", 42)
         .await
@@ -94,13 +97,16 @@ async fn alias_aliasing_tunnel() {
         russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
             .await
             .expect("Failed to connect to SSH server");
-    assert!(client_session
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
+    assert!(
+        client_session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     let mut channel = client_session
         .channel_open_direct_tcpip("my.tunnel", 42, "::1", 23456)
         .await
@@ -127,12 +133,21 @@ async fn alias_aliasing_tunnel() {
         .cancel_tcpip_forward("my.tunnel", 42)
         .await
         .expect("cancel_tcpip_forward failed");
-    assert!(client_session
-        .channel_open_direct_tcpip("my.tunnel", 42, "::1", 23456)
-        .await
-        .is_err());
-    assert!(!proxy_session.is_closed());
-    assert!(!client_session.is_closed());
+    assert!(
+        client_session
+            .channel_open_direct_tcpip("my.tunnel", 42, "::1", 23456)
+            .await
+            .is_err(),
+        "shouldn't be able to connect to closed proxy"
+    );
+    assert!(
+        !proxy_session.is_closed(),
+        "shouldn't disconnect proxy session"
+    );
+    assert!(
+        !client_session.is_closed(),
+        "shouldn't disconnect client session"
+    );
 }
 
 struct SshClient;

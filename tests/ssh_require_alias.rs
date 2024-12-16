@@ -34,7 +34,7 @@ async fn ssh_require_alias() {
         acme_use_staging: true,
         bind_hostnames: BindHostnames::All,
         load_balancing: LoadBalancing::Allow,
-        allow_provided_subdomains: false,
+        allow_requested_subdomains: false,
         allow_requested_ports: false,
         quota_per_user: None,
         random_subdomain_seed: None,
@@ -66,14 +66,20 @@ async fn ssh_require_alias() {
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
-    assert!(session
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
-    assert!(session.tcpip_forward("localhost", 22).await.is_err());
+    assert!(
+        session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
+    assert!(
+        session.tcpip_forward("localhost", 22).await.is_err(),
+        "shouldn't allow binding on localhost:22"
+    );
 }
 
 struct SshClient;

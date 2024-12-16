@@ -38,7 +38,7 @@ async fn tcp_bind_random_ports() {
         acme_use_staging: true,
         bind_hostnames: BindHostnames::None,
         load_balancing: LoadBalancing::Allow,
-        allow_provided_subdomains: false,
+        allow_requested_subdomains: false,
         allow_requested_ports: false,
         quota_per_user: None,
         random_subdomain_seed: None,
@@ -70,13 +70,16 @@ async fn tcp_bind_random_ports() {
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
-    assert!(session
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
+    assert!(
+        session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     let mut channel = session
         .channel_open_session()
         .await
@@ -106,7 +109,10 @@ async fn tcp_bind_random_ports() {
     else {
         panic!("Timed out waiting for port allocation.");
     };
-    assert!(port.parse::<u16>().expect("should be a valid port number") > 1024);
+    assert!(
+        port.parse::<u16>().expect("should be a valid port number") >= 1024,
+        "random port must be greater than or equal to 1024"
+    );
 
     // 3. Connect to the TCP port of our proxy
     let mut tcp_stream = TcpStream::connect(format!("127.0.0.1:{port}"))

@@ -10,17 +10,17 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
 ## Features
 
-- Reverse proxy that only requires your services to have a regular SSH client.
+- Reverse proxy that only requires your services to have an OpenSSH client.
 - Automatic HTTPS support (with [dnsrobocert](https://github.com/adferrand/dnsrobocert) and/or ACME).
+- Easily load-balance by pointing multiple services to the same domain/port.
+- Bring your own custom domains and authorize them via DNS records.
 - Random subdomain assignment by default, with options for deterministic assignment.
-- Easily balance load by pointing multiple services to the same domain/port.
-- Authorize keys for custom domains with DNS, via TXT records.
 - A terminal-based admin interface to view current connections.
 - Written in Rust, with comprehensive testing of most features.
 
 ## Status
 
-Sandhole is in early stages, but is actively developed. Contributions are welcome, but try it in production at your own risk.
+Sandhole is in active development. Contributions are welcome, but try it in production at your own risk.
 
 ## Alternatives
 

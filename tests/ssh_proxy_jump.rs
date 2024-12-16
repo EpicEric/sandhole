@@ -44,7 +44,7 @@ async fn ssh_proxy_jump() {
         acme_use_staging: true,
         bind_hostnames: BindHostnames::All,
         load_balancing: LoadBalancing::Allow,
-        allow_provided_subdomains: false,
+        allow_requested_subdomains: false,
         allow_requested_ports: false,
         quota_per_user: None,
         random_subdomain_seed: None,
@@ -76,13 +76,16 @@ async fn ssh_proxy_jump() {
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
-    assert!(session
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
+    assert!(
+        session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     session
         .tcpip_forward("test.foobar.tld", 22)
         .await
@@ -94,13 +97,16 @@ async fn ssh_proxy_jump() {
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
-    assert!(session
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
+    assert!(
+        session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     let channel = session
         .channel_open_direct_tcpip("test.foobar.tld", 18022, "::1", 12345)
         .await
@@ -110,10 +116,13 @@ async fn ssh_proxy_jump() {
     let mut proxy_session = client::connect_stream(Default::default(), fake_socket, new_ssh_client)
         .await
         .expect("Failed to connect to proxied SSH server");
-    assert!(proxy_session
-        .authenticate_password("user", "password")
-        .await
-        .expect("Proxy SSH authentication failed"));
+    assert!(
+        proxy_session
+            .authenticate_password("user", "password")
+            .await
+            .expect("Proxy SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     let mut session_channel = proxy_session
         .channel_open_session()
         .await

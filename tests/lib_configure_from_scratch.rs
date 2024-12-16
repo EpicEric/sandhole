@@ -51,7 +51,7 @@ async fn lib_configure_from_scratch() {
         acme_use_staging: true,
         bind_hostnames: BindHostnames::None,
         load_balancing: LoadBalancing::Allow,
-        allow_provided_subdomains: false,
+        allow_requested_subdomains: false,
         allow_requested_ports: true,
         quota_per_user: None,
         random_subdomain_seed: None,
@@ -72,11 +72,23 @@ async fn lib_configure_from_scratch() {
     {
         panic!("Timeout waiting for Sandhole to start.")
     };
-    assert!(temp_dir.join("user_keys").is_dir());
-    assert!(temp_dir.join("admin_keys").is_dir());
-    assert!(temp_dir.join("certificates").is_dir());
-    assert!(temp_dir.join("server_keys").is_dir());
-    assert!(temp_dir.join("server_keys/ssh").is_file());
+    assert!(temp_dir.join("user_keys").is_dir(), "missing user_keys dir");
+    assert!(
+        temp_dir.join("admin_keys").is_dir(),
+        "missing admin_keys dir"
+    );
+    assert!(
+        temp_dir.join("certificates").is_dir(),
+        "missing certificates dir"
+    );
+    assert!(
+        temp_dir.join("server_keys").is_dir(),
+        "missing server_keys dir"
+    );
+    assert!(
+        temp_dir.join("server_keys/ssh").is_file(),
+        "missing server_keys/ssh file"
+    );
 
     // 2. Start SSH client that is not recognized
     let key = load_secret_key(
@@ -88,14 +100,20 @@ async fn lib_configure_from_scratch() {
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
-    assert!(session
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
-    assert!(session.tcpip_forward("localhost", 12345).await.is_err());
+    assert!(
+        session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
+    assert!(
+        session.tcpip_forward("localhost", 12345).await.is_err(),
+        "shouldn't allow unknown user to remote forward"
+    );
 
     // 3. Add key for SSH client that will be recognized
     fs::copy(
@@ -117,13 +135,16 @@ async fn lib_configure_from_scratch() {
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
-    assert!(session
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(Arc::new(key), Some(HashAlg::Sha512)).unwrap()
-        )
-        .await
-        .expect("SSH authentication failed"));
+    assert!(
+        session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key), Some(HashAlg::Sha512)).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
     session
         .tcpip_forward("localhost", 12345)
         .await

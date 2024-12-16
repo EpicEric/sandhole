@@ -20,7 +20,7 @@ ssh -R 80:localhost:3000 -R 80:localhost:4000 -R 22:localhost:5000 server.com -p
 
 ## Requesting a particular subdomain/port
 
-After you [allow binding on any subdomain/port](configuration.md#allow-binding-on-any-subdomainsports), it's possible to configure which of these will be assigned to you.
+After the server owner [allows binding on any subdomain/port](configuration.md#allow-binding-on-any-subdomainsports), it's possible to configure which will be assigned to you.
 
 For example, to bind under `test.server.com`, we could use either of these commands:
 

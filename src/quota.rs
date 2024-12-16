@@ -100,10 +100,16 @@ mod quota_map_tests {
         let token_1 = map.get_token(TokenHolder::User("a".into())).unwrap();
         let _token_2 = map.get_token(TokenHolder::User("a".into())).unwrap();
         let _token_3 = map.get_token(TokenHolder::User("a".into())).unwrap();
-        assert!(map.get_token(TokenHolder::User("a".into())).is_none());
+        assert!(
+            map.get_token(TokenHolder::User("a".into())).is_none(),
+            "shouldn't create token for quota-reaching user"
+        );
         drop(token_1);
         let _token_4 = map.get_token(TokenHolder::User("a".into())).unwrap();
-        assert!(map.get_token(TokenHolder::User("a".into())).is_none());
+        assert!(
+            map.get_token(TokenHolder::User("a".into())).is_none(),
+            "shouldn't create token for quota-reaching user"
+        );
     }
 
     #[test]
@@ -121,14 +127,29 @@ mod quota_map_tests {
         let token_a_1 = map.get_token(TokenHolder::User("a".into())).unwrap();
         let _token_a_2 = map.get_token(TokenHolder::User("a".into())).unwrap();
         let _token_a_3 = map.get_token(TokenHolder::User("a".into())).unwrap();
-        assert!(map.get_token(TokenHolder::User("a".into())).is_none());
+        assert!(
+            map.get_token(TokenHolder::User("a".into())).is_none(),
+            "shouldn't create token for quota-reaching user"
+        );
         let _token_b_1 = map.get_token(TokenHolder::User("b".into())).unwrap();
         let _token_b_2 = map.get_token(TokenHolder::User("b".into())).unwrap();
         let _token_b_3 = map.get_token(TokenHolder::User("b".into())).unwrap();
-        assert!(map.get_token(TokenHolder::User("b".into())).is_none());
-        assert!(map.get_token(TokenHolder::User("a".into())).is_none());
+        assert!(
+            map.get_token(TokenHolder::User("b".into())).is_none(),
+            "shouldn't create token for quota-reaching user"
+        );
+        assert!(
+            map.get_token(TokenHolder::User("a".into())).is_none(),
+            "shouldn't create token for quota-reaching user"
+        );
         drop(token_a_1);
-        assert!(map.get_token(TokenHolder::User("b".into())).is_none());
-        assert!(map.get_token(TokenHolder::User("a".into())).is_some());
+        assert!(
+            map.get_token(TokenHolder::User("b".into())).is_none(),
+            "shouldn't create token for quota-reaching user"
+        );
+        assert!(
+            map.get_token(TokenHolder::User("a".into())).is_some(),
+            "should create token for user below quota"
+        );
     }
 }
