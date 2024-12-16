@@ -1,9 +1,9 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use crate::{
+    connection_handler::ConnectionHandler,
     connections::{ConnectionMap, ConnectionMapReactor},
     droppable_handle::DroppableHandle,
-    connection_handler::ConnectionHandler,
     ssh::SshTunnelHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
 };

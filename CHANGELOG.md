@@ -15,7 +15,7 @@
 
 ### Changed
 
-- **BREAKING**: Bump MSRV to 1.79.0.
+- **BREAKING**: Bump MSRV to 1.81.0.
 - **BREAKING**: Rename `--allow-provided-subdomains` to `--allow-requested-subdomains`.
 - Change `--random-subdomain-seed=fingerprint` to also take user into account.
 - Modify exports to live within `lib.rs`.
