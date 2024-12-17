@@ -204,7 +204,9 @@ mod connection_map_tests {
 
     use crate::{
         config::LoadBalancing,
-        quota::{DummyQuotaHandler, MockQuotaHandler, QuotaHandler, TokenHolder},
+        quota::{
+            DummyQuotaHandler, MockQuotaHandler, QuotaHandler, TokenHolder, UserIdentification,
+        },
     };
 
     use super::{ConnectionMap, MockConnectionMapReactor};
@@ -214,10 +216,9 @@ mod connection_map_tests {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(2).returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota
-            .expect_get_token()
-            .once()
-            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
+        mock_quota.expect_get_token().once().returning(|_| {
+            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
+        });
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -226,7 +227,7 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            TokenHolder::User("user1".into()),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
             1,
         )
         .unwrap();
@@ -247,10 +248,9 @@ mod connection_map_tests {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(3).returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota
-            .expect_get_token()
-            .times(2)
-            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
+        mock_quota.expect_get_token().times(2).returning(|_| {
+            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
+        });
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -259,14 +259,14 @@ mod connection_map_tests {
         map.insert(
             "host1".into(),
             "127.0.0.1:2".parse().unwrap(),
-            TokenHolder::User("user1".into()),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
             1,
         )
         .unwrap();
         map.insert(
             "host2".into(),
             "127.0.0.1:2".parse().unwrap(),
-            TokenHolder::User("user2".into()),
+            TokenHolder::User(UserIdentification::Username("user2".into())),
             2,
         )
         .unwrap();
@@ -291,10 +291,9 @@ mod connection_map_tests {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(4).returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota
-            .expect_get_token()
-            .times(4)
-            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
+        mock_quota.expect_get_token().times(4).returning(|_| {
+            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
+        });
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -303,28 +302,28 @@ mod connection_map_tests {
         map.insert(
             "host1".into(),
             "127.0.0.1:2".parse().unwrap(),
-            TokenHolder::User("user1".into()),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
             1,
         )
         .unwrap();
         map.insert(
             "host2".into(),
             "127.0.0.1:2".parse().unwrap(),
-            TokenHolder::User("user1".into()),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
             2,
         )
         .unwrap();
         map.insert(
             "host2".into(),
             "127.0.0.1:3".parse().unwrap(),
-            TokenHolder::User("user2".into()),
+            TokenHolder::User(UserIdentification::Username("user2".into())),
             3,
         )
         .unwrap();
         map.insert(
             "host3".into(),
             "127.0.0.1:3".parse().unwrap(),
-            TokenHolder::User("user2".into()),
+            TokenHolder::User(UserIdentification::Username("user2".into())),
             4,
         )
         .unwrap();
@@ -346,10 +345,9 @@ mod connection_map_tests {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(2).returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota
-            .expect_get_token()
-            .times(2)
-            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
+        mock_quota.expect_get_token().times(2).returning(|_| {
+            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
+        });
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -358,14 +356,14 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            TokenHolder::User("user1".into()),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
             1,
         )
         .unwrap();
         map.insert(
             "other".into(),
             "127.0.0.1:2".parse().unwrap(),
-            TokenHolder::User("user2".into()),
+            TokenHolder::User(UserIdentification::Username("user2".into())),
             2,
         )
         .unwrap();
@@ -381,10 +379,9 @@ mod connection_map_tests {
             .with(eq(vec![String::from("host")]))
             .returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota
-            .expect_get_token()
-            .times(3)
-            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
+        mock_quota.expect_get_token().times(3).returning(|_| {
+            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
+        });
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -393,21 +390,21 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            TokenHolder::User("user1".into()),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
             1,
         )
         .unwrap();
         map.insert(
             "host".into(),
             "127.0.0.1:2".parse().unwrap(),
-            TokenHolder::User("user2".into()),
+            TokenHolder::User(UserIdentification::Username("user2".into())),
             2,
         )
         .unwrap();
         map.insert(
             "host".into(),
             "127.0.0.1:3".parse().unwrap(),
-            TokenHolder::User("user3".into()),
+            TokenHolder::User(UserIdentification::Username("user3".into())),
             3,
         )
         .unwrap();
@@ -462,10 +459,9 @@ mod connection_map_tests {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(1).returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota
-            .expect_get_token()
-            .times(2)
-            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
+        mock_quota.expect_get_token().times(2).returning(|_| {
+            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
+        });
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Replace,
             Arc::new(Box::new(mock_quota)),
@@ -474,14 +470,14 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            TokenHolder::User("user1".into()),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
             1,
         )
         .unwrap();
         map.insert(
             "host".into(),
             "127.0.0.1:2".parse().unwrap(),
-            TokenHolder::User("user2".into()),
+            TokenHolder::User(UserIdentification::Username("user2".into())),
             2,
         )
         .unwrap();
@@ -500,10 +496,9 @@ mod connection_map_tests {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(1).returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota
-            .expect_get_token()
-            .once()
-            .returning(|_| DummyQuotaHandler.get_token(TokenHolder::Admin("".into())));
+        mock_quota.expect_get_token().once().returning(|_| {
+            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
+        });
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Deny,
             Arc::new(Box::new(mock_quota)),
@@ -512,7 +507,7 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            TokenHolder::User("user1".into()),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
             1,
         )
         .unwrap();
@@ -520,7 +515,7 @@ mod connection_map_tests {
             map.insert(
                 "host".into(),
                 "127.0.0.1:2".parse().unwrap(),
-                TokenHolder::User("user2".into()),
+                TokenHolder::User(UserIdentification::Username("user2".into())),
                 2
             )
             .is_err(),
@@ -550,10 +545,14 @@ mod connection_map_tests {
             .expect_get_token()
             .times(3)
             .returning(move |holder| {
-                assert_eq!(holder, TokenHolder::User("user1".into()));
+                assert_eq!(
+                    holder,
+                    TokenHolder::User(UserIdentification::Username("user1".into()))
+                );
                 if quota_count < 2 {
                     quota_count += 1;
-                    DummyQuotaHandler.get_token(TokenHolder::Admin("".into()))
+                    DummyQuotaHandler
+                        .get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
                 } else {
                     None
                 }
@@ -567,7 +566,7 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            TokenHolder::User("user1".into()),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
             1,
         )
         .unwrap();
@@ -575,7 +574,7 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:2".parse().unwrap(),
-            TokenHolder::User("user1".into()),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
             2,
         )
         .unwrap();
@@ -584,7 +583,7 @@ mod connection_map_tests {
             map.insert(
                 "host".into(),
                 "127.0.0.1:3".parse().unwrap(),
-                TokenHolder::User("user1".into()),
+                TokenHolder::User(UserIdentification::Username("user1".into())),
                 3,
             )
             .is_err(),
@@ -623,10 +622,14 @@ mod connection_map_tests {
             .expect_get_token()
             .times(2)
             .returning(move |holder| {
-                assert_eq!(holder, TokenHolder::User("user1".into()));
+                assert_eq!(
+                    holder,
+                    TokenHolder::User(UserIdentification::Username("user1".into()))
+                );
                 if quota_count < 1 {
                     quota_count += 1;
-                    DummyQuotaHandler.get_token(TokenHolder::Admin("".into()))
+                    DummyQuotaHandler
+                        .get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
                 } else {
                     None
                 }
@@ -640,7 +643,7 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
-            TokenHolder::User("user1".into()),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
             1,
         )
         .unwrap();
@@ -649,7 +652,7 @@ mod connection_map_tests {
             map.insert(
                 "host".into(),
                 "127.0.0.1:2".parse().unwrap(),
-                TokenHolder::User("user1".into()),
+                TokenHolder::User(UserIdentification::Username("user1".into())),
                 2,
             )
             .is_err(),
@@ -675,12 +678,16 @@ mod connection_map_tests {
             .expect_get_token()
             .times(2)
             .returning(move |holder| {
-                assert_eq!(holder, TokenHolder::User("user1".into()));
+                assert_eq!(
+                    holder,
+                    TokenHolder::User(UserIdentification::Username("user1".into()))
+                );
                 if quota_count < 1 {
                     quota_count += 1;
                     None
                 } else {
-                    DummyQuotaHandler.get_token(TokenHolder::Admin("".into()))
+                    DummyQuotaHandler
+                        .get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
                 }
             });
         let map = ConnectionMap::<String, usize, _>::new(
@@ -693,7 +700,7 @@ mod connection_map_tests {
             map.insert(
                 "host".into(),
                 "127.0.0.1:1".parse().unwrap(),
-                TokenHolder::User("user1".into()),
+                TokenHolder::User(UserIdentification::Username("user1".into())),
                 1,
             )
             .is_err(),
@@ -703,7 +710,7 @@ mod connection_map_tests {
         map.insert(
             "host".into(),
             "127.0.0.1:2".parse().unwrap(),
-            TokenHolder::User("user1".into()),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
             2,
         )
         .unwrap();
@@ -712,7 +719,7 @@ mod connection_map_tests {
             map.insert(
                 "host".into(),
                 "127.0.0.1:3".parse().unwrap(),
-                TokenHolder::User("user1".into()),
+                TokenHolder::User(UserIdentification::Username("user1".into())),
                 3
             )
             .is_err(),

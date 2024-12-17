@@ -13,7 +13,7 @@ use crate::{
     error::ServerError,
     fingerprints::AuthenticationType,
     login::AuthenticationRequest,
-    quota::TokenHolder,
+    quota::{TokenHolder, UserIdentification},
     tcp::{is_alias, PortHandler, NO_ALIAS_HOST},
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
     SandholeServer,
@@ -278,10 +278,9 @@ impl Handler for ServerHandler {
                 if is_authenticated {
                     self.user = Some(user.into());
                     self.auth_data = AuthenticatedData::User {
-                        user_data: Box::new(UserData::new(TokenHolder::User(format!(
-                            "u:{}",
-                            user
-                        )))),
+                        user_data: Box::new(UserData::new(TokenHolder::User(
+                            UserIdentification::Username(user.into()),
+                        ))),
                     };
                     info!(
                         "{} ({}) connected with {} (password)",
@@ -340,19 +339,17 @@ impl Handler for ServerHandler {
             }
             AuthenticationType::User => {
                 self.auth_data = AuthenticatedData::User {
-                    user_data: Box::new(UserData::new(TokenHolder::User(format!(
-                        "f:{}",
-                        fingerprint
-                    )))),
+                    user_data: Box::new(UserData::new(TokenHolder::User(
+                        UserIdentification::Fingerprint(fingerprint.to_string()),
+                    ))),
                 };
                 Ok(Auth::Accept)
             }
             AuthenticationType::Admin => {
                 self.auth_data = AuthenticatedData::Admin {
-                    user_data: Box::new(UserData::new(TokenHolder::Admin(format!(
-                        "f:{}",
-                        fingerprint
-                    )))),
+                    user_data: Box::new(UserData::new(TokenHolder::Admin(
+                        UserIdentification::Fingerprint(fingerprint.to_string()),
+                    ))),
                     admin_data: Box::new(AdminData::new()),
                 };
                 Ok(Auth::Accept)
@@ -497,7 +494,7 @@ impl Handler for ServerHandler {
                     .resize(col_width as u16, row_height as u16)
                     .is_err()
                 {
-                    warn!("Failed to resize terminal");
+                    warn!("Failed to resize terminal for {}", self.peer);
                 }
             }
         }

@@ -345,11 +345,11 @@ mod proxy_handler_tests {
         config::LoadBalancing,
         connection_handler::MockConnectionHandler,
         connections::MockConnectionMapReactor,
-        http::{ProxyData, Telemetry},
-        quota::{DummyQuotaHandler, TokenHolder},
+        quota::{DummyQuotaHandler, TokenHolder, UserIdentification},
+        telemetry::Telemetry,
     };
 
-    use super::{proxy_handler, ConnectionMap, DomainRedirect, Protocol};
+    use super::{proxy_handler, ConnectionMap, DomainRedirect, Protocol, ProxyData};
 
     #[tokio::test]
     async fn errors_on_missing_host_header() {
@@ -498,7 +498,7 @@ mod proxy_handler_tests {
             .insert(
                 "with.handler".into(),
                 "127.0.0.1:12345".parse().unwrap(),
-                TokenHolder::User("a".into()),
+                TokenHolder::User(UserIdentification::Username("a".into())),
                 Arc::new(mock),
             )
             .unwrap();
@@ -558,7 +558,7 @@ mod proxy_handler_tests {
             .insert(
                 "non.standard".into(),
                 "127.0.0.1:12345".parse().unwrap(),
-                TokenHolder::User("a".into()),
+                TokenHolder::User(UserIdentification::Username("a".into())),
                 Arc::new(mock),
             )
             .unwrap();
@@ -624,7 +624,7 @@ mod proxy_handler_tests {
             .insert(
                 "with.handler".into(),
                 "127.0.0.1:12345".parse().unwrap(),
-                TokenHolder::User("a".into()),
+                TokenHolder::User(UserIdentification::Username("a".into())),
                 Arc::new(mock),
             )
             .unwrap();
@@ -714,7 +714,7 @@ mod proxy_handler_tests {
             .insert(
                 "root.domain".into(),
                 "127.0.0.1:12345".parse().unwrap(),
-                TokenHolder::User("a".into()),
+                TokenHolder::User(UserIdentification::Username("a".into())),
                 Arc::new(mock),
             )
             .unwrap();
@@ -807,7 +807,7 @@ mod proxy_handler_tests {
             .insert(
                 "with.websocket".into(),
                 "127.0.0.1:12345".parse().unwrap(),
-                TokenHolder::User("a".into()),
+                TokenHolder::User(UserIdentification::Username("a".into())),
                 Arc::new(mock),
             )
             .unwrap();

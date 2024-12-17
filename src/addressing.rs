@@ -279,15 +279,16 @@ impl<R: Resolver> AddressDelegator<R> {
 
 #[cfg(test)]
 mod address_delegator_tests {
-    use crate::config::BindHostnames;
-
-    use super::{AddressDelegator, MockResolver};
     use mockall::predicate::*;
     use rand::rngs::OsRng;
     use regex::Regex;
     use ssh_key::HashAlg;
     use std::net::SocketAddr;
     use webpki::types::DnsName;
+
+    use crate::config::BindHostnames;
+
+    use super::{AddressDelegator, MockResolver};
 
     #[tokio::test]
     async fn returns_provided_address_when_binding_any_host() {

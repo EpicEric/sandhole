@@ -4,17 +4,25 @@ use dashmap::DashMap;
 #[cfg(test)]
 use mockall::automock;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub(crate) enum UserIdentification {
+    Fingerprint(String),
+    Username(String),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) enum TokenHolder {
-    User(String),
-    Admin(String),
+    User(UserIdentification),
+    Admin(UserIdentification),
 }
 
 impl TokenHolder {
     pub(crate) fn get_user(&self) -> String {
         match self {
-            TokenHolder::User(user) => user.clone(),
-            TokenHolder::Admin(user) => user.clone(),
+            TokenHolder::User(user) | TokenHolder::Admin(user) => match user {
+                UserIdentification::Fingerprint(fingerprint) => fingerprint.clone(),
+                UserIdentification::Username(username) => username.clone(),
+            },
         }
     }
 }
@@ -37,7 +45,7 @@ impl QuotaHandler for DummyQuotaHandler {
 
 pub(crate) struct QuotaMap {
     max_quota: NonZero<usize>,
-    map: DashMap<String, usize>,
+    map: DashMap<UserIdentification, usize>,
 }
 
 impl QuotaMap {
@@ -51,25 +59,26 @@ impl QuotaMap {
 
 impl QuotaHandler for Arc<QuotaMap> {
     fn get_token(&self, holder: TokenHolder) -> Option<QuotaToken> {
-        if let TokenHolder::User(holder) = holder {
-            let mut entry = self.map.entry(holder.clone()).or_default();
-            if *entry >= self.max_quota.into() {
-                return None;
+        match holder {
+            TokenHolder::User(holder) => {
+                let mut entry = self.map.entry(holder.clone()).or_default();
+                if *entry >= self.max_quota.into() {
+                    return None;
+                }
+                *entry += 1;
+                drop(entry);
+                let this = Arc::clone(self);
+                let callback = move || {
+                    this.map.remove_if_mut(&holder, |_, entry| {
+                        *entry -= 1;
+                        *entry == 0
+                    });
+                };
+                Some(QuotaToken {
+                    callback: Some(Box::new(callback)),
+                })
             }
-            *entry += 1;
-            drop(entry);
-            let this = Arc::clone(self);
-            let callback = move || {
-                this.map.remove_if_mut(&holder, |_, entry| {
-                    *entry -= 1;
-                    *entry == 0
-                });
-            };
-            Some(QuotaToken {
-                callback: Some(Box::new(callback)),
-            })
-        } else {
-            Some(QuotaToken { callback: None })
+            TokenHolder::Admin(_) => Some(QuotaToken { callback: None }),
         }
     }
 }
@@ -90,24 +99,32 @@ impl Drop for QuotaToken {
 mod quota_map_tests {
     use std::sync::Arc;
 
-    use crate::quota::TokenHolder;
-
-    use super::{QuotaHandler, QuotaMap};
+    use super::{QuotaHandler, QuotaMap, TokenHolder, UserIdentification};
 
     #[test]
     fn returns_tokens_while_under_quota() {
         let map = Arc::new(QuotaMap::new(3.try_into().unwrap()));
-        let token_1 = map.get_token(TokenHolder::User("a".into())).unwrap();
-        let _token_2 = map.get_token(TokenHolder::User("a".into())).unwrap();
-        let _token_3 = map.get_token(TokenHolder::User("a".into())).unwrap();
+        let token_1 = map
+            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
+            .unwrap();
+        let _token_2 = map
+            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
+            .unwrap();
+        let _token_3 = map
+            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
+            .unwrap();
         assert!(
-            map.get_token(TokenHolder::User("a".into())).is_none(),
+            map.get_token(TokenHolder::User(UserIdentification::Username("a".into())))
+                .is_none(),
             "shouldn't create token for quota-reaching user"
         );
         drop(token_1);
-        let _token_4 = map.get_token(TokenHolder::User("a".into())).unwrap();
+        let _token_4 = map
+            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
+            .unwrap();
         assert!(
-            map.get_token(TokenHolder::User("a".into())).is_none(),
+            map.get_token(TokenHolder::User(UserIdentification::Username("a".into())))
+                .is_none(),
             "shouldn't create token for quota-reaching user"
         );
     }
@@ -117,38 +134,70 @@ mod quota_map_tests {
         let map = Arc::new(QuotaMap::new(3.try_into().unwrap()));
         let mut tokens = Vec::with_capacity(5);
         for _ in 0..5 {
-            tokens.push(map.get_token(TokenHolder::Admin("c".into())).unwrap());
+            tokens.push(
+                map.get_token(TokenHolder::Admin(UserIdentification::Fingerprint(
+                    "c".into(),
+                )))
+                .unwrap(),
+            );
         }
     }
 
     #[test]
     fn returns_tokens_for_different_holders() {
         let map = Arc::new(QuotaMap::new(3.try_into().unwrap()));
-        let token_a_1 = map.get_token(TokenHolder::User("a".into())).unwrap();
-        let _token_a_2 = map.get_token(TokenHolder::User("a".into())).unwrap();
-        let _token_a_3 = map.get_token(TokenHolder::User("a".into())).unwrap();
+        let token_a_1 = map
+            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
+            .unwrap();
+        let _token_a_2 = map
+            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
+            .unwrap();
+        let _token_a_3 = map
+            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
+            .unwrap();
         assert!(
-            map.get_token(TokenHolder::User("a".into())).is_none(),
+            map.get_token(TokenHolder::User(UserIdentification::Username("a".into())))
+                .is_none(),
             "shouldn't create token for quota-reaching user"
         );
-        let _token_b_1 = map.get_token(TokenHolder::User("b".into())).unwrap();
-        let _token_b_2 = map.get_token(TokenHolder::User("b".into())).unwrap();
-        let _token_b_3 = map.get_token(TokenHolder::User("b".into())).unwrap();
+        let _token_b_1 = map
+            .get_token(TokenHolder::User(UserIdentification::Fingerprint(
+                "b".into(),
+            )))
+            .unwrap();
+        let _token_b_2 = map
+            .get_token(TokenHolder::User(UserIdentification::Fingerprint(
+                "b".into(),
+            )))
+            .unwrap();
+        let _token_b_3 = map
+            .get_token(TokenHolder::User(UserIdentification::Fingerprint(
+                "b".into(),
+            )))
+            .unwrap();
         assert!(
-            map.get_token(TokenHolder::User("b".into())).is_none(),
+            map.get_token(TokenHolder::User(UserIdentification::Fingerprint(
+                "b".into()
+            )))
+            .is_none(),
             "shouldn't create token for quota-reaching user"
         );
         assert!(
-            map.get_token(TokenHolder::User("a".into())).is_none(),
+            map.get_token(TokenHolder::User(UserIdentification::Username("a".into())))
+                .is_none(),
             "shouldn't create token for quota-reaching user"
         );
         drop(token_a_1);
         assert!(
-            map.get_token(TokenHolder::User("b".into())).is_none(),
+            map.get_token(TokenHolder::User(UserIdentification::Fingerprint(
+                "b".into()
+            )))
+            .is_none(),
             "shouldn't create token for quota-reaching user"
         );
         assert!(
-            map.get_token(TokenHolder::User("a".into())).is_some(),
+            map.get_token(TokenHolder::User(UserIdentification::Username("a".into())))
+                .is_some(),
             "should create token for user below quota"
         );
     }

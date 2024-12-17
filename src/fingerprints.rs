@@ -166,9 +166,10 @@ impl FingerprintsValidator {
 
 #[cfg(test)]
 mod fingerprints_validator_tests {
-    use super::{AuthenticationType, FingerprintsValidator};
     use russh_keys::parse_public_key_base64;
     use ssh_key::HashAlg;
+
+    use super::{AuthenticationType, FingerprintsValidator};
 
     static USER_KEYS_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys");
     static ADMIN_KEYS_DIRECTORY: &str =
