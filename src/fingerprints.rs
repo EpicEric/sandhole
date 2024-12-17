@@ -1,9 +1,4 @@
-use std::{
-    collections::BTreeSet,
-    path::PathBuf,
-    sync::{Arc, RwLock},
-    time::Duration,
-};
+use std::{collections::BTreeSet, path::PathBuf, sync::Arc, time::Duration};
 
 use crate::{directory::watch_directory, droppable_handle::DroppableHandle};
 use log::{error, warn};
@@ -11,7 +6,7 @@ use notify::RecommendedWatcher;
 use ssh_key::{Fingerprint, HashAlg, PublicKey};
 use tokio::{
     fs::{read_dir, read_to_string},
-    sync::oneshot,
+    sync::{oneshot, RwLock},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -77,7 +72,7 @@ impl FingerprintsValidator {
                                 }
                             }
                         }
-                        *user_fingerprints_clone.write().unwrap() = user_set;
+                        *user_fingerprints_clone.write().await = user_set;
                     }
                     Err(err) => {
                         error!(
@@ -122,7 +117,7 @@ impl FingerprintsValidator {
                                 }
                             }
                         }
-                        *admin_fingerprints_clone.write().unwrap() = admin_set;
+                        *admin_fingerprints_clone.write().await = admin_set;
                     }
                     Err(err) => {
                         error!(
@@ -148,15 +143,13 @@ impl FingerprintsValidator {
     }
 
     // Find the right authentication type for a given fingerprint
-    pub(crate) fn authenticate_fingerprint(&self, fingerprint: &Fingerprint) -> AuthenticationType {
-        if self
-            .admin_fingerprints
-            .read()
-            .unwrap()
-            .contains(fingerprint)
-        {
+    pub(crate) async fn authenticate_fingerprint(
+        &self,
+        fingerprint: &Fingerprint,
+    ) -> AuthenticationType {
+        if self.admin_fingerprints.read().await.contains(fingerprint) {
             AuthenticationType::Admin
-        } else if self.user_fingerprints.read().unwrap().contains(fingerprint) {
+        } else if self.user_fingerprints.read().await.contains(fingerprint) {
             AuthenticationType::User
         } else {
             AuthenticationType::None
@@ -202,19 +195,27 @@ mod fingerprints_validator_tests {
         .unwrap();
 
         assert_eq!(
-            validator.authenticate_fingerprint(&admin_key.fingerprint(HashAlg::Sha256)),
+            validator
+                .authenticate_fingerprint(&admin_key.fingerprint(HashAlg::Sha256))
+                .await,
             AuthenticationType::Admin
         );
         assert_eq!(
-            validator.authenticate_fingerprint(&key_one.fingerprint(HashAlg::Sha256)),
+            validator
+                .authenticate_fingerprint(&key_one.fingerprint(HashAlg::Sha256))
+                .await,
             AuthenticationType::User
         );
         assert_eq!(
-            validator.authenticate_fingerprint(&key_two.fingerprint(HashAlg::Sha256)),
+            validator
+                .authenticate_fingerprint(&key_two.fingerprint(HashAlg::Sha256))
+                .await,
             AuthenticationType::User
         );
         assert_eq!(
-            validator.authenticate_fingerprint(&unknown_key.fingerprint(HashAlg::Sha256)),
+            validator
+                .authenticate_fingerprint(&unknown_key.fingerprint(HashAlg::Sha256))
+                .await,
             AuthenticationType::None
         );
     }

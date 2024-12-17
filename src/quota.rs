@@ -1,13 +1,27 @@
-use std::{num::NonZero, sync::Arc};
+use std::{hash::Hash, num::NonZero, sync::Arc};
 
 use dashmap::DashMap;
 #[cfg(test)]
 use mockall::automock;
+use ssh_key::Fingerprint;
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum UserIdentification {
-    Fingerprint(String),
+    PublicKey(Fingerprint),
     Username(String),
+}
+
+impl Hash for UserIdentification {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+        match self {
+            UserIdentification::PublicKey(fingerprint) => {
+                fingerprint.algorithm().hash(state);
+                fingerprint.as_bytes().hash(state);
+            }
+            UserIdentification::Username(user) => user.hash(state),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
@@ -20,7 +34,7 @@ impl TokenHolder {
     pub(crate) fn get_user(&self) -> String {
         match self {
             TokenHolder::User(user) | TokenHolder::Admin(user) => match user {
-                UserIdentification::Fingerprint(fingerprint) => fingerprint.clone(),
+                UserIdentification::PublicKey(fingerprint) => fingerprint.to_string(),
                 UserIdentification::Username(username) => username.clone(),
             },
         }
@@ -99,44 +113,40 @@ impl Drop for QuotaToken {
 mod quota_map_tests {
     use std::sync::Arc;
 
+    use rand::rngs::OsRng;
+    use ssh_key::HashAlg;
+
     use super::{QuotaHandler, QuotaMap, TokenHolder, UserIdentification};
 
     #[test]
     fn returns_tokens_while_under_quota() {
+        let user = UserIdentification::Username("a".into());
         let map = Arc::new(QuotaMap::new(3.try_into().unwrap()));
-        let token_1 = map
-            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
-            .unwrap();
-        let _token_2 = map
-            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
-            .unwrap();
-        let _token_3 = map
-            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
-            .unwrap();
+        let token_1 = map.get_token(TokenHolder::User(user.clone())).unwrap();
+        let _token_2 = map.get_token(TokenHolder::User(user.clone())).unwrap();
+        let _token_3 = map.get_token(TokenHolder::User(user.clone())).unwrap();
         assert!(
-            map.get_token(TokenHolder::User(UserIdentification::Username("a".into())))
-                .is_none(),
+            map.get_token(TokenHolder::User(user.clone())).is_none(),
             "shouldn't create token for quota-reaching user"
         );
         drop(token_1);
-        let _token_4 = map
-            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
-            .unwrap();
+        let _token_4 = map.get_token(TokenHolder::User(user.clone())).unwrap();
         assert!(
-            map.get_token(TokenHolder::User(UserIdentification::Username("a".into())))
-                .is_none(),
+            map.get_token(TokenHolder::User(user.clone())).is_none(),
             "shouldn't create token for quota-reaching user"
         );
     }
 
     #[test]
     fn returns_unlimited_tokens_for_admin_holder() {
+        let key =
+            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
         let map = Arc::new(QuotaMap::new(3.try_into().unwrap()));
         let mut tokens = Vec::with_capacity(5);
         for _ in 0..5 {
             tokens.push(
-                map.get_token(TokenHolder::Admin(UserIdentification::Fingerprint(
-                    "c".into(),
+                map.get_token(TokenHolder::Admin(UserIdentification::PublicKey(
+                    key.fingerprint(HashAlg::Sha256),
                 )))
                 .unwrap(),
             );
@@ -145,59 +155,37 @@ mod quota_map_tests {
 
     #[test]
     fn returns_tokens_for_different_holders() {
+        let key =
+            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
+        let fingerprint = key.fingerprint(HashAlg::Sha256);
+        let user_a = UserIdentification::Username("a".into());
+        let user_b = UserIdentification::PublicKey(fingerprint);
         let map = Arc::new(QuotaMap::new(3.try_into().unwrap()));
-        let token_a_1 = map
-            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
-            .unwrap();
-        let _token_a_2 = map
-            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
-            .unwrap();
-        let _token_a_3 = map
-            .get_token(TokenHolder::User(UserIdentification::Username("a".into())))
-            .unwrap();
+        let token_a_1 = map.get_token(TokenHolder::User(user_a.clone())).unwrap();
+        let _token_a_2 = map.get_token(TokenHolder::User(user_a.clone())).unwrap();
+        let _token_a_3 = map.get_token(TokenHolder::User(user_a.clone())).unwrap();
         assert!(
-            map.get_token(TokenHolder::User(UserIdentification::Username("a".into())))
-                .is_none(),
+            map.get_token(TokenHolder::User(user_a.clone())).is_none(),
             "shouldn't create token for quota-reaching user"
         );
-        let _token_b_1 = map
-            .get_token(TokenHolder::User(UserIdentification::Fingerprint(
-                "b".into(),
-            )))
-            .unwrap();
-        let _token_b_2 = map
-            .get_token(TokenHolder::User(UserIdentification::Fingerprint(
-                "b".into(),
-            )))
-            .unwrap();
-        let _token_b_3 = map
-            .get_token(TokenHolder::User(UserIdentification::Fingerprint(
-                "b".into(),
-            )))
-            .unwrap();
+        let _token_b_1 = map.get_token(TokenHolder::User(user_b.clone())).unwrap();
+        let _token_b_2 = map.get_token(TokenHolder::User(user_b.clone())).unwrap();
+        let _token_b_3 = map.get_token(TokenHolder::User(user_b.clone())).unwrap();
         assert!(
-            map.get_token(TokenHolder::User(UserIdentification::Fingerprint(
-                "b".into()
-            )))
-            .is_none(),
+            map.get_token(TokenHolder::User(user_b.clone())).is_none(),
             "shouldn't create token for quota-reaching user"
         );
         assert!(
-            map.get_token(TokenHolder::User(UserIdentification::Username("a".into())))
-                .is_none(),
+            map.get_token(TokenHolder::User(user_a.clone())).is_none(),
             "shouldn't create token for quota-reaching user"
         );
         drop(token_a_1);
         assert!(
-            map.get_token(TokenHolder::User(UserIdentification::Fingerprint(
-                "b".into()
-            )))
-            .is_none(),
+            map.get_token(TokenHolder::User(user_b.clone())).is_none(),
             "shouldn't create token for quota-reaching user"
         );
         assert!(
-            map.get_token(TokenHolder::User(UserIdentification::Username("a".into())))
-                .is_some(),
+            map.get_token(TokenHolder::User(user_a.clone())).is_some(),
             "should create token for user below quota"
         );
     }

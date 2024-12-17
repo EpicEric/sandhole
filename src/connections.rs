@@ -83,15 +83,7 @@ where
                 });
             }
             LoadBalancing::Replace => {
-                let removed_entry = if self.map.contains_key(&key) {
-                    self.map.remove(&key)
-                } else {
-                    None
-                };
                 let Some(token) = self.quota_handler.get_token(holder) else {
-                    if let Some((key, value)) = removed_entry {
-                        self.map.insert(key, value);
-                    }
                     return Err(ServerError::QuotaReached.into());
                 };
                 self.map.insert(

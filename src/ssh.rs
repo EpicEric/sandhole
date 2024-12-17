@@ -312,7 +312,8 @@ impl Handler for ServerHandler {
         let authentication = self
             .server
             .fingerprints_validator
-            .authenticate_fingerprint(self.key_fingerprint.as_ref().unwrap());
+            .authenticate_fingerprint(self.key_fingerprint.as_ref().unwrap())
+            .await;
         info!(
             "{} ({}) connected with {} (public key)",
             user, self.peer, self.auth_data
@@ -340,7 +341,7 @@ impl Handler for ServerHandler {
             AuthenticationType::User => {
                 self.auth_data = AuthenticatedData::User {
                     user_data: Box::new(UserData::new(TokenHolder::User(
-                        UserIdentification::Fingerprint(fingerprint.to_string()),
+                        UserIdentification::PublicKey(fingerprint),
                     ))),
                 };
                 Ok(Auth::Accept)
@@ -348,7 +349,7 @@ impl Handler for ServerHandler {
             AuthenticationType::Admin => {
                 self.auth_data = AuthenticatedData::Admin {
                     user_data: Box::new(UserData::new(TokenHolder::Admin(
-                        UserIdentification::Fingerprint(fingerprint.to_string()),
+                        UserIdentification::PublicKey(fingerprint),
                     ))),
                     admin_data: Box::new(AdminData::new()),
                 };
