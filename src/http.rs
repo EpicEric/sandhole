@@ -125,7 +125,7 @@ where
 pub(crate) async fn proxy_handler<B, H, T, R>(
     mut request: Request<B>,
     tcp_address: SocketAddr,
-    proxy_data: ProxyData<H, T, R>,
+    proxy_data: Arc<ProxyData<H, T, R>>,
 ) -> anyhow::Result<Response<AxumBody>>
 where
     H: ConnectionHandler<T>,
@@ -135,16 +135,11 @@ where
     <B as Body>::Data: Send + Sync + 'static,
     <B as Body>::Error: Error + Send + Sync + 'static,
 {
-    let ProxyData {
-        conn_manager,
-        telemetry,
-        domain_redirect,
-        protocol,
-        http_request_timeout,
-        websocket_timeout,
-        disable_http_logs,
-        ..
-    } = proxy_data;
+    let conn_manager = &proxy_data.conn_manager;
+    let telemetry = &proxy_data.telemetry;
+    let domain_redirect = &proxy_data.domain_redirect;
+    let protocol = &proxy_data.protocol;
+    let disable_http_logs = proxy_data.disable_http_logs;
     let timer = Instant::now();
     let host = request
         .headers()
@@ -183,13 +178,9 @@ where
             let elapsed_time = timer.elapsed();
             let response = Redirect::permanent(
                 format!(
-                    "https://{}{}{}",
+                    "https://{}:{}{}",
                     host,
-                    if to_port == 443 {
-                        "".into()
-                    } else {
-                        format!(":{to_port}")
-                    },
+                    to_port,
                     request
                         .uri()
                         .path_and_query()
@@ -243,9 +234,12 @@ where
                     warn!("Connection failed: {:?}", err);
                 }
             });
-            let response = timeout(http_request_timeout, sender.send_request(request))
-                .await
-                .map_err(|_| ServerError::RequestTimeout)??;
+            let response = timeout(
+                proxy_data.http_request_timeout,
+                sender.send_request(request),
+            )
+            .await
+            .map_err(|_| ServerError::RequestTimeout)??;
             let elapsed_time = timer.elapsed();
             http_log(
                 HttpLog {
@@ -270,9 +264,12 @@ where
             });
             let request_type = request_upgrade.to_str()?.to_string();
             let upgraded_request = hyper::upgrade::on(&mut request);
-            let mut response = timeout(http_request_timeout, sender.send_request(request))
-                .await
-                .map_err(|_| ServerError::RequestTimeout)??;
+            let mut response = timeout(
+                proxy_data.http_request_timeout,
+                sender.send_request(request),
+            )
+            .await
+            .map_err(|_| ServerError::RequestTimeout)??;
             let elapsed_time = timer.elapsed();
             http_log(
                 HttpLog {
@@ -296,6 +293,7 @@ where
                             .to_str()?
                     {
                         let upgraded_response = hyper::upgrade::on(&mut response).await?;
+                        let websocket_timeout = proxy_data.websocket_timeout;
                         tokio::spawn(async move {
                             let mut upgraded_request =
                                 TokioIo::new(upgraded_request.await.unwrap());
@@ -372,7 +370,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
-            ProxyData {
+            Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
                 domain_redirect: Arc::new(DomainRedirect {
@@ -384,7 +382,7 @@ mod proxy_handler_tests {
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
-            },
+            }),
         )
         .await;
         assert!(response.is_err(), "should error on missing host header");
@@ -412,7 +410,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
-            ProxyData {
+            Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
                 domain_redirect: Arc::new(DomainRedirect {
@@ -424,7 +422,7 @@ mod proxy_handler_tests {
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
-            },
+            }),
         )
         .await;
         assert!(response.is_ok(), "should return response when not found");
@@ -454,7 +452,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
-            ProxyData {
+            Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
                 domain_redirect: Arc::new(DomainRedirect {
@@ -466,7 +464,7 @@ mod proxy_handler_tests {
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
-            },
+            }),
         )
         .await;
         assert!(response.is_ok(), "should return response when redirect");
@@ -511,7 +509,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
-            ProxyData {
+            Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
                 domain_redirect: Arc::new(DomainRedirect {
@@ -523,7 +521,7 @@ mod proxy_handler_tests {
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
-            },
+            }),
         )
         .await;
         assert!(
@@ -534,7 +532,7 @@ mod proxy_handler_tests {
         assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
         assert_eq!(
             response.headers().get("location").unwrap(),
-            "https://with.handler/api/endpoint"
+            "https://with.handler:443/api/endpoint"
         );
     }
 
@@ -571,7 +569,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
-            ProxyData {
+            Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
                 domain_redirect: Arc::new(DomainRedirect {
@@ -583,7 +581,7 @@ mod proxy_handler_tests {
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
-            },
+            }),
         )
         .await;
         assert!(
@@ -663,7 +661,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
-            ProxyData {
+            Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
                 domain_redirect: Arc::new(DomainRedirect {
@@ -675,7 +673,7 @@ mod proxy_handler_tests {
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
-            },
+            }),
         )
         .await;
         assert!(!logging_rx.is_empty(), "should log after proxying request");
@@ -753,7 +751,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "192.168.0.1:12345".parse().unwrap(),
-            ProxyData {
+            Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
                 domain_redirect: Arc::new(DomainRedirect {
@@ -765,7 +763,7 @@ mod proxy_handler_tests {
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
-            },
+            }),
         )
         .await;
         assert!(!logging_rx.is_empty(), "should log after proxying request");
@@ -837,7 +835,7 @@ mod proxy_handler_tests {
             proxy_handler(
                 request,
                 "127.0.0.1:12345".parse().unwrap(),
-                ProxyData {
+                Arc::new(ProxyData {
                     conn_manager: Arc::clone(&conn_manager),
                     telemetry: Arc::new(Telemetry::new()),
                     domain_redirect: Arc::new(DomainRedirect {
@@ -849,7 +847,7 @@ mod proxy_handler_tests {
                     websocket_timeout: None,
                     disable_http_logs: false,
                     _phantom_data: PhantomData,
-                },
+                }),
             )
         });
         let jh2 = tokio::spawn(async move {

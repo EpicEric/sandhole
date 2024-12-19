@@ -316,74 +316,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         }
     });
 
-    // HTTP handlers
-    let http_listener = TcpListener::bind((listen_address, config.http_port))
-        .await
-        .with_context(|| "Error listening to HTTP port")?;
-    info!(
-        "Listening for HTTP connections on port {}",
-        config.http_port
-    );
-    let http_map = Arc::clone(&http_connections);
-    let redirect = Arc::clone(&domain_redirect);
-    let telemetry_http = Arc::clone(&telemetry);
-    tokio::spawn(async move {
-        loop {
-            let http_map = Arc::clone(&http_map);
-            let telemetry = Arc::clone(&telemetry_http);
-            let domain_redirect = Arc::clone(&redirect);
-            let (stream, address) = http_listener.accept().await.unwrap();
-            let service = service_fn(move |req: Request<Incoming>| {
-                proxy_handler(
-                    req,
-                    address,
-                    ProxyData {
-                        conn_manager: Arc::clone(&http_map),
-                        telemetry: Arc::clone(&telemetry),
-                        domain_redirect: Arc::clone(&domain_redirect),
-                        protocol: if config.force_https {
-                            Protocol::TlsRedirect {
-                                from: config.http_port,
-                                to: config.https_port,
-                            }
-                        } else {
-                            Protocol::Http {
-                                port: config.http_port,
-                            }
-                        },
-                        http_request_timeout: config.http_request_timeout,
-                        websocket_timeout: config.tcp_connection_timeout,
-                        disable_http_logs: config.disable_http_logs,
-                        _phantom_data: PhantomData,
-                    },
-                )
-            });
-            let io = TokioIo::new(stream);
-            tokio::spawn(async move {
-                let conn = http1::Builder::new()
-                    .serve_connection(io, service)
-                    .with_upgrades();
-                let _ = conn.await;
-            });
-        }
-    });
-
-    // HTTPS handlers (with optional SSH handling)
-    let https_listener = TcpListener::bind((listen_address, config.https_port))
-        .await
-        .with_context(|| "Error listening to HTTPS port")?;
-    info!(
-        "Listening for HTTPS connections on port {}",
-        config.https_port
-    );
-    let certificates_clone = Arc::clone(&certificates);
-    let tls_server_config = Arc::new(
-        ServerConfig::builder()
-            .with_no_client_auth()
-            .with_cert_resolver(certificates),
-    );
-    let http_map = Arc::clone(&http_connections);
-    let telemetry_http = Arc::clone(&telemetry);
+    // SSH server
     let ssh_config = Arc::new(Config {
         inactivity_timeout: Some(Duration::from_secs(3_600)),
         auth_rejection_time: Duration::from_secs(2),
@@ -392,7 +325,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         ..Default::default()
     });
     let mut sandhole = Arc::new(SandholeServer {
-        http: http_connections,
+        http: Arc::clone(&http_connections),
         ssh: ssh_connections,
         tcp: tcp_connections,
         http_data,
@@ -410,6 +343,77 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         force_random_ports: !config.allow_requested_ports,
         authentication_request_timeout: config.authentication_request_timeout,
         idle_connection_timeout: config.idle_connection_timeout,
+    });
+
+    // HTTP handler
+    let http_listener = TcpListener::bind((listen_address, config.http_port))
+        .await
+        .with_context(|| "Error listening to HTTP port")?;
+    info!(
+        "Listening for HTTP connections on port {}",
+        config.http_port
+    );
+    let http_proxy_data = Arc::new(ProxyData {
+        conn_manager: Arc::clone(&http_connections),
+        telemetry: Arc::clone(&telemetry),
+        domain_redirect: Arc::clone(&domain_redirect),
+        protocol: if config.force_https {
+            Protocol::TlsRedirect {
+                from: config.http_port,
+                to: config.https_port,
+            }
+        } else {
+            Protocol::Http {
+                port: config.http_port,
+            }
+        },
+        http_request_timeout: config.http_request_timeout,
+        websocket_timeout: config.tcp_connection_timeout,
+        disable_http_logs: config.disable_http_logs,
+        _phantom_data: PhantomData,
+    });
+    tokio::spawn(async move {
+        loop {
+            let proxy_data = Arc::clone(&http_proxy_data);
+            let (stream, address) = http_listener.accept().await.unwrap();
+            let service = service_fn(move |req: Request<Incoming>| {
+                proxy_handler(req, address, Arc::clone(&proxy_data))
+            });
+            let io = TokioIo::new(stream);
+            tokio::spawn(async move {
+                let conn = http1::Builder::new()
+                    .serve_connection(io, service)
+                    .with_upgrades();
+                let _ = conn.await;
+            });
+        }
+    });
+
+    // HTTPS handler (with optional SSH handling)
+    let https_listener = TcpListener::bind((listen_address, config.https_port))
+        .await
+        .with_context(|| "Error listening to HTTPS port")?;
+    info!(
+        "Listening for HTTPS connections on port {}",
+        config.https_port
+    );
+    let certificates_clone = Arc::clone(&certificates);
+    let tls_server_config = Arc::new(
+        ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(certificates),
+    );
+    let https_proxy_data = Arc::new(ProxyData {
+        conn_manager: http_connections,
+        telemetry: Arc::clone(&telemetry),
+        domain_redirect: Arc::clone(&domain_redirect),
+        protocol: Protocol::Https {
+            port: config.https_port,
+        },
+        http_request_timeout: config.http_request_timeout,
+        websocket_timeout: config.tcp_connection_timeout,
+        disable_http_logs: config.disable_http_logs,
+        _phantom_data: PhantomData,
     });
     let mut sandhole_clone = Arc::clone(&sandhole);
     let ssh_config_clone = Arc::clone(&ssh_config);
@@ -431,27 +435,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     }
                 }
             }
-            let http_map = Arc::clone(&http_map);
-            let telemetry = Arc::clone(&telemetry_http);
-            let domain_redirect = Arc::clone(&domain_redirect);
+            let proxy_data = Arc::clone(&https_proxy_data);
             let server_config = Arc::clone(&tls_server_config);
             let service = service_fn(move |req: Request<Incoming>| {
-                proxy_handler(
-                    req,
-                    address,
-                    ProxyData {
-                        conn_manager: Arc::clone(&http_map),
-                        telemetry: Arc::clone(&telemetry),
-                        domain_redirect: Arc::clone(&domain_redirect),
-                        protocol: Protocol::Https {
-                            port: config.https_port,
-                        },
-                        http_request_timeout: config.http_request_timeout,
-                        websocket_timeout: config.tcp_connection_timeout,
-                        disable_http_logs: config.disable_http_logs,
-                        _phantom_data: PhantomData,
-                    },
-                )
+                proxy_handler(req, address, Arc::clone(&proxy_data))
             });
             match LazyConfigAcceptor::new(Default::default(), stream).await {
                 Ok(handshake) => {
@@ -494,7 +481,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         }
     });
 
-    // Start Sandhole
+    // Start Sandhole on SSH port
     let ssh_listener = TcpListener::bind((listen_address, config.ssh_port))
         .await
         .with_context(|| "Error listening to SSH port")?;

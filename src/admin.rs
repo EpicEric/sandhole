@@ -93,10 +93,6 @@ struct AdminState {
     vertical_scroll: ScrollbarState,
 }
 
-fn remove_user_namespace(user: &str) -> &str {
-    &user[2..]
-}
-
 fn to_socket_addr_string(addr: SocketAddr) -> String {
     let ip = addr.ip().to_canonical();
     if ip.is_ipv4() {
@@ -162,10 +158,7 @@ impl AdminState {
                     Row::new(vec![
                         host,
                         req_per_min.to_string(),
-                        users
-                            .iter()
-                            .map(|user| remove_user_namespace(user))
-                            .join("\n"),
+                        users.iter().join("\n"),
                         peers.into_iter().map(to_socket_addr_string).join("\n"),
                     ])
                     .height(len)
@@ -194,10 +187,7 @@ impl AdminState {
                     let (peers, users): (Vec<_>, Vec<_>) = connections.into_iter().unzip();
                     Row::new(vec![
                         host,
-                        users
-                            .iter()
-                            .map(|user| remove_user_namespace(user))
-                            .join("\n"),
+                        users.iter().join("\n"),
                         peers.into_iter().map(to_socket_addr_string).join("\n"),
                     ])
                     .height(len)
@@ -228,10 +218,7 @@ impl AdminState {
                         Row::new(vec![
                             alias,
                             port.to_string(),
-                            users
-                                .iter()
-                                .map(|user| remove_user_namespace(user))
-                                .join("\n"),
+                            users.iter().join("\n"),
                             peers.into_iter().map(to_socket_addr_string).join("\n"),
                         ])
                         .height(len)

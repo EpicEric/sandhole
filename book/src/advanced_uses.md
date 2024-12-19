@@ -1,5 +1,15 @@
 # Advanced uses
 
+## Connecting to the HTTPS port
+
+In some networks, outbound connections to 22 (or 2222) may be blocked by the operator. In Sandhole, it's possible to get around this with the `--connect-ssh-on-https-port` option.
+
+Once your administrator has configured it, you can then expose your services with:
+
+```bash
+ssh -R test:80:localhost:3000 server.com -p 443
+```
+
 ## Local forwarding and aliasing
 
 In addition to remote port forwarding, Sandhole also supports local port forwarding. This allows you to create SSH-based tunnels to connect to a service.
