@@ -6,6 +6,7 @@
 
 - **BREAKING**: Add `remote_address` field to API login request.
 - Add user forwarding quotas via the `--quota-per-user` option.
+- Add `--connect-ssh-on-https-port` option.
 - Add user IDs to admin interface.
 
 ### Fixed

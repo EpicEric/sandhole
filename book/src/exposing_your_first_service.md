@@ -41,3 +41,13 @@ ssh -R localhost:4321:localhost:3000 server.com -p 2222
 ## Automatic reconnection
 
 If you'd like to have persistent tunnels, use a tool like `autossh` with the `-M 0` option to automatically reconnect when disconnected. Note that you'll be assigned a new subdomain/port if the option above is not enabled, depending on the server configuration.
+
+## Connecting to the HTTPS port
+
+In some networks, outbound connections to 22 (or 2222) may be blocked by the operator. In Sandhole, it's possible to get around this with the `--connect-ssh-on-https-port` option.
+
+Once your administrator has configured it, you can then expose your services with:
+
+```bash
+ssh -R test:80:localhost:3000 server.com -p 443
+```

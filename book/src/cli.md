@@ -76,6 +76,10 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           [default: 443]
 
+      <b>--connect-ssh-on-https-port</b>
+          Allow connecting to SSH via the HTTPS port as well. This can be useful
+          in networks that block binding to other ports
+
       <b>--force-https</b>
           Always redirect HTTP requests to HTTPS
 

@@ -43,6 +43,7 @@ async fn lib_configure_from_scratch() {
         ssh_port: 18022,
         http_port: 18080,
         https_port: 18443,
+        connect_ssh_on_https_port: false,
         force_https: false,
         disable_http_logs: false,
         disable_tcp_logs: false,

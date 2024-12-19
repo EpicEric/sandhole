@@ -41,6 +41,7 @@ pub struct ApplicationConfig {
     pub ssh_port: u16,
     pub http_port: u16,
     pub https_port: u16,
+    pub connect_ssh_on_https_port: bool,
     pub force_https: bool,
     pub disable_http_logs: bool,
     pub disable_tcp_logs: bool,

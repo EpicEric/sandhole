@@ -27,7 +27,13 @@ use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
 use tcp::TcpHandler;
 use tcp_alias::TcpAlias;
 use telemetry::Telemetry;
-use tokio::{fs, io::AsyncWriteExt, net::TcpListener, sync::oneshot, time::sleep};
+use tokio::{
+    fs,
+    io::AsyncWriteExt,
+    net::{TcpListener, TcpStream},
+    sync::oneshot,
+    time::sleep,
+};
 use tokio_rustls::LazyConfigAcceptor;
 
 use crate::{
@@ -362,7 +368,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         }
     });
 
-    // HTTPS handlers
+    // HTTPS handlers (with optional SSH handling)
     let https_listener = TcpListener::bind((listen_address, config.https_port))
         .await
         .with_context(|| "Error listening to HTTPS port")?;
@@ -378,13 +384,57 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     );
     let http_map = Arc::clone(&http_connections);
     let telemetry_http = Arc::clone(&telemetry);
+    let ssh_config = Arc::new(Config {
+        inactivity_timeout: Some(Duration::from_secs(3_600)),
+        auth_rejection_time: Duration::from_secs(2),
+        auth_rejection_time_initial: Some(Duration::from_secs(0)),
+        keys: vec![key],
+        ..Default::default()
+    });
+    let mut sandhole = Arc::new(SandholeServer {
+        http: http_connections,
+        ssh: ssh_connections,
+        tcp: tcp_connections,
+        http_data,
+        ssh_data,
+        tcp_data,
+        system_data,
+        fingerprints_validator: fingerprints,
+        api_login,
+        address_delegator: addressing,
+        tcp_handler,
+        domain: config.domain,
+        http_port: config.http_port,
+        https_port: config.https_port,
+        ssh_port: config.ssh_port,
+        force_random_ports: !config.allow_requested_ports,
+        authentication_request_timeout: config.authentication_request_timeout,
+        idle_connection_timeout: config.idle_connection_timeout,
+    });
+    let mut sandhole_clone = Arc::clone(&sandhole);
+    let ssh_config_clone = Arc::clone(&ssh_config);
     tokio::spawn(async move {
         loop {
+            let (stream, address) = https_listener.accept().await.unwrap();
+            if config.connect_ssh_on_https_port {
+                let mut buf = [0u8; 8];
+                if let Ok(n) = stream.peek(&mut buf).await {
+                    if buf[..n].starts_with(b"SSH-2.0-") {
+                        handle_ssh_connection(
+                            stream,
+                            address,
+                            &ssh_config_clone,
+                            &mut sandhole_clone,
+                        )
+                        .await;
+                        continue;
+                    }
+                }
+            }
             let http_map = Arc::clone(&http_map);
             let telemetry = Arc::clone(&telemetry_http);
             let domain_redirect = Arc::clone(&domain_redirect);
             let server_config = Arc::clone(&tls_server_config);
-            let (stream, address) = https_listener.accept().await.unwrap();
             let service = service_fn(move |req: Request<Incoming>| {
                 proxy_handler(
                     req,
@@ -445,33 +495,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     });
 
     // Start Sandhole
-    let ssh_config = Arc::new(Config {
-        inactivity_timeout: Some(Duration::from_secs(3_600)),
-        auth_rejection_time: Duration::from_secs(2),
-        auth_rejection_time_initial: Some(Duration::from_secs(0)),
-        keys: vec![key],
-        ..Default::default()
-    });
-    let mut sandhole = Arc::new(SandholeServer {
-        http: http_connections,
-        ssh: ssh_connections,
-        tcp: tcp_connections,
-        http_data,
-        ssh_data,
-        tcp_data,
-        system_data,
-        fingerprints_validator: fingerprints,
-        api_login,
-        address_delegator: addressing,
-        tcp_handler,
-        domain: config.domain,
-        http_port: config.http_port,
-        https_port: config.https_port,
-        ssh_port: config.ssh_port,
-        force_random_ports: !config.allow_requested_ports,
-        authentication_request_timeout: config.authentication_request_timeout,
-        idle_connection_timeout: config.idle_connection_timeout,
-    });
     let ssh_listener = TcpListener::bind((listen_address, config.ssh_port))
         .await
         .with_context(|| "Error listening to SSH port")?;
@@ -482,29 +505,37 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             Ok((stream, address)) => (stream, address),
             Err(_) => break,
         };
-        debug_assert_eq!(stream.peer_addr().ok(), Some(address));
-        let config = Arc::clone(&ssh_config);
-        let (tx, mut rx) = oneshot::channel::<()>();
-        let handler = sandhole.new_client(Some(address), tx);
-        tokio::spawn(async move {
-            let mut session = match russh::server::run_stream(config, stream, handler).await {
-                Ok(session) => session,
-                Err(err) => {
-                    warn!("Connection setup failed: {}", err);
-                    return;
-                }
-            };
-            tokio::select! {
-                result = &mut session => {
-                    if let Err(err) = result {
-                        warn!("Connection with {} closed with error: {}", address, err);
-                    }
-                }
-                Ok(_) = &mut rx => {
-                    let _ = session.handle().disconnect(russh::Disconnect::ByApplication, "".into(), "English".into()).await;
-                },
-            }
-        });
+        handle_ssh_connection(stream, address, &ssh_config, &mut sandhole).await;
     }
     Ok(())
+}
+
+async fn handle_ssh_connection(
+    stream: TcpStream,
+    address: SocketAddr,
+    config: &Arc<Config>,
+    server: &mut Arc<SandholeServer>,
+) {
+    let config = Arc::clone(&config);
+    let (tx, mut rx) = oneshot::channel::<()>();
+    let handler = server.new_client(Some(address), tx);
+    tokio::spawn(async move {
+        let mut session = match russh::server::run_stream(config, stream, handler).await {
+            Ok(session) => session,
+            Err(err) => {
+                warn!("Connection setup failed: {}", err);
+                return;
+            }
+        };
+        tokio::select! {
+            result = &mut session => {
+                if let Err(err) = result {
+                    warn!("Connection with {} closed with error: {}", address, err);
+                }
+            }
+            Ok(_) = &mut rx => {
+                let _ = session.handle().disconnect(russh::Disconnect::ByApplication, "".into(), "English".into()).await;
+            },
+        }
+    });
 }

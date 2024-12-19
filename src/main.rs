@@ -78,11 +78,18 @@ impl From<LoadBalancing> for LBConfig {
 #[command(version, about, long_about = None)]
 struct Args {
     /// The root domain of the application.
-    #[arg(long, value_parser = validate_domain)]
+    #[arg(
+        long,
+        value_parser = validate_domain
+    )]
     domain: String,
 
     /// Where to redirect requests to the root domain.
-    #[arg(long, default_value_t = String::from(env!("CARGO_PKG_REPOSITORY")), value_name = "URL")]
+    #[arg(
+        long,
+        default_value_t = String::from(env!("CARGO_PKG_REPOSITORY")),
+        value_name = "URL"
+    )]
     domain_redirect: String,
 
     /// Directory containing public keys of authorized users.
@@ -138,20 +145,44 @@ struct Args {
     disable_directory_creation: bool,
 
     /// Address to listen for all client connections.
-    #[arg(long, default_value_t = String::from("::"), value_name = "ADDRESS")]
+    #[arg(
+        long,
+        default_value_t = String::from("::"),
+        value_name = "ADDRESS"
+    )]
     listen_address: String,
 
     /// Port to listen for SSH connections.
-    #[arg(long, default_value_t = 2222, value_parser = validate_port, value_name = "PORT")]
+    #[arg(
+        long,
+        default_value_t = 2222,
+        value_parser = validate_port,
+        value_name = "PORT"
+    )]
     ssh_port: u16,
 
     /// Port to listen for HTTP connections.
-    #[arg(long, default_value_t = 80, value_parser = validate_port, value_name = "PORT")]
+    #[arg(
+        long,
+        default_value_t = 80,
+        value_parser = validate_port,
+        value_name = "PORT"
+    )]
     http_port: u16,
 
     /// Port to listen for HTTPS connections.
-    #[arg(long, default_value_t = 443, value_parser = validate_port, value_name = "PORT")]
+    #[arg(
+        long,
+        default_value_t = 443,
+        value_parser = validate_port,
+        value_name = "PORT"
+    )]
     https_port: u16,
+
+    /// Allow connecting to SSH via the HTTPS port as well.
+    /// This can be useful in networks that block binding to other ports.
+    #[arg(long, default_value_t = false)]
+    connect_ssh_on_https_port: bool,
 
     /// Always redirect HTTP requests to HTTPS.
     #[arg(long, default_value_t = false)]
@@ -188,13 +219,23 @@ struct Args {
     /// Policy on whether to allow binding specific hostnames.
     ///
     /// Beware that this can lead to domain takeovers if misused!
-    #[arg(long, value_enum, default_value_t = BindHostnames::Txt, value_name = "POLICY")]
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = BindHostnames::Txt,
+        value_name = "POLICY"
+    )]
     bind_hostnames: BindHostnames,
 
     /// Strategy for load-balancing when multiple services request the same hostname/port.
     ///
     /// By default, traffic towards matching hostnames/ports will be load-balanced.
-    #[arg(long, value_enum, default_value_t = LoadBalancing::Allow, value_name = "STRATEGY")]
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = LoadBalancing::Allow,
+        value_name = "STRATEGY"
+    )]
     load_balancing: LoadBalancing,
 
     /// Prefix for TXT DNS records containing key fingerprints, for authorization to bind under a specific domain.
@@ -202,7 +243,12 @@ struct Args {
     /// In other words, valid records will be of the form:
     ///
     /// TXT prefix.custom-domain SHA256:...
-    #[arg(long, default_value_t = String::from("_sandhole"), value_parser = validate_txt_record_prefix, value_name = "PREFIX")]
+    #[arg(
+        long,
+        default_value_t = String::from("_sandhole"),
+        value_parser = validate_txt_record_prefix,
+        value_name = "PREFIX"
+    )]
     txt_record_prefix: String,
 
     /// Allow user-requested subdomains. By default, subdomains are always random.
@@ -269,6 +315,7 @@ async fn main() -> anyhow::Result<()> {
         ssh_port: args.ssh_port,
         http_port: args.http_port,
         https_port: args.https_port,
+        connect_ssh_on_https_port: args.connect_ssh_on_https_port,
         force_https: args.force_https,
         disable_http_logs: args.disable_http_logs,
         disable_tcp_logs: args.disable_tcp_logs,

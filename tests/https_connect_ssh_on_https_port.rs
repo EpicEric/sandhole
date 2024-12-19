@@ -26,7 +26,7 @@ use tokio_rustls::TlsConnector;
 use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn https_bind_all_hostnames() {
+async fn https_connect_ssh_on_https_port() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),
@@ -42,7 +42,7 @@ async fn https_bind_all_hostnames() {
         ssh_port: 18022,
         http_port: 18080,
         https_port: 18443,
-        connect_ssh_on_https_port: false,
+        connect_ssh_on_https_port: true,
         force_https: false,
         disable_http_logs: false,
         disable_tcp_logs: false,
@@ -73,14 +73,14 @@ async fn https_bind_all_hostnames() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied
+    // 2. Start SSH client that will connect via the HTTPS port
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18443", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(
@@ -94,7 +94,7 @@ async fn https_bind_all_hostnames() {
         "authentication didn't succeed"
     );
     session
-        .tcpip_forward("foobar.tld", 80)
+        .tcpip_forward("hostname.foobar.tld", 80)
         .await
         .expect("tcpip_forward failed");
 
@@ -118,7 +118,7 @@ async fn https_bind_all_hostnames() {
         .await
         .expect("TCP connection failed");
     let tls_stream = connector
-        .connect("foobar.tld".try_into().unwrap(), tcp_stream)
+        .connect("hostname.foobar.tld".try_into().unwrap(), tcp_stream)
         .await
         .unwrap();
     let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls_stream))
@@ -132,7 +132,7 @@ async fn https_bind_all_hostnames() {
     let request = Request::builder()
         .method("GET")
         .uri("/")
-        .header("host", "foobar.tld")
+        .header("host", "hostname.foobar.tld")
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();
     let Ok(response) = timeout(Duration::from_secs(5), async move {
@@ -156,7 +156,7 @@ async fn https_bind_all_hostnames() {
             .into(),
     )
     .expect("Invalid response body");
-    assert_eq!(response_body, "Hello from test.foobar.tld!");
+    assert_eq!(response_body, "We managed to beat port-blocking!");
 }
 
 struct SshClient;
@@ -181,7 +181,7 @@ impl russh::client::Handler for SshClient {
         let router = Router::new()
             .route(
                 "/",
-                get(|| async move { format!("Hello from test.foobar.tld!") }),
+                get(|| async move { format!("We managed to beat port-blocking!") }),
             )
             .into_service();
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
