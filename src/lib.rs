@@ -516,7 +516,7 @@ async fn handle_ssh_connection(
     config: &Arc<Config>,
     server: &mut Arc<SandholeServer>,
 ) {
-    let config = Arc::clone(&config);
+    let config = Arc::clone(config);
     let (tx, mut rx) = oneshot::channel::<()>();
     let handler = server.new_client(Some(address), tx);
     tokio::spawn(async move {
