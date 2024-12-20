@@ -106,7 +106,8 @@ impl AdminState {
     // Render the admin interface
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         if self.is_pty {
-            let title = Line::from(" Sandhole admin ".bold());
+            let title =
+                Line::from(concat!(" Sandhole admin v", env!("CARGO_PKG_VERSION"), " ").bold());
             let instructions = Line::from(vec![
                 " Change tab".into(),
                 " <Tab> ".blue().bold(),

@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use regex::Regex;
 use russh::{
     client::{self, Msg, Session},
     Channel,
@@ -122,7 +123,7 @@ async fn admin_interface() {
         .await
         .expect("channel_open_session failed");
     channel
-        .request_pty(false, "xterm", 40, 30, 640, 480, &[])
+        .request_pty(false, "xterm", 140, 30, 640, 480, &[])
         .await
         .expect("request_pty failed");
     channel
@@ -134,7 +135,7 @@ async fn admin_interface() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut writer = channel.make_writer();
     let jh = tokio::spawn(async move {
-        let mut parser = vt100_ctt::Parser::new(30, 40, 0);
+        let mut parser = vt100_ctt::Parser::new(30, 140, 0);
         let mut screen = Vec::new();
         while let Some(msg) = channel.wait().await {
             match msg {
@@ -153,19 +154,24 @@ async fn admin_interface() {
     });
     if timeout(Duration::from_secs(3), async move {
         // 4a. Validate header, system information, and HTTP tab data
-        let search_strings = vec![
-            "Sandhole admin",
-            "System information",
-            "  CPU%  ",
-            " Memory ",
-            "   TX   ",
-            "   RX   ",
-            "HTTP services",
-            "http.aaa",
-        ];
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"System information",
+            r"  CPU%  ",
+            r" Memory ",
+            r"   TX   ",
+            r"   RX   ",
+            r"HTTP services",
+            r"http\.aaa",
+            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"127.0.0.1:\d{4,5}",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).unwrap())
+        .collect();
         loop {
             let screen = rx.recv().await.unwrap();
-            if search_strings.iter().all(|needle| screen.contains(needle)) {
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
                 break;
             }
         }
@@ -174,19 +180,24 @@ async fn admin_interface() {
             .write(&b"\t"[..])
             .await
             .expect("channel write failed");
-        let search_strings = vec![
-            "Sandhole admin",
-            "System information",
-            "  CPU%  ",
-            " Memory ",
-            "   TX   ",
-            "   RX   ",
-            "SSH services",
-            "ssh.bbb",
-        ];
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"System information",
+            r"  CPU%  ",
+            r" Memory ",
+            r"   TX   ",
+            r"   RX   ",
+            r"SSH services",
+            r"ssh\.bbb",
+            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"127.0.0.1:\d{4,5}",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).unwrap())
+        .collect();
         loop {
             let screen = rx.recv().await.unwrap();
-            if search_strings.iter().all(|needle| screen.contains(needle)) {
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
                 break;
             }
         }
@@ -195,66 +206,54 @@ async fn admin_interface() {
             .write(&b"\t"[..])
             .await
             .expect("channel write failed");
-        let search_strings = vec![
-            "Sandhole admin",
-            "System information",
-            "  CPU%  ",
-            " Memory ",
-            "   TX   ",
-            "   RX   ",
-            "TCP services",
-            "proxy.ccc",
-        ];
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"System information",
+            r"  CPU%  ",
+            r" Memory ",
+            r"   TX   ",
+            r"   RX   ",
+            r"TCP services",
+            r"proxy\.ccc",
+            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"127.0.0.1:\d{4,5}",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).unwrap())
+        .collect();
         loop {
             let screen = rx.recv().await.unwrap();
-            if search_strings.iter().all(|needle| screen.contains(needle)) {
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
                 break;
             }
         }
-        // 4d. Select line with TCP alias in table by pressing Down
-        writer
-            .write(&b"\x1b[B"[..])
-            .await
-            .expect("channel write failed");
-        let search_strings = vec![
-            "Sandhole admin",
-            "System information",
-            "  CPU%  ",
-            " Memory ",
-            "   TX   ",
-            "   RX   ",
-            "TCP services",
-            "proxy.ccc",
-        ];
-        loop {
-            let screen = rx.recv().await.unwrap();
-            if search_strings.iter().all(|needle| screen.contains(needle)) {
-                break;
-            }
-        }
-        // 4e. Go back one tab
+        // 4d. Go back one tab
         writer
             .write(&b"\x1b[Z"[..])
             .await
             .expect("channel write failed");
-        let mut search_strings = vec![
-            "Sandhole admin",
-            "System information",
-            "  CPU%  ",
-            " Memory ",
-            "   TX   ",
-            "   RX   ",
-            "SSH services",
-            "ssh.bbb",
-        ];
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"System information",
+            r"  CPU%  ",
+            r" Memory ",
+            r"   TX   ",
+            r"   RX   ",
+            r"SSH services",
+            r"ssh\.bbb",
+            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"127.0.0.1:\d{4,5}",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).unwrap())
+        .collect();
         loop {
             let screen = rx.recv().await.unwrap();
-            search_strings.retain(|needle| !screen.contains(needle));
-            if search_strings.is_empty() {
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
                 break;
             }
         }
-        // 4f. Quit the admin interface with Ctrl-C (ETX)
+        // 4e. Quit the admin interface with Ctrl-C (ETX)
         writer
             .write(&b"\x03"[..])
             .await
