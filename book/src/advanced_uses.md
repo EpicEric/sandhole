@@ -1,6 +1,6 @@
 # Advanced uses
 
-## Connecting to the HTTPS port
+## Connecting via SSH to the HTTPS port
 
 In some networks, outbound connections to 22 (or 2222) may be blocked by the operator. In Sandhole, it's possible to get around this with the `--connect-ssh-on-https-port` option.
 

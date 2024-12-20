@@ -23,8 +23,9 @@ Expose HTTP/SSH/TCP services through SSH port forwarding. A self-hosted [ngrok](
 
 Sandhole is in active development. Contributions are welcome, but try it in production at your own risk.
 
-## Alternatives
+## Some alternatives
 
-- [sish](https://github.com/antoniomika/sish/) - My favorite one. Written in Golang.
-- [rlt](https://github.com/kaichaosun/rlt) - Uses own protocol instead of SSH. Written in Rust.
+- [sish](https://github.com/antoniomika/sish/) - Main inspiration for this project. Written in Golang.
+- [rlt](https://github.com/kaichaosun/rlt) - Uses localtunnel's protocol instead of SSH. Written in Rust.
+- [rathole](https://github.com/rapiz1/rathole) - A highly configurable reverse proxy with NAT traversal and a great name. Written in Rust.
 - [sshuttle](https://github.com/sshuttle/sshuttle) - A smarter proxy service, also based on SSH. Written in Python.
