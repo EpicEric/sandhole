@@ -4,9 +4,11 @@
 [![crates.io version](https://img.shields.io/crates/v/sandhole)](https://crates.io/crates/sandhole)
 [![GitHub license](https://img.shields.io/github/license/EpicEric/sandhole)](https://github.com/EpicEric/sandhole/blob/main/LICENSE)
 
-Expose HTTP/SSH/TCP services through SSH port forwarding. A self-hosted [ngrok](https://ngrok.com/)/[Cloudflare Tunnels](https://www.cloudflare.com/products/tunnel/)/[localhost.run](https://localhost.run/)/etc. alternative.
+![The Sandhole logo, with Ferris partially inside a sandhole and the name "Sandhole" written in cursive beside them.](https://sandhole.eric.dev.br/logo.png)
 
-[Check out the Sandhole book.](https://sandhole.eric.dev.br)
+Expose HTTP/SSH/TCP services through SSH port forwarding. A self-hosted ngrok / Cloudflare Tunnels / localhost.run alternative.
+
+[Check out the Sandhole book](https://sandhole.eric.dev.br) for a full guide.
 
 ## Features
 

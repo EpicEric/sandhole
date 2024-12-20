@@ -1,10 +1,12 @@
 # Introduction
 
+![The Sandhole logo, with Ferris partially inside a sandhole and the name "Sandhole" written in cursive beside them.](./logo.png)
+
 Welcome to the **Sandhole book**. This is a guide on how to install, configure, and use an instance of Sandhole.
 
 ## About the project
 
-[Sandhole](https://github.com/EpicEric/sandhole) is an unconventional reverse proxy that uses SSH's built-in reverse port forwarding functionality, in order to allow services to expose themselves to the Internet. This is especially useful for services behind NAT, but you may also want this for:
+[Sandhole](https://github.com/EpicEric/sandhole) is an unconventional reverse proxy which uses the built-in reverse port forwarding from OpenSSH, allowing services to expose themselves to the Internet with minimal configuration. This is especially useful for services behind NAT, but you may also want this for:
 
 - Quickly prototyping websites, APIs, and TCP services, and sharing them with others.
 - Exposing endpoints or ports on IoT devices, game servers, and other applications.
