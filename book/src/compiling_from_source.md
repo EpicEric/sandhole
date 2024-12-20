@@ -32,9 +32,9 @@ By default, this will expose ports 80 (for HTTP), 443 (for HTTPS), and 2222 (for
 
 ```log
 [2024-11-23T13:10:51Z INFO  sandhole] Key file not found. Creating...
-[2024-11-23T13:10:51Z INFO  sandhole] Listening for HTTP connections on port 80
-[2024-11-23T13:10:51Z INFO  sandhole] Listening for HTTPS connections on port 443
-[2024-11-23T13:10:51Z INFO  sandhole] Listening for SSH connections on port 2222
+[2024-11-23T13:10:51Z INFO  sandhole] Listening for HTTP connections on port 80.
+[2024-11-23T13:10:51Z INFO  sandhole] Listening for HTTPS connections on port 443.
+[2024-11-23T13:10:51Z INFO  sandhole] Listening for SSH connections on port 2222.
 [2024-11-23T13:10:51Z INFO  sandhole] sandhole is now running.
 ```
 

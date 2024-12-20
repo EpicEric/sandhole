@@ -20,7 +20,7 @@
 - **BREAKING**: Rename `--allow-provided-subdomains` to `--allow-requested-subdomains`.
 - Change `--random-subdomain-seed=fingerprint` to also take user into account.
 - Modify exports to live within `lib.rs`.
-- Update `russh` dependency to version `0.50.0-beta.1`.
+- Update `russh` dependency to version `0.49.2`.
 - Update `sysinfo` dependency to version `0.33.0`.
 
 ## 0.1.4 (2024-12-03)

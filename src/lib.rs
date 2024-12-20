@@ -350,7 +350,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .await
         .with_context(|| "Error listening to HTTP port")?;
     info!(
-        "Listening for HTTP connections on port {}",
+        "Listening for HTTP connections on port {}.",
         config.http_port
     );
     let http_proxy_data = Arc::new(ProxyData {
@@ -394,7 +394,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .await
         .with_context(|| "Error listening to HTTPS port")?;
     info!(
-        "Listening for HTTPS connections on port {}",
+        "Listening for HTTPS connections on port {}.",
         config.https_port
     );
     let certificates_clone = Arc::clone(&certificates);
@@ -485,7 +485,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let ssh_listener = TcpListener::bind((listen_address, config.ssh_port))
         .await
         .with_context(|| "Error listening to SSH port")?;
-    info!("Listening for SSH connections on port {}", config.ssh_port);
+    info!("Listening for SSH connections on port {}.", config.ssh_port);
     info!("sandhole is now running.");
     loop {
         let (stream, address) = match ssh_listener.accept().await {

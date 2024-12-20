@@ -196,9 +196,7 @@ mod connection_map_tests {
 
     use crate::{
         config::LoadBalancing,
-        quota::{
-            DummyQuotaHandler, MockQuotaHandler, QuotaHandler, TokenHolder, UserIdentification,
-        },
+        quota::{get_test_token, MockQuotaHandler, TokenHolder, UserIdentification},
     };
 
     use super::{ConnectionMap, MockConnectionMapReactor};
@@ -208,9 +206,10 @@ mod connection_map_tests {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(2).returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota.expect_get_token().once().returning(|_| {
-            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
-        });
+        mock_quota
+            .expect_get_token()
+            .once()
+            .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -240,9 +239,10 @@ mod connection_map_tests {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(3).returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota.expect_get_token().times(2).returning(|_| {
-            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
-        });
+        mock_quota
+            .expect_get_token()
+            .times(2)
+            .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -283,9 +283,10 @@ mod connection_map_tests {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(4).returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota.expect_get_token().times(4).returning(|_| {
-            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
-        });
+        mock_quota
+            .expect_get_token()
+            .times(4)
+            .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -337,9 +338,10 @@ mod connection_map_tests {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(2).returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota.expect_get_token().times(2).returning(|_| {
-            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
-        });
+        mock_quota
+            .expect_get_token()
+            .times(2)
+            .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -371,9 +373,10 @@ mod connection_map_tests {
             .with(eq(vec![String::from("host")]))
             .returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota.expect_get_token().times(3).returning(|_| {
-            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
-        });
+        mock_quota
+            .expect_get_token()
+            .times(3)
+            .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Allow,
             Arc::new(Box::new(mock_quota)),
@@ -451,9 +454,10 @@ mod connection_map_tests {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(1).returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota.expect_get_token().times(2).returning(|_| {
-            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
-        });
+        mock_quota
+            .expect_get_token()
+            .times(2)
+            .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Replace,
             Arc::new(Box::new(mock_quota)),
@@ -488,9 +492,10 @@ mod connection_map_tests {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(1).returning(|_| {});
         let mut mock_quota = MockQuotaHandler::new();
-        mock_quota.expect_get_token().once().returning(|_| {
-            DummyQuotaHandler.get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
-        });
+        mock_quota
+            .expect_get_token()
+            .once()
+            .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::new(
             LoadBalancing::Deny,
             Arc::new(Box::new(mock_quota)),
@@ -543,8 +548,7 @@ mod connection_map_tests {
                 );
                 if quota_count < 2 {
                     quota_count += 1;
-                    DummyQuotaHandler
-                        .get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
+                    Some(get_test_token())
                 } else {
                     None
                 }
@@ -620,8 +624,7 @@ mod connection_map_tests {
                 );
                 if quota_count < 1 {
                     quota_count += 1;
-                    DummyQuotaHandler
-                        .get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
+                    Some(get_test_token())
                 } else {
                     None
                 }
@@ -678,8 +681,7 @@ mod connection_map_tests {
                     quota_count += 1;
                     None
                 } else {
-                    DummyQuotaHandler
-                        .get_token(TokenHolder::Admin(UserIdentification::Username("".into())))
+                    Some(get_test_token())
                 }
             });
         let map = ConnectionMap::<String, usize, _>::new(

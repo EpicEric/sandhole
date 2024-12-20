@@ -1010,6 +1010,76 @@ mod address_delegator_tests {
     }
 
     #[tokio::test]
+    async fn returns_unique_random_subdomains_per_ip_and_user_if_forced() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::new(
+            mock,
+            "_some_prefix".into(),
+            "root.tld".into(),
+            BindHostnames::None,
+            true,
+            Some(crate::config::RandomSubdomainSeed::IpAndUser),
+        );
+        let address1_u1_i1 = delegator
+            .get_address(
+                "a1",
+                &Some("user1".into()),
+                &None,
+                &"192.168.0.1:12301".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address2_u1_i1 = delegator
+            .get_address(
+                "a1",
+                &Some("user1".into()),
+                &None,
+                &"192.168.0.1:12302".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address3_u2_i1 = delegator
+            .get_address(
+                "a1",
+                &Some("user2".into()),
+                &None,
+                &"192.168.0.1:12303".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        let address4_u1_i2 = delegator
+            .get_address(
+                "a1",
+                &Some("user1".into()),
+                &None,
+                &"192.168.0.2:12304".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert_eq!(address1_u1_i1, address2_u1_i1);
+        assert_ne!(address1_u1_i1, address3_u2_i1);
+        assert_ne!(address1_u1_i1, address4_u1_i2);
+        assert_ne!(address3_u2_i1, address4_u1_i2);
+        assert!(
+            DnsName::try_from(address1_u1_i1.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address1_u1_i1
+        );
+        assert!(
+            DnsName::try_from(address2_u1_i1.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address2_u1_i1
+        );
+        assert!(
+            DnsName::try_from(address3_u2_i1.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address3_u2_i1
+        );
+        assert!(
+            DnsName::try_from(address4_u1_i2.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address4_u1_i2
+        );
+    }
+
+    #[tokio::test]
     async fn returns_unique_random_subdomains_per_socket_and_address_if_forced() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();

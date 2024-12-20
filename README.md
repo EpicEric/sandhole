@@ -4,17 +4,18 @@
 [![crates.io version](https://img.shields.io/crates/v/sandhole)](https://crates.io/crates/sandhole)
 [![GitHub license](https://img.shields.io/github/license/EpicEric/sandhole)](https://github.com/EpicEric/sandhole/blob/main/LICENSE)
 
-Expose HTTP/SSH/TCP services through SSH port forwarding.
+Expose HTTP/SSH/TCP services through SSH port forwarding. A self-hosted [ngrok](https://ngrok.com/)/[Cloudflare Tunnels](https://www.cloudflare.com/products/tunnel/)/[localhost.run](https://localhost.run/)/etc. alternative.
 
 [Check out the Sandhole book.](https://sandhole.eric.dev.br)
 
 ## Features
 
-- Reverse proxy that only requires your services to have an OpenSSH client.
+- Reverse proxy that just works with an OpenSSH client. No extra software required!
 - Automatic HTTPS support (with [dnsrobocert](https://github.com/adferrand/dnsrobocert) and/or ACME).
 - Easily load-balance by pointing multiple services to the same domain/port.
 - Bring your own custom domains and authorize them via DNS records.
 - Random subdomain assignment by default, with options for deterministic assignment.
+- Option to connect with SSH via the HTTPS port, if your network blocks outbound connections to SSH ports.
 - A terminal-based admin interface to view current connections.
 - Written in Rust, with comprehensive testing of most features.
 

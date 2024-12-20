@@ -34,7 +34,7 @@ If you'd like to restrict which users can access your service, you can provide t
 ssh -R my.tunnel:3000:localhost:2000 server.com -p 2222 allowed-fingerprints=SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ,SHA256:bwf4FDtNeZzFv8xHBzHJwRpDRxssCll8w2tCHFC9n1o
 ```
 
-This only works for TCP aliases, and will be ignored for HTTP.
+This only works for SSH and TCP aliases, and will be ignored for HTTP.
 
 ## Custom domains
 
@@ -57,6 +57,12 @@ This instructs your DNS to redirect requests to Sandhole, and tells Sandhole to 
 
 If you need to use multiple keys for the same domain, simply add a TXT record for each one.
 
+Then, expose your service at the given domain:
+
+```bash
+ssh -R my.domain.net:80:localhost:3000 server.com -p 2222
+```
+
 ### HTTPS support
 
 If your administrator has configured [ACME support](./tls_support.md#acme-support), you don't need any extra steps. HTTPS will be automatically available for you.
@@ -67,4 +73,4 @@ However, if you require DNS challenges for your domain's certification for any r
 | ----- | ----------------------------------------- | ---------------------------------------------------- |
 | CNAME | <pre>\_acme-challenge.my.domain.net</pre> | <pre>\_acme-challenge.my.domain.net.server.com</pre> |
 
-This lets dnsrobocert manage the ACME challenge for you.
+This lets dnsrobocert manage the ACME challenge for you, as long as the admin updates the configuration.

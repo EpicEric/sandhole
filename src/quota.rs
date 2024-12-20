@@ -41,6 +41,23 @@ impl TokenHolder {
     }
 }
 
+pub(crate) struct QuotaToken {
+    callback: Option<Box<dyn FnOnce() + Send + Sync>>,
+}
+
+impl Drop for QuotaToken {
+    fn drop(&mut self) {
+        if let Some(callback) = self.callback.take() {
+            (callback)()
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn get_test_token() -> QuotaToken {
+    QuotaToken { callback: None }
+}
+
 #[cfg_attr(test, automock)]
 // A trait for handlers that generate a token, indicating that some of the holder's quota is in use.
 // To get a new token once the maximum quota is reached, old tokens must be dropped
@@ -93,18 +110,6 @@ impl QuotaHandler for Arc<QuotaMap> {
                 })
             }
             TokenHolder::Admin(_) => Some(QuotaToken { callback: None }),
-        }
-    }
-}
-
-pub(crate) struct QuotaToken {
-    callback: Option<Box<dyn FnOnce() + Send + Sync>>,
-}
-
-impl Drop for QuotaToken {
-    fn drop(&mut self) {
-        if let Some(callback) = self.callback.take() {
-            (callback)()
         }
     }
 }
