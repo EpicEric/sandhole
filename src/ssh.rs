@@ -380,10 +380,8 @@ impl Handler for ServerHandler {
                         b"\x1b[A" | b"k" => admin_interface.move_up(),
                         // Down
                         b"\x1b[B" | b"j" => admin_interface.move_down(),
-                        // Left
-                        b"\x1b[D" | b"h" => admin_interface.move_left(),
-                        // Right
-                        b"\x1b[C" | b"l" => admin_interface.move_right(),
+                        // Esc
+                        b"\x1b" => admin_interface.cancel(),
                         _ => (),
                     }
                 }

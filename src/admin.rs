@@ -166,7 +166,7 @@ impl AdminState {
                 });
                 let constraints = [
                     Constraint::Min(25),
-                    Constraint::Min(7),
+                    Constraint::Length(7),
                     Constraint::Length(50),
                     Constraint::Length(47),
                 ];
@@ -230,8 +230,8 @@ impl AdminState {
                     Constraint::Length(50),
                     Constraint::Length(47),
                 ];
-                let header =
-                    Row::new(["Alias", "Port", "Peer(s)"]).add_modifier(Modifier::UNDERLINED);
+                let header = Row::new(["Alias", "Port", "User(s)", "Peer(s)"])
+                    .add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("TCP services".fg(color).bold()).centered());
                 Table::new(rows, constraints)
@@ -425,7 +425,10 @@ impl AdminInterface {
         {
             let mut interface = self.interface.lock().unwrap();
             interface.state.table_state.select_next();
-            interface.state.vertical_scroll.next();
+            interface.state.vertical_scroll = interface
+                .state
+                .vertical_scroll
+                .position(interface.state.table_state.selected().unwrap());
             drop(interface);
         }
         let _ = self.change_notifier.send(());
@@ -436,27 +439,21 @@ impl AdminInterface {
         {
             let mut interface = self.interface.lock().unwrap();
             interface.state.table_state.select_previous();
-            interface.state.vertical_scroll.prev();
+            interface.state.vertical_scroll = interface
+                .state
+                .vertical_scroll
+                .position(interface.state.table_state.selected().unwrap());
             drop(interface);
         }
         let _ = self.change_notifier.send(());
     }
 
-    // Move left in the selected tab's table
-    pub(crate) fn move_left(&mut self) {
+    // Cancel current selection in the table
+    pub(crate) fn cancel(&mut self) {
         {
             let mut interface = self.interface.lock().unwrap();
-            interface.state.table_state.select_previous_column();
-            drop(interface);
-        }
-        let _ = self.change_notifier.send(());
-    }
-
-    // Move right in the selected tab's table
-    pub(crate) fn move_right(&mut self) {
-        {
-            let mut interface = self.interface.lock().unwrap();
-            interface.state.table_state.select_next_column();
+            interface.state.table_state = Default::default();
+            interface.state.vertical_scroll = Default::default();
             drop(interface);
         }
         let _ = self.change_notifier.send(());
