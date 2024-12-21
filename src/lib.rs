@@ -15,7 +15,7 @@ use connections::ConnectionMapReactor;
 use http::{DomainRedirect, ProxyData};
 use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
 use hyper_util::rt::TokioIo;
-use log::{info, warn};
+use log::{debug, info, warn};
 use login::ApiLogin;
 use quota::{DummyQuotaHandler, QuotaHandler, QuotaMap};
 use rand::rngs::OsRng;
@@ -31,6 +31,7 @@ use tokio::{
     fs,
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
+    pin,
     sync::oneshot,
     time::sleep,
 };
@@ -487,13 +488,23 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .with_context(|| "Error listening to SSH port")?;
     info!("Listening for SSH connections on port {}.", config.ssh_port);
     info!("sandhole is now running.");
+    let signal_handler = wait_for_signal();
+    pin!(signal_handler);
     loop {
-        let (stream, address) = match ssh_listener.accept().await {
-            Ok((stream, address)) => (stream, address),
-            Err(_) => break,
-        };
-        handle_ssh_connection(stream, address, &ssh_config, &mut sandhole).await;
+        tokio::select! {
+            conn = ssh_listener.accept() => {
+                let (stream, address) = match conn {
+                    Ok((stream, address)) => (stream, address),
+                    Err(_) => break,
+                };
+                handle_ssh_connection(stream, address, &ssh_config, &mut sandhole).await;
+            }
+            _ = &mut signal_handler => {
+                break;
+            }
+        }
     }
+    info!("sandhole is shutting down.");
     Ok(())
 }
 
@@ -505,7 +516,7 @@ async fn handle_ssh_connection(
 ) {
     let config = Arc::clone(config);
     let (tx, mut rx) = oneshot::channel::<()>();
-    let handler = server.new_client(Some(address), tx);
+    let handler = server.new_client(address, tx);
     tokio::spawn(async move {
         let mut session = match russh::server::run_stream(config, stream, handler).await {
             Ok(session) => session,
@@ -525,4 +536,34 @@ async fn handle_ssh_connection(
             },
         }
     });
+}
+
+#[cfg(unix)]
+async fn wait_for_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let mut signal_terminate = signal(SignalKind::terminate()).unwrap();
+    let mut signal_interrupt = signal(SignalKind::interrupt()).unwrap();
+
+    tokio::select! {
+        _ = signal_terminate.recv() => debug!("Received SIGTERM."),
+        _ = signal_interrupt.recv() => debug!("Received SIGINT."),
+    };
+}
+
+#[cfg(windows)]
+async fn wait_for_signal() {
+    use tokio::signal::windows;
+
+    let mut signal_c = windows::ctrl_c().unwrap();
+    let mut signal_break = windows::ctrl_break().unwrap();
+    let mut signal_close = windows::ctrl_close().unwrap();
+    let mut signal_shutdown = windows::ctrl_shutdown().unwrap();
+
+    tokio::select! {
+        _ = signal_c.recv() => debug!("Received CTRL_C."),
+        _ = signal_break.recv() => debug!("Received CTRL_BREAK."),
+        _ = signal_close.recv() => debug!("Received CTRL_CLOSE."),
+        _ = signal_shutdown.recv() => debug!("Received CTRL_SHUTDOWN."),
+    };
 }

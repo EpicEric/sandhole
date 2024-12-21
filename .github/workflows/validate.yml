@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  RUST_MSRV: 1.81.0
+
 jobs:
   rustfmt:
     name: Check rustfmt formatting
@@ -27,11 +30,9 @@ jobs:
         run: |
           rustup component add clippy
           cargo clippy -- -D warnings
-  tests:
-    name: Tests
+  build-msrv:
+    name: Build on MSRV
     runs-on: ubuntu-latest
-    env:
-      RUST_MSRV: 1.81.0
     steps:
       - uses: actions/checkout@v4
       - name: Run tests
@@ -39,4 +40,11 @@ jobs:
           rustup toolchain install ${RUST_MSRV}-x86_64-unknown-linux-gnu
           rustup override set ${RUST_MSRV}-x86_64-unknown-linux-gnu
           cargo build
+  tests:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: |
           cargo test --verbose

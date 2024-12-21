@@ -5,6 +5,11 @@
 ### Added
 
 - Add Sandhole version to admin interface.
+- Add signal handling for shutdown.
+
+### Fixed
+
+- Fix SSH authentication log always showing "no authentication".
 
 ## 0.2.0 (2024-12-20)
 

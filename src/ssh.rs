@@ -192,7 +192,7 @@ pub(crate) struct ServerHandler {
 pub(crate) trait Server {
     fn new_client(
         &mut self,
-        peer_address: Option<SocketAddr>,
+        peer_address: SocketAddr,
         cancelation_tx: oneshot::Sender<()>,
     ) -> ServerHandler;
 }
@@ -201,14 +201,11 @@ impl Server for Arc<SandholeServer> {
     // Create a new handler for the SSH connection.
     fn new_client(
         &mut self,
-        peer_address: Option<SocketAddr>,
+        peer_address: SocketAddr,
         cancelation_tx: oneshot::Sender<()>,
     ) -> ServerHandler {
-        if let Some(peer) = &peer_address {
-            info!("{} connected", peer);
-        }
+        info!("{} connected", peer_address);
         let (tx, rx) = mpsc::unbounded_channel();
-        let peer_address = peer_address.unwrap();
         ServerHandler {
             _timeout_handle: None,
             peer: peer_address,
@@ -314,10 +311,6 @@ impl Handler for ServerHandler {
             .fingerprints_validator
             .authenticate_fingerprint(self.key_fingerprint.as_ref().unwrap())
             .await;
-        info!(
-            "{} ({}) connected with {} (public key)",
-            user, self.peer, self.auth_data
-        );
         match authentication {
             AuthenticationType::None => {
                 // Start timer for user to do local port forwarding.
@@ -336,7 +329,6 @@ impl Handler for ServerHandler {
                         let _ = cancelation_tx.send(());
                     }
                 })));
-                Ok(Auth::Accept)
             }
             AuthenticationType::User => {
                 self.auth_data = AuthenticatedData::User {
@@ -344,7 +336,6 @@ impl Handler for ServerHandler {
                         UserIdentification::PublicKey(fingerprint),
                     ))),
                 };
-                Ok(Auth::Accept)
             }
             AuthenticationType::Admin => {
                 self.auth_data = AuthenticatedData::Admin {
@@ -353,9 +344,13 @@ impl Handler for ServerHandler {
                     ))),
                     admin_data: Box::new(AdminData::new()),
                 };
-                Ok(Auth::Accept)
             }
         }
+        info!(
+            "{} ({}) connected with {} (public key)",
+            user, self.peer, self.auth_data
+        );
+        Ok(Auth::Accept)
     }
 
     // Handle data received from the client such as key presses.
