@@ -10,23 +10,29 @@ use human_bytes::human_bytes;
 use itertools::Itertools;
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Layout, Margin, Rect},
+    layout::{Constraint, Flex, Layout, Margin, Rect},
     prelude::CrosstermBackend,
     style::{Color, Modifier, Style, Stylize},
     symbols::border,
     text::{Line, Text},
     widgets::{
-        Block, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
-        Table, TableState, Tabs, Widget,
+        Block, Clear, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        StatefulWidget, Table, TableState, Tabs, Widget, Wrap,
     },
     Terminal, TerminalOptions, Viewport,
 };
+use ssh_key::Fingerprint;
 use tokio::{
     sync::{mpsc::UnboundedSender, watch},
     time::sleep,
 };
 
-use crate::{droppable_handle::DroppableHandle, tcp_alias::TcpAlias, SandholeServer, SystemData};
+use crate::{
+    droppable_handle::DroppableHandle,
+    fingerprints::{AuthenticationType, KeyData},
+    tcp_alias::TcpAlias,
+    SandholeServer, SystemData,
+};
 
 struct BufferedSender {
     tx: UnboundedSender<Vec<u8>>,
@@ -85,15 +91,23 @@ impl Tab {
     }
 }
 
+enum AdminPrompt {
+    Infobox(String),
+    SelectUser(Vec<String>, TableState),
+    UserDetails(String, Option<(Fingerprint, KeyData)>),
+    RemoveUser(String, Option<(Fingerprint, KeyData)>),
+}
+
 struct AdminState {
     server: Arc<SandholeServer>,
     is_pty: bool,
     tab: Tab,
     table_state: TableState,
     vertical_scroll: ScrollbarState,
+    prompt: Option<AdminPrompt>,
 }
 
-fn to_socket_addr_string(addr: SocketAddr) -> String {
+fn to_socket_addr_string(addr: &SocketAddr) -> String {
     let ip = addr.ip().to_canonical();
     if ip.is_ipv4() {
         format!("{}:{}", ip, addr.port())
@@ -111,6 +125,8 @@ impl AdminState {
             let instructions = Line::from(vec![
                 " Change tab".into(),
                 " <Tab> ".blue().bold(),
+                " Details".into(),
+                " <Enter> ".blue().bold(),
                 " Quit".into(),
                 " <Ctrl-C> ".blue().bold(),
             ]);
@@ -133,6 +149,7 @@ impl AdminState {
                 .border_set(border::PROPORTIONAL_TALL)
                 .render(inner_area, buf);
             self.render_tab(inner_area.inner(Margin::new(2, 1)), buf);
+            self.render_prompt(area, buf);
         } else {
             let text = Text::from(vec![
                 Line::from(
@@ -146,6 +163,91 @@ impl AdminState {
         }
     }
 
+    fn render_prompt(&mut self, area: Rect, buf: &mut Buffer) {
+        if let Some(ref mut prompt) = self.prompt {
+            let vertical = Layout::vertical([Constraint::Percentage(50)]).flex(Flex::Center);
+            let horizontal = Layout::horizontal([Constraint::Length(60)]).flex(Flex::Center);
+            let [area] = vertical.areas(area);
+            let [area] = horizontal.areas(area);
+            let block = Block::bordered().black().on_white();
+            let inner = block.inner(area);
+            Widget::render(Clear, area, buf);
+            match prompt {
+                AdminPrompt::Infobox(text) => {
+                    let block = block.title_bottom(Line::raw(" <Enter> Close ").centered());
+                    let text = Paragraph::new(text.as_str())
+                        .centered()
+                        .wrap(Wrap { trim: true });
+                    Widget::render(block, area, buf);
+                    Widget::render(text, inner, buf);
+                }
+                AdminPrompt::SelectUser(users, table_state) => {
+                    let block = block
+                        .title(Line::raw("Connected users"))
+                        .title_bottom(Line::raw(" <Enter> Details ").centered());
+                    let users = Table::new(
+                        users.iter().map(|user| Row::new([user.as_str()])),
+                        [Constraint::Fill(1)],
+                    )
+                    .row_highlight_style(Style::new().black().on_blue());
+                    Widget::render(block, area, buf);
+                    StatefulWidget::render(users, inner, buf, table_state);
+                }
+                AdminPrompt::UserDetails(user, data) => {
+                    let block = block.title(Line::raw("User details")).title_bottom(
+                        Line::raw(
+                            if data
+                                .as_ref()
+                                .is_none_or(|(_, data)| data.auth == AuthenticationType::User)
+                            {
+                                " <Esc> Close  <Delete> Remove "
+                            } else {
+                                " <Esc> Close "
+                            },
+                        )
+                        .centered(),
+                    );
+                    let (user_type, comment) = data
+                        .as_ref()
+                        .map(|(_, data)| {
+                            (
+                                format!("Type: {}", data.auth),
+                                format!("Key comment: {}", data.comment),
+                            )
+                        })
+                        .unwrap_or(("Type: User".into(), "(authenticated with password)".into()));
+                    let text = Paragraph::new(vec![
+                        Line::from(user.as_str()).centered(),
+                        Line::from(user_type).centered(),
+                        Line::from(comment).centered(),
+                    ])
+                    .wrap(Wrap { trim: true });
+                    Widget::render(block, area, buf);
+                    Widget::render(text, inner, buf);
+                }
+                AdminPrompt::RemoveUser(user, data) => {
+                    let block = block
+                        .title(Line::raw("Remove user?"))
+                        .title_bottom(Line::raw(" <Esc> Cancel  <Enter> Confirm ").centered());
+                    let text = Paragraph::new(vec![
+                        Line::from("Are you sure you want to remove the following user?")
+                            .centered(),
+                        Line::from(user.as_str()).bold().centered(),
+                        Line::from(if data.is_some() {
+                            "They will lose all forwarding permissions!"
+                        } else {
+                            "They might still be able to reconnect via the login API!"
+                        })
+                        .centered(),
+                    ])
+                    .wrap(Wrap { trim: true });
+                    Widget::render(block, area, buf);
+                    Widget::render(text, inner, buf);
+                }
+            };
+        }
+    }
+
     // Render the selected tab's contents
     fn render_tab(&mut self, area: Rect, buf: &mut Buffer) {
         let color = self.tab.color();
@@ -153,17 +255,20 @@ impl AdminState {
             Tab::Http => {
                 let data = self.server.http_data.read().unwrap().clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
-                let rows = data.into_iter().map(|(host, (connections, req_per_min))| {
-                    let len = connections.len() as u16;
-                    let (peers, users): (Vec<_>, Vec<_>) = connections.into_iter().unzip();
-                    Row::new(vec![
-                        host,
-                        req_per_min.to_string(),
-                        users.iter().join("\n"),
-                        peers.into_iter().map(to_socket_addr_string).join("\n"),
-                    ])
-                    .height(len)
-                });
+                let rows: Vec<Row<'_>> = data
+                    .iter()
+                    .map(|(host, (connections, req_per_min))| {
+                        let len = connections.len() as u16;
+                        let (peers, users): (Vec<_>, Vec<_>) = connections.iter().unzip();
+                        Row::new(vec![
+                            host.clone(),
+                            req_per_min.to_string(),
+                            users.iter().join("\n"),
+                            peers.iter().map(to_socket_addr_string).join("\n"),
+                        ])
+                        .height(len)
+                    })
+                    .collect();
                 let constraints = [
                     Constraint::Min(25),
                     Constraint::Length(7),
@@ -183,16 +288,19 @@ impl AdminState {
             Tab::Ssh => {
                 let data = self.server.ssh_data.read().unwrap().clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
-                let rows = data.into_iter().map(|(host, connections)| {
-                    let len = connections.len() as u16;
-                    let (peers, users): (Vec<_>, Vec<_>) = connections.into_iter().unzip();
-                    Row::new(vec![
-                        host,
-                        users.iter().join("\n"),
-                        peers.into_iter().map(to_socket_addr_string).join("\n"),
-                    ])
-                    .height(len)
-                });
+                let rows: Vec<Row<'_>> = data
+                    .iter()
+                    .map(|(host, connections)| {
+                        let len = connections.len() as u16;
+                        let (peers, users): (Vec<_>, Vec<_>) = connections.iter().unzip();
+                        Row::new(vec![
+                            host.clone(),
+                            users.iter().join("\n"),
+                            peers.iter().map(to_socket_addr_string).join("\n"),
+                        ])
+                        .height(len)
+                    })
+                    .collect();
                 let constraints = [
                     Constraint::Min(25),
                     Constraint::Length(50),
@@ -211,19 +319,20 @@ impl AdminState {
             Tab::Tcp => {
                 let data = self.server.tcp_data.read().unwrap().clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
-                let rows = data
-                    .into_iter()
+                let rows: Vec<Row<'_>> = data
+                    .iter()
                     .map(|(TcpAlias(alias, port), connections)| {
                         let len = connections.len() as u16;
-                        let (peers, users): (Vec<_>, Vec<_>) = connections.into_iter().unzip();
+                        let (peers, users): (Vec<_>, Vec<_>) = connections.iter().unzip();
                         Row::new(vec![
-                            alias,
+                            alias.clone(),
                             port.to_string(),
                             users.iter().join("\n"),
-                            peers.into_iter().map(to_socket_addr_string).join("\n"),
+                            peers.iter().map(to_socket_addr_string).join("\n"),
                         ])
                         .height(len)
-                    });
+                    })
+                    .collect();
                 let constraints = [
                     Constraint::Min(25),
                     Constraint::Length(5),
@@ -326,6 +435,7 @@ impl AdminInterface {
                 is_pty: false,
                 table_state: Default::default(),
                 vertical_scroll: Default::default(),
+                prompt: None,
             },
         }));
         let interface_clone = Arc::clone(&interface);
@@ -370,7 +480,6 @@ impl AdminInterface {
             let mut interface = self.interface.lock().unwrap();
             interface.terminal.resize(rect)?;
             interface.state.is_pty = true;
-            drop(interface);
         }
         let _ = self.change_notifier.send(());
         Ok(())
@@ -393,7 +502,6 @@ impl AdminInterface {
             }
             interface.state.table_state = Default::default();
             interface.state.vertical_scroll = Default::default();
-            drop(interface);
         }
         let _ = self.change_notifier.send(());
     }
@@ -415,47 +523,255 @@ impl AdminInterface {
             }
             interface.state.table_state = Default::default();
             interface.state.vertical_scroll = Default::default();
-            drop(interface);
         }
         let _ = self.change_notifier.send(());
     }
 
     // Move down in the selected tab's table
     pub(crate) fn move_down(&mut self) {
-        {
+        let notify = {
             let mut interface = self.interface.lock().unwrap();
-            interface.state.table_state.select_next();
-            interface.state.vertical_scroll = interface
-                .state
-                .vertical_scroll
-                .position(interface.state.table_state.selected().unwrap());
-            drop(interface);
+            match interface.state.prompt {
+                Some(AdminPrompt::SelectUser(_, ref mut state)) => {
+                    state.select_next();
+                    true
+                }
+                Some(_) => false,
+                None => {
+                    interface.state.table_state.select_next();
+                    interface.state.vertical_scroll = interface
+                        .state
+                        .vertical_scroll
+                        .position(interface.state.table_state.selected().unwrap());
+                    true
+                }
+            }
+        };
+        if notify {
+            let _ = self.change_notifier.send(());
         }
-        let _ = self.change_notifier.send(());
     }
 
     // Move up in the selected tab's table
     pub(crate) fn move_up(&mut self) {
-        {
+        let notify = {
             let mut interface = self.interface.lock().unwrap();
-            interface.state.table_state.select_previous();
-            interface.state.vertical_scroll = interface
-                .state
-                .vertical_scroll
-                .position(interface.state.table_state.selected().unwrap());
-            drop(interface);
+            match interface.state.prompt {
+                Some(AdminPrompt::SelectUser(_, ref mut state)) => {
+                    state.select_previous();
+                    true
+                }
+                Some(_) => false,
+                None => {
+                    interface.state.table_state.select_previous();
+                    interface.state.vertical_scroll = interface
+                        .state
+                        .vertical_scroll
+                        .position(interface.state.table_state.selected().unwrap());
+                    true
+                }
+            }
+        };
+        if notify {
+            let _ = self.change_notifier.send(());
         }
-        let _ = self.change_notifier.send(());
     }
 
-    // Cancel current selection in the table
+    // Cancel current selection in the table or prompt
     pub(crate) fn cancel(&mut self) {
-        {
+        let notify = {
             let mut interface = self.interface.lock().unwrap();
-            interface.state.table_state = Default::default();
-            interface.state.vertical_scroll = Default::default();
-            drop(interface);
+            match interface.state.prompt {
+                Some(_) => {
+                    interface.state.prompt = None;
+                    true
+                }
+                None => {
+                    if interface.state.table_state.selected().is_some() {
+                        interface.state.table_state = Default::default();
+                        interface.state.vertical_scroll = Default::default();
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+        };
+        if notify {
+            let _ = self.change_notifier.send(());
         }
-        let _ = self.change_notifier.send(());
+    }
+
+    // Confirm current selection, which might be an entry in a table or a prompt
+    pub(crate) fn enter(&mut self) {
+        let notify = {
+            let mut interface = self.interface.lock().unwrap();
+            match interface.state.prompt.take() {
+                Some(AdminPrompt::Infobox(_)) => {
+                    interface.state.prompt = None;
+                    true
+                }
+                Some(AdminPrompt::RemoveUser(user, data)) => {
+                    let mut text = "User removed successfully!".into();
+                    if let Some(fingerprint) = data.map(|(fingerprint, _)| fingerprint) {
+                        if let Err(err) = interface
+                            .state
+                            .server
+                            .fingerprints_validator
+                            .remove_user_key(&fingerprint)
+                        {
+                            text = format!("Error: {}", err);
+                        }
+                        if let Some(sessions) = interface
+                            .state
+                            .server
+                            .sessions_publickey
+                            .lock()
+                            .unwrap()
+                            .remove(&fingerprint)
+                        {
+                            sessions.values().for_each(|tx| {
+                                let _ = tx.send(());
+                            });
+                        }
+                    } else if let Some(sessions) = interface
+                        .state
+                        .server
+                        .sessions_password
+                        .lock()
+                        .unwrap()
+                        .remove(&user)
+                    {
+                        sessions.values().for_each(|tx| {
+                            let _ = tx.send(());
+                        });
+                    }
+                    interface.state.prompt = Some(AdminPrompt::Infobox(text));
+                    true
+                }
+                Some(AdminPrompt::SelectUser(users, table_state)) => {
+                    if let Some(user) = table_state
+                        .selected()
+                        .and_then(|selected| users.get(selected))
+                    {
+                        let user = user.clone();
+                        let fingerprint = user.parse().ok();
+                        let key_data = fingerprint.as_ref().and_then(|fingerprint| {
+                            interface
+                                .state
+                                .server
+                                .fingerprints_validator
+                                .get_data_for_fingerprint(fingerprint)
+                        });
+                        interface.state.prompt =
+                            Some(AdminPrompt::UserDetails(user, fingerprint.zip(key_data)));
+                        true
+                    } else {
+                        interface.state.prompt = Some(AdminPrompt::SelectUser(users, table_state));
+                        false
+                    }
+                }
+                Some(prompt) => {
+                    interface.state.prompt = Some(prompt);
+                    false
+                }
+                None => {
+                    if let Some(row) = interface.state.table_state.selected() {
+                        let users: Option<Vec<String>> = match interface.state.tab {
+                            Tab::Http => interface
+                                .state
+                                .server
+                                .http_data
+                                .read()
+                                .unwrap()
+                                .values()
+                                .nth(row)
+                                .map(|value| value.0.values().cloned().collect()),
+                            Tab::Ssh => interface
+                                .state
+                                .server
+                                .ssh_data
+                                .read()
+                                .unwrap()
+                                .values()
+                                .nth(row)
+                                .map(|value| value.values().cloned().collect()),
+                            Tab::Tcp => interface
+                                .state
+                                .server
+                                .tcp_data
+                                .read()
+                                .unwrap()
+                                .values()
+                                .nth(row)
+                                .map(|value| value.values().cloned().collect()),
+                        };
+                        match users {
+                            None => {
+                                interface.state.prompt =
+                                    Some(AdminPrompt::Infobox("No users found!".into()));
+                            }
+                            Some(users) if users.is_empty() => {
+                                interface.state.prompt =
+                                    Some(AdminPrompt::Infobox("No users found!".into()));
+                            }
+                            Some(mut users) if users.len() == 1 => {
+                                let user = users.remove(0);
+                                let fingerprint = user.parse().ok();
+                                let key_data = fingerprint.as_ref().and_then(|fingerprint| {
+                                    interface
+                                        .state
+                                        .server
+                                        .fingerprints_validator
+                                        .get_data_for_fingerprint(fingerprint)
+                                });
+                                interface.state.prompt =
+                                    Some(AdminPrompt::UserDetails(user, fingerprint.zip(key_data)));
+                            }
+                            Some(users) => {
+                                interface.state.prompt =
+                                    Some(AdminPrompt::SelectUser(users, TableState::default()));
+                            }
+                        }
+                        true
+                    } else {
+                        interface.state.prompt =
+                            Some(AdminPrompt::Infobox("No row selected!".into()));
+                        true
+                    }
+                }
+            }
+        };
+        if notify {
+            let _ = self.change_notifier.send(());
+        }
+    }
+
+    pub(crate) fn delete(&mut self) {
+        let notify = {
+            let mut interface = self.interface.lock().unwrap();
+            match interface.state.prompt.take() {
+                Some(AdminPrompt::UserDetails(user, data)) => {
+                    if data
+                        .as_ref()
+                        .is_none_or(|(_, data)| data.auth == AuthenticationType::User)
+                    {
+                        interface.state.prompt = Some(AdminPrompt::RemoveUser(user, data));
+                        true
+                    } else {
+                        interface.state.prompt = Some(AdminPrompt::UserDetails(user, data));
+                        false
+                    }
+                }
+                Some(prompt) => {
+                    interface.state.prompt = Some(prompt);
+                    false
+                }
+                None => false,
+            }
+        };
+        if notify {
+            let _ = self.change_notifier.send(());
+        }
     }
 }

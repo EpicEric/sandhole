@@ -3,10 +3,10 @@
 //!
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     marker::PhantomData,
     net::{IpAddr, SocketAddr},
-    sync::{Arc, RwLock},
+    sync::{atomic::AtomicUsize, Arc, Mutex, RwLock},
     time::Duration,
 };
 
@@ -23,6 +23,7 @@ use russh::server::Config;
 use russh_keys::decode_secret_key;
 use rustls::ServerConfig;
 use rustls_acme::is_tls_alpn_challenge;
+use ssh_key::Fingerprint;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
 use tcp::TcpHandler;
 use tcp_alias::TcpAlias;
@@ -32,7 +33,7 @@ use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
     pin,
-    sync::oneshot,
+    sync::watch,
     time::sleep,
 };
 use tokio_rustls::LazyConfigAcceptor;
@@ -70,8 +71,6 @@ mod tcp;
 mod tcp_alias;
 mod telemetry;
 
-type DataTable<K, V> = Arc<RwLock<BTreeMap<K, V>>>;
-
 struct HttpReactor {
     certificates: Arc<CertificateResolver>,
     telemetry: Arc<Telemetry>,
@@ -93,7 +92,13 @@ struct SystemData {
     cpu_usage: f32,
 }
 
+type SessionMap = HashMap<usize, watch::Sender<()>>;
+type DataTable<K, V> = Arc<RwLock<BTreeMap<K, V>>>;
+
 pub(crate) struct SandholeServer {
+    pub(crate) session_id: AtomicUsize,
+    pub(crate) sessions_password: Mutex<HashMap<String, SessionMap>>,
+    pub(crate) sessions_publickey: Mutex<BTreeMap<Fingerprint, SessionMap>>,
     pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
     pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>>>,
     pub(crate) tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
@@ -326,6 +331,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         ..Default::default()
     });
     let mut sandhole = Arc::new(SandholeServer {
+        session_id: AtomicUsize::new(0),
+        sessions_password: Mutex::default(),
+        sessions_publickey: Mutex::default(),
         http: Arc::clone(&http_connections),
         ssh: ssh_connections,
         tcp: tcp_connections,
@@ -515,7 +523,7 @@ async fn handle_ssh_connection(
     server: &mut Arc<SandholeServer>,
 ) {
     let config = Arc::clone(config);
-    let (tx, mut rx) = oneshot::channel::<()>();
+    let (tx, mut rx) = watch::channel(());
     let handler = server.new_client(address, tx);
     tokio::spawn(async move {
         let mut session = match russh::server::run_stream(config, stream, handler).await {
@@ -531,7 +539,8 @@ async fn handle_ssh_connection(
                     warn!("Connection with {} closed with error: {}", address, err);
                 }
             }
-            Ok(_) = &mut rx => {
+            Ok(_) = rx.changed() => {
+                info!("Disconnecting client {}...", address);
                 let _ = session.handle().disconnect(russh::Disconnect::ByApplication, "".into(), "English".into()).await;
             },
         }

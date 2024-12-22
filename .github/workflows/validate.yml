@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  RUST_MSRV: 1.81.0
+  RUST_MSRV: 1.82.0
 
 jobs:
   rustfmt:

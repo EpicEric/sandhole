@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt::Display,
     net::SocketAddr,
-    sync::Arc,
+    sync::{atomic::Ordering, Arc},
 };
 
 use crate::{
@@ -23,13 +23,13 @@ use async_trait::async_trait;
 use log::{debug, info, warn};
 use russh::{
     server::{Auth, Handler, Msg, Session},
-    Channel, ChannelId, ChannelStream, Disconnect, MethodSet,
+    Channel, ChannelId, ChannelStream, MethodSet,
 };
 use russh_keys::PublicKey;
 use ssh_key::{Fingerprint, HashAlg};
 use tokio::{
     io::{copy_bidirectional, AsyncWriteExt},
-    sync::{mpsc, oneshot, Mutex, RwLock},
+    sync::{mpsc, watch, RwLock},
     time::{sleep, timeout},
 };
 
@@ -153,9 +153,7 @@ impl AdminData {
 }
 
 enum AuthenticatedData {
-    None {
-        cancelation_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
-    },
+    None,
     Proxy,
     User {
         user_data: Box<UserData>,
@@ -178,10 +176,12 @@ impl Display for AuthenticatedData {
 }
 
 pub(crate) struct ServerHandler {
-    _timeout_handle: Option<DroppableHandle<()>>,
+    id: usize,
+    timeout_handle: Option<DroppableHandle<()>>,
     peer: SocketAddr,
     user: Option<String>,
     key_fingerprint: Option<Fingerprint>,
+    cancelation_tx: watch::Sender<()>,
     auth_data: AuthenticatedData,
     tx: mpsc::UnboundedSender<Vec<u8>>,
     rx: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
@@ -193,7 +193,7 @@ pub(crate) trait Server {
     fn new_client(
         &mut self,
         peer_address: SocketAddr,
-        cancelation_tx: oneshot::Sender<()>,
+        cancelation_tx: watch::Sender<()>,
     ) -> ServerHandler;
 }
 
@@ -202,18 +202,19 @@ impl Server for Arc<SandholeServer> {
     fn new_client(
         &mut self,
         peer_address: SocketAddr,
-        cancelation_tx: oneshot::Sender<()>,
+        cancelation_tx: watch::Sender<()>,
     ) -> ServerHandler {
+        let id = self.session_id.fetch_add(1, Ordering::AcqRel);
         info!("{} connected", peer_address);
         let (tx, rx) = mpsc::unbounded_channel();
         ServerHandler {
-            _timeout_handle: None,
+            id,
+            timeout_handle: None,
             peer: peer_address,
             user: None,
             key_fingerprint: None,
-            auth_data: AuthenticatedData::None {
-                cancelation_tx: Arc::new(Mutex::new(Some(cancelation_tx))),
-            },
+            cancelation_tx,
+            auth_data: AuthenticatedData::None,
             tx,
             rx: Some(rx),
             open_session_join_handle: None,
@@ -273,6 +274,13 @@ impl Handler for ServerHandler {
                 .await
             {
                 if is_authenticated {
+                    self.server
+                        .sessions_password
+                        .lock()
+                        .unwrap()
+                        .entry(user.into())
+                        .or_default()
+                        .insert(self.id, self.cancelation_tx.clone());
                     self.user = Some(user.into());
                     self.auth_data = AuthenticatedData::User {
                         user_data: Box::new(UserData::new(TokenHolder::User(
@@ -309,28 +317,26 @@ impl Handler for ServerHandler {
         let authentication = self
             .server
             .fingerprints_validator
-            .authenticate_fingerprint(self.key_fingerprint.as_ref().unwrap())
-            .await;
+            .authenticate_fingerprint(self.key_fingerprint.as_ref().unwrap());
         match authentication {
             AuthenticationType::None => {
                 // Start timer for user to do local port forwarding.
                 // Otherwise, the connection will be canceled upon expiration
-                let AuthenticatedData::None { ref cancelation_tx } = self.auth_data else {
-                    warn!("{} ({}) is already authenticated", user, self.peer);
-                    return Ok(Auth::Reject {
-                        proceed_with_methods: None,
-                    });
-                };
-                let cancelation_tx = Arc::clone(cancelation_tx);
+                let cancelation_tx = self.cancelation_tx.clone();
                 let timeout = self.server.idle_connection_timeout;
-                self._timeout_handle = Some(DroppableHandle(tokio::spawn(async move {
+                self.timeout_handle = Some(DroppableHandle(tokio::spawn(async move {
                     sleep(timeout).await;
-                    if let Some(cancelation_tx) = cancelation_tx.lock().await.take() {
-                        let _ = cancelation_tx.send(());
-                    }
+                    let _ = cancelation_tx.send(());
                 })));
             }
             AuthenticationType::User => {
+                self.server
+                    .sessions_publickey
+                    .lock()
+                    .unwrap()
+                    .entry(fingerprint)
+                    .or_default()
+                    .insert(self.id, self.cancelation_tx.clone());
                 self.auth_data = AuthenticatedData::User {
                     user_data: Box::new(UserData::new(TokenHolder::User(
                         UserIdentification::PublicKey(fingerprint),
@@ -358,11 +364,11 @@ impl Handler for ServerHandler {
         &mut self,
         _channel: ChannelId,
         data: &[u8],
-        session: &mut Session,
+        _session: &mut Session,
     ) -> Result<(), Self::Error> {
         // Sending Ctrl+C ends the session and disconnects the client
         if data == [3] {
-            session.disconnect(Disconnect::ByApplication, "", "English")?;
+            let _ = self.cancelation_tx.send(());
             return Ok(());
         }
         debug!("received data {:?}", data);
@@ -382,6 +388,10 @@ impl Handler for ServerHandler {
                         b"\x1b[B" | b"j" => admin_interface.move_down(),
                         // Esc
                         b"\x1b" => admin_interface.cancel(),
+                        // Enter
+                        b"\r" => admin_interface.enter(),
+                        // Delete
+                        b"\x1b[3~" => admin_interface.delete(),
                         _ => (),
                     }
                 }
@@ -895,8 +905,7 @@ impl Handler for ServerHandler {
                     )
                     .await
                 {
-                    if let AuthenticatedData::None { ref cancelation_tx } = self.auth_data {
-                        cancelation_tx.lock().await.take();
+                    if self.timeout_handle.take().is_some() {
                         self.auth_data = AuthenticatedData::Proxy;
                     }
                     let _ = handler.log_channel().send(
@@ -930,8 +939,7 @@ impl Handler for ServerHandler {
                     )
                     .await
                 {
-                    if let AuthenticatedData::None { ref cancelation_tx } = self.auth_data {
-                        cancelation_tx.lock().await.take();
+                    if self.timeout_handle.take().is_some() {
                         self.auth_data = AuthenticatedData::Proxy;
                     }
                     let _ = handler.log_channel().send(
@@ -968,8 +976,7 @@ impl Handler for ServerHandler {
                 )
                 .await
             {
-                if let AuthenticatedData::None { ref cancelation_tx } = self.auth_data {
-                    cancelation_tx.lock().await.take();
+                if self.timeout_handle.take().is_some() {
                     self.auth_data = AuthenticatedData::Proxy;
                 }
                 let _ = handler.log_channel().send(
@@ -1008,11 +1015,28 @@ impl Drop for ServerHandler {
         match self.auth_data {
             AuthenticatedData::User { .. } | AuthenticatedData::Admin { .. } => {
                 let server = Arc::clone(&self.server);
+                let id = self.id;
                 let peer = self.peer;
                 tokio::task::spawn_blocking(move || {
                     server.ssh.remove_by_address(&peer);
                     server.http.remove_by_address(&peer);
                     server.tcp.remove_by_address(&peer);
+                    server
+                        .sessions_password
+                        .lock()
+                        .unwrap()
+                        .retain(|_, session| {
+                            session.remove(&id);
+                            !session.is_empty()
+                        });
+                    server
+                        .sessions_publickey
+                        .lock()
+                        .unwrap()
+                        .retain(|_, session| {
+                            session.remove(&id);
+                            !session.is_empty()
+                        });
                 });
             }
             AuthenticatedData::Proxy | AuthenticatedData::None { .. } => (),

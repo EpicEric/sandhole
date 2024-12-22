@@ -1,12 +1,18 @@
-use std::{collections::BTreeSet, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    fs::remove_file,
+    path::PathBuf,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 
-use crate::{directory::watch_directory, droppable_handle::DroppableHandle};
+use crate::{directory::watch_directory, droppable_handle::DroppableHandle, error::ServerError};
 use log::{error, warn};
 use notify::RecommendedWatcher;
 use ssh_key::{Fingerprint, HashAlg, PublicKey};
 use tokio::{
     fs::{read_dir, read_to_string},
-    sync::{oneshot, RwLock},
+    sync::oneshot,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -19,10 +25,27 @@ pub(crate) enum AuthenticationType {
     Admin,
 }
 
+impl std::fmt::Display for AuthenticationType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            AuthenticationType::None => "None",
+            AuthenticationType::User => "User",
+            AuthenticationType::Admin => "Admin",
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct KeyData {
+    pub(crate) file: PathBuf,
+    pub(crate) comment: String,
+    pub(crate) auth: AuthenticationType,
+}
+
 #[derive(Debug)]
 pub(crate) struct FingerprintsValidator {
-    user_fingerprints: Arc<RwLock<BTreeSet<Fingerprint>>>,
-    admin_fingerprints: Arc<RwLock<BTreeSet<Fingerprint>>>,
+    user_fingerprints: Arc<RwLock<BTreeMap<Fingerprint, KeyData>>>,
+    admin_fingerprints: Arc<RwLock<BTreeMap<Fingerprint, KeyData>>>,
     _user_join_handle: DroppableHandle<()>,
     _admin_join_handle: DroppableHandle<()>,
     _watchers: [RecommendedWatcher; 2],
@@ -34,11 +57,11 @@ impl FingerprintsValidator {
         user_keys_directory: PathBuf,
         admin_keys_directory: PathBuf,
     ) -> anyhow::Result<Self> {
-        let user_fingerprints = Arc::new(RwLock::new(BTreeSet::new()));
+        let user_fingerprints = Arc::new(RwLock::new(BTreeMap::new()));
         let (user_watcher, mut user_rx) =
             watch_directory::<RecommendedWatcher>(user_keys_directory.as_path())?;
         user_rx.mark_changed();
-        let admin_fingerprints = Arc::new(RwLock::new(BTreeSet::new()));
+        let admin_fingerprints = Arc::new(RwLock::new(BTreeMap::new()));
         let (admin_watcher, mut admin_rx) =
             watch_directory::<RecommendedWatcher>(admin_keys_directory.as_path())?;
         admin_rx.mark_changed();
@@ -51,7 +74,7 @@ impl FingerprintsValidator {
                 if user_rx.changed().await.is_err() {
                     break;
                 }
-                let mut user_set = BTreeSet::new();
+                let mut user_set = BTreeMap::new();
                 match read_dir(user_keys_directory.as_path()).await {
                     Ok(mut read_dir) => {
                         while let Ok(Some(entry)) = read_dir.next_entry().await {
@@ -60,7 +83,16 @@ impl FingerprintsValidator {
                                     user_set.extend(
                                         data.lines()
                                             .flat_map(|line| PublicKey::from_openssh(line).ok())
-                                            .map(|key| key.fingerprint(HashAlg::Sha256)),
+                                            .map(|key| {
+                                                (
+                                                    key.fingerprint(HashAlg::Sha256),
+                                                    KeyData {
+                                                        file: entry.path(),
+                                                        comment: key.comment().into(),
+                                                        auth: AuthenticationType::User,
+                                                    },
+                                                )
+                                            }),
                                     );
                                 }
                                 Err(err) => {
@@ -72,7 +104,7 @@ impl FingerprintsValidator {
                                 }
                             }
                         }
-                        *user_fingerprints_clone.write().await = user_set;
+                        *user_fingerprints_clone.write().unwrap() = user_set;
                     }
                     Err(err) => {
                         error!(
@@ -96,7 +128,7 @@ impl FingerprintsValidator {
                 if admin_rx.changed().await.is_err() {
                     break;
                 }
-                let mut admin_set = BTreeSet::new();
+                let mut admin_set = BTreeMap::new();
                 match read_dir(admin_keys_directory.as_path()).await {
                     Ok(mut read_dir) => {
                         while let Ok(Some(entry)) = read_dir.next_entry().await {
@@ -105,7 +137,16 @@ impl FingerprintsValidator {
                                     admin_set.extend(
                                         data.lines()
                                             .flat_map(|line| PublicKey::from_openssh(line).ok())
-                                            .map(|key| key.fingerprint(HashAlg::Sha256)),
+                                            .map(|key| {
+                                                (
+                                                    key.fingerprint(HashAlg::Sha256),
+                                                    KeyData {
+                                                        file: entry.path(),
+                                                        comment: key.comment().into(),
+                                                        auth: AuthenticationType::Admin,
+                                                    },
+                                                )
+                                            }),
                                     );
                                 }
                                 Err(err) => {
@@ -117,7 +158,7 @@ impl FingerprintsValidator {
                                 }
                             }
                         }
-                        *admin_fingerprints_clone.write().await = admin_set;
+                        *admin_fingerprints_clone.write().unwrap() = admin_set;
                     }
                     Err(err) => {
                         error!(
@@ -143,16 +184,45 @@ impl FingerprintsValidator {
     }
 
     // Find the right authentication type for a given fingerprint
-    pub(crate) async fn authenticate_fingerprint(
-        &self,
-        fingerprint: &Fingerprint,
-    ) -> AuthenticationType {
-        if self.admin_fingerprints.read().await.contains(fingerprint) {
+    pub(crate) fn authenticate_fingerprint(&self, fingerprint: &Fingerprint) -> AuthenticationType {
+        if self
+            .admin_fingerprints
+            .read()
+            .unwrap()
+            .contains_key(fingerprint)
+        {
             AuthenticationType::Admin
-        } else if self.user_fingerprints.read().await.contains(fingerprint) {
+        } else if self
+            .user_fingerprints
+            .read()
+            .unwrap()
+            .contains_key(fingerprint)
+        {
             AuthenticationType::User
         } else {
             AuthenticationType::None
+        }
+    }
+
+    pub(crate) fn get_data_for_fingerprint(&self, fingerprint: &Fingerprint) -> Option<KeyData> {
+        if let Some(key_data) = self.admin_fingerprints.read().unwrap().get(fingerprint) {
+            Some(key_data.clone())
+        } else {
+            self.user_fingerprints
+                .read()
+                .unwrap()
+                .get(fingerprint)
+                .cloned()
+        }
+    }
+
+    pub(crate) fn remove_user_key(&self, fingerprint: &Fingerprint) -> anyhow::Result<()> {
+        if let Some(KeyData { file, .. }) =
+            self.user_fingerprints.write().unwrap().remove(fingerprint)
+        {
+            Ok(remove_file(file)?)
+        } else {
+            Err(ServerError::NoMatchingUserKey.into())
         }
     }
 }
@@ -195,27 +265,19 @@ mod fingerprints_validator_tests {
         .unwrap();
 
         assert_eq!(
-            validator
-                .authenticate_fingerprint(&admin_key.fingerprint(HashAlg::Sha256))
-                .await,
+            validator.authenticate_fingerprint(&admin_key.fingerprint(HashAlg::Sha256)),
             AuthenticationType::Admin
         );
         assert_eq!(
-            validator
-                .authenticate_fingerprint(&key_one.fingerprint(HashAlg::Sha256))
-                .await,
+            validator.authenticate_fingerprint(&key_one.fingerprint(HashAlg::Sha256)),
             AuthenticationType::User
         );
         assert_eq!(
-            validator
-                .authenticate_fingerprint(&key_two.fingerprint(HashAlg::Sha256))
-                .await,
+            validator.authenticate_fingerprint(&key_two.fingerprint(HashAlg::Sha256)),
             AuthenticationType::User
         );
         assert_eq!(
-            validator
-                .authenticate_fingerprint(&unknown_key.fingerprint(HashAlg::Sha256))
-                .await,
+            validator.authenticate_fingerprint(&unknown_key.fingerprint(HashAlg::Sha256)),
             AuthenticationType::None
         );
     }

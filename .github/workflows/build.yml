@@ -56,7 +56,6 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          file: Dockerfile.ci
           push: true
           platforms: |
             linux/amd64
@@ -66,7 +65,6 @@ jobs:
       - name: Export binaries
         uses: docker/build-push-action@v6
         with:
-          file: Dockerfile.ci
           target: binary
           outputs: type=local,dest=out
       - name: Upload artifact

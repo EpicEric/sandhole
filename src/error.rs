@@ -16,4 +16,6 @@ pub(crate) enum ServerError {
     LoadBalancingAlreadyBound,
     #[error("Quota reached for user")]
     QuotaReached,
+    #[error("No matching user key")]
+    NoMatchingUserKey,
 }

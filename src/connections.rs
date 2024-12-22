@@ -9,7 +9,7 @@ use std::{
 use dashmap::DashMap;
 #[cfg(test)]
 use mockall::automock;
-use rand::seq::SliceRandom;
+use rand::{seq::SliceRandom, thread_rng};
 
 use crate::{
     config::LoadBalancing,
@@ -127,12 +127,11 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        let mut rng = rand::thread_rng();
         self.map.get(key).and_then(|handler| {
             handler
                 .value()
                 .as_slice()
-                .choose(&mut rng)
+                .choose(&mut thread_rng())
                 .map(|ConnectionMapEntry { handler, .. }| Clone::clone(handler))
         })
     }

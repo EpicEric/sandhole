@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add user detail popups to admin interface.
+- Add functionality to remove users via the admin interface.
+
+### Changed
+
+- **BREAKING**: Bump MSRV to 1.82.0.
+
 ## 0.2.1 (2024-12-22)
 
 ### Added
