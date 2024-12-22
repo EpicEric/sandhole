@@ -148,7 +148,6 @@ impl russh::client::Handler for SshClient {
         async fn authentication_route(
             Json(body): Json<AuthenticationRequest>,
         ) -> impl IntoResponse {
-            dbg!(&body);
             if body.user == "eric"
                 && body.password == "sandhole"
                 && body.remote_address.ip().is_loopback()

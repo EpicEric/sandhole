@@ -367,7 +367,7 @@ impl Handler for ServerHandler {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         // Sending Ctrl+C ends the session and disconnects the client
-        if data == [3] {
+        if data == b"\x03" {
             let _ = self.cancelation_tx.send(());
             return Ok(());
         }

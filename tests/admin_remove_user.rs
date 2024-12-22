@@ -1,6 +1,13 @@
-use std::{sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use axum::{extract::Request, response::IntoResponse, routing::post, Json, Router};
+use http::StatusCode;
+use hyper::{body::Incoming, service::service_fn};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto::Builder,
+};
 use regex::Regex;
 use russh::{
     client::{self, Msg, Session},
@@ -8,12 +15,14 @@ use russh::{
 };
 use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig, BindHostnames, LoadBalancing};
+use serde::Deserialize;
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
     sync::mpsc,
     time::{sleep, timeout},
 };
+use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn admin_interface() {
@@ -28,7 +37,7 @@ async fn admin_interface() {
         private_key_file: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh").into(),
         disable_directory_creation: true,
         listen_address: "127.0.0.1".into(),
-        password_authentication_url: None,
+        password_authentication_url: Some("http://localhost:38080/authenticate".into()),
         ssh_port: 18022,
         http_port: 18080,
         https_port: 18443,
@@ -41,7 +50,7 @@ async fn admin_interface() {
         acme_use_staging: true,
         bind_hostnames: BindHostnames::All,
         load_balancing: LoadBalancing::Allow,
-        allow_requested_subdomains: false,
+        allow_requested_subdomains: true,
         allow_requested_ports: true,
         quota_per_user: None,
         random_subdomain_seed: None,
@@ -63,18 +72,18 @@ async fn admin_interface() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied
+    // 2. Start SSH client that will host the login API and not be removed
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+    let mut session_1 = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(
-        session
+        session_1
             .authenticate_publickey(
                 "user",
                 PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
@@ -83,22 +92,35 @@ async fn admin_interface() {
             .expect("SSH authentication failed"),
         "authentication didn't succeed"
     );
-    session
-        .tcpip_forward("http.aaa", 443)
+    session_1
+        .tcpip_forward("localhost", 38080)
         .await
         .expect("tcpip_forward failed");
-    session
-        .tcpip_forward("ssh.bbb", 22)
+
+    // 3. Start SSH client that will be proxied and later removed by the admin
+    let ssh_client = SshClient;
+    let mut session_2 = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
+    assert!(
+        session_2
+            .authenticate_password("custom_user", "password")
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
+    session_2
+        .tcpip_forward("aaa.foobar.tld", 443)
         .await
         .expect("tcpip_forward failed");
-    session
-        .tcpip_forward("proxy.ccc", 12345)
+    session_2
+        .tcpip_forward("localhost", 12345)
         .await
         .expect("tcpip_forward failed");
     // Required for updating the admin interface data
     sleep(Duration::from_secs(3)).await;
 
-    // 3. Request admin pty
+    // 4. Request admin pty
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/admin"),
         None,
@@ -111,7 +133,7 @@ async fn admin_interface() {
     assert!(
         session
             .authenticate_publickey(
-                "user",
+                "admin",
                 PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
             )
             .await
@@ -152,18 +174,13 @@ async fn admin_interface() {
             }
         }
     });
-    if timeout(Duration::from_secs(3), async move {
-        // 4a. Validate header, system information, and HTTP tab data
+    if timeout(Duration::from_secs(5), async move {
+        // 4a. Validate HTTP tab data
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",
-            r"System information",
-            r"  CPU%  ",
-            r" Memory ",
-            r"   TX   ",
-            r"   RX   ",
             r"HTTP services",
-            r"http\.aaa",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"aaa\.foobar\.tld",
+            r"custom_user",
             r"127.0.0.1:\d{4,5}",
         ]
         .into_iter()
@@ -175,22 +192,22 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4b. Switch tabs and validate SSH tab data
+        // 4b. Select user and open details
         writer
-            .write(&b"\t"[..])
+            .write(&b"\x1b[B"[..])
+            .await
+            .expect("channel write failed");
+        writer
+            .write(&b"\r"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",
-            r"System information",
-            r"  CPU%  ",
-            r" Memory ",
-            r"   TX   ",
-            r"   RX   ",
-            r"SSH services",
-            r"ssh\.bbb",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
-            r"127.0.0.1:\d{4,5}",
+            r"User details",
+            r"custom_user",
+            r"Type: User",
+            r"(authenticated with password)",
+            r" <Esc> Close  <Delete> Remove ",
         ]
         .into_iter()
         .map(|re| Regex::new(re).unwrap())
@@ -201,22 +218,18 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4c. Switch tabs again and validate TCP tab data
+        // 4c. Open removal prompt
         writer
-            .write(&b"\t"[..])
+            .write(&b"\x1b[3~"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",
-            r"System information",
-            r"  CPU%  ",
-            r" Memory ",
-            r"   TX   ",
-            r"   RX   ",
-            r"TCP services",
-            r"proxy\.ccc",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
-            r"127.0.0.1:\d{4,5}",
+            r"Remove user?",
+            r"Are you sure you want to remove the following user?",
+            r"custom_user",
+            r"They might still be able to reconnect via the login API!",
+            r" <Esc> Cancel  <Enter> Confirm ",
         ]
         .into_iter()
         .map(|re| Regex::new(re).unwrap())
@@ -227,20 +240,46 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4d. Go back one tab
+        // 4d. Confirm removal
+        writer
+            .write(&b"\r"[..])
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"User removed successfully!",
+            r" <Enter> Close ",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).unwrap())
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // Required for updating the admin interface data
+        sleep(Duration::from_secs(3)).await;
+        assert!(session_2.is_closed(), "user session wasn't terminated");
+        // 4e. Close prompt and ensure that window still displays the first service under TCP
+        assert!(
+            !session_1.is_closed(),
+            "proxy session shouldn't have been terminated"
+        );
+        writer
+            .write(&b"\r"[..])
+            .await
+            .expect("channel write failed");
         writer
             .write(&b"\x1b[Z"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",
-            r"System information",
-            r"  CPU%  ",
-            r" Memory ",
-            r"   TX   ",
-            r"   RX   ",
-            r"SSH services",
-            r"ssh\.bbb",
+            r"TCP services",
+            r"localhost",
+            r"38080",
             r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
             r"127.0.0.1:\d{4,5}",
         ]
@@ -253,7 +292,33 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4e. Quit the admin interface with Ctrl-C (ETX)
+        // 4f. Check details for the remaining service
+        writer
+            .write(&b"\x1b[B"[..])
+            .await
+            .expect("channel write failed");
+        writer
+            .write(&b"\r"[..])
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"User details",
+            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"Type: User",
+            r"Key comment: key1",
+            r" <Esc> Close  <Delete> Remove ",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).unwrap())
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 4g. Quit the admin interface with Ctrl-C (ETX)
         writer
             .write(&b"\x03"[..])
             .await
@@ -288,8 +353,34 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        channel.data(&b"Hello, world!"[..]).await.unwrap();
-        channel.eof().await.unwrap();
+        #[derive(Debug, Deserialize)]
+        struct AuthenticationRequest {
+            user: String,
+            password: String,
+            remote_address: SocketAddr,
+        }
+        async fn authentication_route(
+            Json(body): Json<AuthenticationRequest>,
+        ) -> impl IntoResponse {
+            if body.user == "custom_user"
+                && body.password == "password"
+                && body.remote_address.ip().is_loopback()
+            {
+                StatusCode::OK
+            } else {
+                StatusCode::FORBIDDEN
+            }
+        }
+        let router = Router::new()
+            .route("/authenticate", post(authentication_route))
+            .into_service();
+        let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
+        tokio::spawn(async move {
+            Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(TokioIo::new(channel.into_stream()), service)
+                .await
+                .expect("Invalid request");
+        });
         Ok(())
     }
 }

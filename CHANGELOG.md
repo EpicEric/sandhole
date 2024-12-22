@@ -9,7 +9,7 @@
 
 ### Changed
 
-- **BREAKING**: Bump MSRV to 1.82.0.
+- Bump MSRV to 1.82.0.
 
 ## 0.2.1 (2024-12-22)
 
@@ -42,8 +42,8 @@
 
 ### Changed
 
-- **BREAKING**: Bump MSRV to 1.81.0.
 - **BREAKING**: Rename `--allow-provided-subdomains` to `--allow-requested-subdomains`.
+- Bump MSRV to 1.81.0.
 - Change `--random-subdomain-seed=fingerprint` to also take user into account.
 - Modify exports to live within `lib.rs`.
 - Update `russh` dependency to version `0.49.2`.

@@ -165,7 +165,7 @@ impl AdminState {
 
     fn render_prompt(&mut self, area: Rect, buf: &mut Buffer) {
         if let Some(ref mut prompt) = self.prompt {
-            let vertical = Layout::vertical([Constraint::Percentage(50)]).flex(Flex::Center);
+            let vertical = Layout::vertical([Constraint::Max(8)]).flex(Flex::Center);
             let horizontal = Layout::horizontal([Constraint::Length(60)]).flex(Flex::Center);
             let [area] = vertical.areas(area);
             let [area] = horizontal.areas(area);
