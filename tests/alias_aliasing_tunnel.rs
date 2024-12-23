@@ -115,10 +115,7 @@ async fn alias_aliasing_tunnel() {
     if timeout(Duration::from_secs(5), async {
         match &mut channel.wait().await.unwrap() {
             russh::ChannelMsg::Data { data } => {
-                assert_eq!(
-                    String::from_utf8(data.to_vec()).unwrap(),
-                    "Poor man's VPN..."
-                );
+                assert_eq!(data.to_vec(), b"Poor man's VPN...");
             }
             msg => panic!("Unexpected message {:?}", msg),
         }

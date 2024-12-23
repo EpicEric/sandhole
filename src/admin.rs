@@ -123,12 +123,12 @@ impl AdminState {
             let title =
                 Line::from(concat!(" Sandhole admin v", env!("CARGO_PKG_VERSION"), " ").bold());
             let instructions = Line::from(vec![
-                " Change tab".into(),
                 " <Tab> ".blue().bold(),
-                " Details".into(),
+                "Change tab ".into(),
                 " <Enter> ".blue().bold(),
-                " Quit".into(),
+                "Details ".into(),
                 " <Ctrl-C> ".blue().bold(),
+                "Quit ".into(),
             ]);
             let block = Block::bordered()
                 .title(title.centered())
@@ -174,7 +174,9 @@ impl AdminState {
             Widget::render(Clear, area, buf);
             match prompt {
                 AdminPrompt::Infobox(text) => {
-                    let block = block.title_bottom(Line::raw(" <Enter> Close ").centered());
+                    let block = block.title_bottom(
+                        Line::from(vec![" <Enter> ".bold(), "Close ".into()]).centered(),
+                    );
                     let text = Paragraph::new(text.as_str())
                         .centered()
                         .wrap(Wrap { trim: true });
@@ -182,9 +184,9 @@ impl AdminState {
                     Widget::render(text, inner, buf);
                 }
                 AdminPrompt::SelectUser(users, table_state) => {
-                    let block = block
-                        .title(Line::raw("Connected users"))
-                        .title_bottom(Line::raw(" <Enter> Details ").centered());
+                    let block = block.title(Line::raw("Connected users")).title_bottom(
+                        Line::from(vec![" <Enter> ".bold(), "Details ".into()]).centered(),
+                    );
                     let users = Table::new(
                         users.iter().map(|user| Row::new([user.as_str()])),
                         [Constraint::Fill(1)],
@@ -195,17 +197,20 @@ impl AdminState {
                 }
                 AdminPrompt::UserDetails(user, data) => {
                     let block = block.title(Line::raw("User details")).title_bottom(
-                        Line::raw(
-                            if data
-                                .as_ref()
-                                .is_none_or(|(_, data)| data.auth == AuthenticationType::User)
-                            {
-                                " <Esc> Close  <Delete> Remove "
-                            } else {
-                                " <Esc> Close "
-                            },
-                        )
-                        .centered(),
+                        if data
+                            .as_ref()
+                            .is_none_or(|(_, data)| data.auth == AuthenticationType::User)
+                        {
+                            Line::from(vec![
+                                " <Esc> ".bold(),
+                                "Close ".into(),
+                                " <Delete> ".bold(),
+                                "Remove ".into(),
+                            ])
+                            .centered()
+                        } else {
+                            Line::from(vec![" <Esc> ".bold(), "Close ".into()]).centered()
+                        },
                     );
                     let (user_type, comment) = data
                         .as_ref()
@@ -226,13 +231,19 @@ impl AdminState {
                     Widget::render(text, inner, buf);
                 }
                 AdminPrompt::RemoveUser(user, data) => {
-                    let block = block
-                        .title(Line::raw("Remove user?"))
-                        .title_bottom(Line::raw(" <Esc> Cancel  <Enter> Confirm ").centered());
+                    let block = block.title(Line::raw("Remove user?")).title_bottom(
+                        Line::from(vec![
+                            " <Esc> ".bold(),
+                            "Cancel ".into(),
+                            " <Enter> ".bold(),
+                            "Confirm ".into(),
+                        ])
+                        .centered(),
+                    );
                     let text = Paragraph::new(vec![
                         Line::from("Are you sure you want to remove the following user?")
                             .centered(),
-                        Line::from(user.as_str()).bold().centered(),
+                        Line::from(user.as_str()).centered(),
                         Line::from(if data.is_some() {
                             "They will lose all forwarding permissions!"
                         } else {

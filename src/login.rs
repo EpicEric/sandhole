@@ -93,7 +93,7 @@ impl ApiLogin {
             .header(HOST, &self.host)
             .header(CONTENT_TYPE, "application/json; charset=UTF-8")
             .body(serde_json::to_string(data).unwrap())
-            .unwrap();
+            .expect("Invalid request");
         let (response, _join_handle) = match self.scheme {
             ApiScheme::Http => {
                 let (mut sender, conn) =

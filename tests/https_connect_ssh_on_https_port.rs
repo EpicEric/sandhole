@@ -106,7 +106,7 @@ async fn https_connect_ssh_on_https_port() {
             "/tests/data/ca/rootCA.pem"
         ))
         .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
-        .unwrap(),
+        .expect("Failed to parse certificates"),
     );
     let tls_config = Arc::new(
         rustls::ClientConfig::builder()
@@ -120,10 +120,10 @@ async fn https_connect_ssh_on_https_port() {
     let tls_stream = connector
         .connect("hostname.foobar.tld".try_into().unwrap(), tcp_stream)
         .await
-        .unwrap();
+        .expect("TLS stream failed");
     let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls_stream))
         .await
-        .unwrap();
+        .expect("HTTP handshake failed");
     tokio::spawn(async move {
         if let Err(err) = conn.await {
             eprintln!("Connection failed: {:?}", err);

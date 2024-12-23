@@ -131,7 +131,7 @@ async fn ssh_proxy_jump() {
     if timeout(Duration::from_secs(5), async {
         match session_channel.wait().await.unwrap() {
             russh::ChannelMsg::Data { data } => {
-                assert_eq!(String::from_utf8(data.to_vec()).unwrap(), "Hello, world!");
+                assert_eq!(data.to_vec(), b"Hello, world!");
             }
             msg => panic!("Unexpected message {:?}", msg),
         }

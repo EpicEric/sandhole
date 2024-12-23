@@ -132,10 +132,7 @@ async fn alias_require_allowed_fingerprints() {
     if timeout(Duration::from_secs(5), async {
         match channel.wait().await.unwrap() {
             russh::ChannelMsg::Data { data } => {
-                assert_eq!(
-                    String::from_utf8(data.to_vec()).unwrap(),
-                    "Hello, some of the world!"
-                );
+                assert_eq!(data.to_vec(), b"Hello, some of the world!");
             }
             msg => panic!("Unexpected message {:?}", msg),
         }

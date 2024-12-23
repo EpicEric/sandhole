@@ -29,7 +29,7 @@ async fn lib_configure_from_scratch() {
     )
     .unwrap();
     let temp_dir = std::env::temp_dir().join(random_name);
-    fs::create_dir(temp_dir.as_path()).unwrap();
+    fs::create_dir(temp_dir.as_path()).expect("Unable to create tempdir");
     let config = ApplicationConfig {
         domain: "foobar.tld".into(),
         domain_redirect: "https://tokio.rs/".into(),

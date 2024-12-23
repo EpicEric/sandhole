@@ -7,6 +7,7 @@ use crate::{
     ssh::SshTunnelHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
 };
+use anyhow::Context;
 use async_trait::async_trait;
 use dashmap::DashMap;
 use log::error;
@@ -57,7 +58,10 @@ impl PortHandler for Arc<TcpHandler> {
             Ok(listener) => listener,
             Err(err) => return Err(err.into()),
         };
-        let port = listener.local_addr().unwrap().port();
+        let port = listener
+            .local_addr()
+            .with_context(|| "Missing local address when binding port")?
+            .port();
         let clone = Arc::clone(self);
         let tcp_connection_timeout = self.tcp_connection_timeout;
         let disable_tcp_logs = self.disable_tcp_logs;

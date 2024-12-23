@@ -102,7 +102,7 @@ async fn https_force_random_subdomains() {
         .tcpip_forward("something.foobar.tld", 80)
         .await
         .expect("tcpip_forward failed");
-    let regex = regex::Regex::new(r"https://(\S+)").unwrap();
+    let regex = regex::Regex::new(r"https://(\S+)").expect("Invalid regex");
     let Ok((_, hostname)) = timeout(Duration::from_secs(3), async move {
         while let Some(message) = channel.wait().await {
             match message {
@@ -113,7 +113,7 @@ async fn https_force_random_subdomains() {
                         let address = captures.get(0).unwrap().as_str().to_string();
                         let hostname = captures
                             .get(1)
-                            .unwrap()
+                            .expect("Missing hostname matching group")
                             .as_str()
                             .split(':')
                             .next()
@@ -133,7 +133,7 @@ async fn https_force_random_subdomains() {
     };
     assert!(
         Regex::new(r"^[0-9a-z]{6}\.foobar\.tld$")
-            .unwrap()
+            .expect("Invalid regex")
             .is_match(&hostname),
         "should create hostname with random subdomain"
     );
@@ -146,7 +146,7 @@ async fn https_force_random_subdomains() {
             "/tests/data/ca/rootCA.pem"
         ))
         .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
-        .unwrap(),
+        .expect("Failed to parse certificates"),
     );
     let tls_config = Arc::new(
         rustls::ClientConfig::builder()
@@ -160,10 +160,10 @@ async fn https_force_random_subdomains() {
     let tls_stream = connector
         .connect(hostname.clone().try_into().unwrap(), tcp_stream)
         .await
-        .unwrap();
+        .expect("TLS stream failed");
     let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls_stream))
         .await
-        .unwrap();
+        .expect("HTTP handshake failed");
     tokio::spawn(async move {
         if let Err(err) = conn.await {
             eprintln!("Connection failed: {:?}", err);

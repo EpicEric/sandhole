@@ -90,9 +90,9 @@ async fn tcp_allow_requested_ports() {
     let mut tcp_stream = TcpStream::connect("127.0.0.1:12345")
         .await
         .expect("TCP connection failed");
-    let mut buf = String::with_capacity(13);
-    tcp_stream.read_to_string(&mut buf).await.unwrap();
-    assert_eq!(buf, "Hello, world!");
+    let mut buf = [0u8; 13];
+    tcp_stream.read(&mut buf).await.unwrap();
+    assert_eq!(&buf, b"Hello, world!");
 }
 
 struct SshClient;

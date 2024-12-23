@@ -184,7 +184,7 @@ async fn admin_interface() {
             r"127.0.0.1:\d{4,5}",
         ]
         .into_iter()
-        .map(|re| Regex::new(re).unwrap())
+        .map(|re| Regex::new(re).expect("Invalid regex"))
         .collect();
         loop {
             let screen = rx.recv().await.unwrap();
@@ -210,7 +210,7 @@ async fn admin_interface() {
             r" <Esc> Close  <Delete> Remove ",
         ]
         .into_iter()
-        .map(|re| Regex::new(re).unwrap())
+        .map(|re| Regex::new(re).expect("Invalid regex"))
         .collect();
         loop {
             let screen = rx.recv().await.unwrap();
@@ -232,7 +232,7 @@ async fn admin_interface() {
             r" <Esc> Cancel  <Enter> Confirm ",
         ]
         .into_iter()
-        .map(|re| Regex::new(re).unwrap())
+        .map(|re| Regex::new(re).expect("Invalid regex"))
         .collect();
         loop {
             let screen = rx.recv().await.unwrap();
@@ -251,7 +251,7 @@ async fn admin_interface() {
             r" <Enter> Close ",
         ]
         .into_iter()
-        .map(|re| Regex::new(re).unwrap())
+        .map(|re| Regex::new(re).expect("Invalid regex"))
         .collect();
         loop {
             let screen = rx.recv().await.unwrap();
@@ -284,7 +284,7 @@ async fn admin_interface() {
             r"127.0.0.1:\d{4,5}",
         ]
         .into_iter()
-        .map(|re| Regex::new(re).unwrap())
+        .map(|re| Regex::new(re).expect("Invalid regex"))
         .collect();
         loop {
             let screen = rx.recv().await.unwrap();
@@ -310,7 +310,7 @@ async fn admin_interface() {
             r" <Esc> Close  <Delete> Remove ",
         ]
         .into_iter()
-        .map(|re| Regex::new(re).unwrap())
+        .map(|re| Regex::new(re).expect("Invalid regex"))
         .collect();
         loop {
             let screen = rx.recv().await.unwrap();

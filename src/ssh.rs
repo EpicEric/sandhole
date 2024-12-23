@@ -317,7 +317,7 @@ impl Handler for ServerHandler {
         let authentication = self
             .server
             .fingerprints_validator
-            .authenticate_fingerprint(self.key_fingerprint.as_ref().unwrap());
+            .authenticate_fingerprint(&fingerprint);
         match authentication {
             AuthenticationType::None => {
                 // Start timer for user to do local port forwarding.

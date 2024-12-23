@@ -89,7 +89,7 @@ async fn tcp_bind_random_ports() {
         .tcpip_forward("", 12345)
         .await
         .expect("tcpip_forward failed");
-    let regex = regex::Regex::new(r"foobar.tld:(\d+)").unwrap();
+    let regex = regex::Regex::new(r"foobar.tld:(\d+)").expect("Invalid regex");
     let Ok(port) = timeout(Duration::from_secs(3), async move {
         while let Some(message) = channel.wait().await {
             match message {
@@ -97,7 +97,11 @@ async fn tcp_bind_random_ports() {
                     let data =
                         String::from_utf8(data.to_vec()).expect("Invalid UTF-8 from message");
                     if let Some(captures) = regex.captures(&data) {
-                        let port = captures.get(1).unwrap().as_str().to_string();
+                        let port = captures
+                            .get(1)
+                            .expect("Missing port capture group")
+                            .as_str()
+                            .to_string();
                         return port;
                     }
                 }

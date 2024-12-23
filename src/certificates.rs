@@ -144,7 +144,9 @@ impl CertificateResolver {
                         );
                     }
                 }
-                init_tx.take().map(|tx| tx.send(()));
+                if let Some(tx) = init_tx.take() {
+                    let _ = tx.send(());
+                }
                 tokio::time::sleep(Duration::from_secs(2)).await
             }
         }));

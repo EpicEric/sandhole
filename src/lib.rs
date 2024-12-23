@@ -15,7 +15,7 @@ use connections::ConnectionMapReactor;
 use http::{DomainRedirect, ProxyData};
 use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
 use hyper_util::rt::TokioIo;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use login::ApiLogin;
 use quota::{DummyQuotaHandler, QuotaHandler, QuotaMap};
 use rand::rngs::OsRng;
@@ -381,10 +381,16 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         disable_http_logs: config.disable_http_logs,
         _phantom_data: PhantomData,
     });
-    tokio::spawn(async move {
+    let mut join_handle_http = tokio::spawn(async move {
         loop {
             let proxy_data = Arc::clone(&http_proxy_data);
-            let (stream, address) = http_listener.accept().await.unwrap();
+            let (stream, address) = match http_listener.accept().await {
+                Ok((stream, address)) => (stream, address),
+                Err(err) => {
+                    error!("Unable to accept HTTP connection: {}", err);
+                    break;
+                }
+            };
             let service = service_fn(move |req: Request<Incoming>| {
                 proxy_handler(req, address, Arc::clone(&proxy_data))
             });
@@ -426,9 +432,15 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     });
     let mut sandhole_clone = Arc::clone(&sandhole);
     let ssh_config_clone = Arc::clone(&ssh_config);
-    tokio::spawn(async move {
+    let mut join_handle_https = tokio::spawn(async move {
         loop {
-            let (stream, address) = https_listener.accept().await.unwrap();
+            let (stream, address) = match https_listener.accept().await {
+                Ok((stream, address)) => (stream, address),
+                Err(err) => {
+                    error!("Unable to accept HTTPS connection: {}", err);
+                    break;
+                }
+            };
             if config.connect_ssh_on_https_port {
                 let mut buf = [0u8; 8];
                 if let Ok(n) = stream.peek(&mut buf).await {
@@ -503,16 +515,27 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             conn = ssh_listener.accept() => {
                 let (stream, address) = match conn {
                     Ok((stream, address)) => (stream, address),
-                    Err(_) => break,
+                    Err(err) => {
+                        error!("Unable to accept SSH connection: {}", err);
+                        break;
+                    },
                 };
                 handle_ssh_connection(stream, address, &ssh_config, &mut sandhole).await;
             }
             _ = &mut signal_handler => {
                 break;
             }
+            _ = &mut join_handle_http => {
+                break;
+            }
+            _ = &mut join_handle_https => {
+                break;
+            }
         }
     }
     info!("sandhole is shutting down.");
+    join_handle_http.abort();
+    join_handle_https.abort();
     Ok(())
 }
 
