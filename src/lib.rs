@@ -210,7 +210,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     );
     let telemetry = Arc::new(Telemetry::new());
     let quota_handler: Arc<Box<dyn QuotaHandler + Send + Sync>> = match config.quota_per_user {
-        Some(max_quota) => Arc::new(Box::new(Arc::new(QuotaMap::new(max_quota)))),
+        Some(max_quota) => Arc::new(Box::new(Arc::new(QuotaMap::new(max_quota.into())))),
         None => Arc::new(Box::new(DummyQuotaHandler)),
     };
     let http_connections = Arc::new(ConnectionMap::new(
@@ -234,7 +234,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let tcp_handler: Arc<TcpHandler> = Arc::new(TcpHandler::new(
         config.listen_address,
         Arc::clone(&tcp_connections),
-        config.tcp_connection_timeout,
+        config.tcp_connection_timeout.map(Into::into),
         config.disable_tcp_logs,
     ));
     tcp_connections.update_reactor(Some(Arc::clone(&tcp_handler)));
@@ -350,8 +350,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         https_port: config.https_port,
         ssh_port: config.ssh_port,
         force_random_ports: !config.allow_requested_ports,
-        authentication_request_timeout: config.authentication_request_timeout,
-        idle_connection_timeout: config.idle_connection_timeout,
+        authentication_request_timeout: config.authentication_request_timeout.into(),
+        idle_connection_timeout: config.idle_connection_timeout.into(),
     });
 
     // HTTP handler
@@ -376,8 +376,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 port: config.http_port,
             }
         },
-        http_request_timeout: config.http_request_timeout,
-        websocket_timeout: config.tcp_connection_timeout,
+        http_request_timeout: config.http_request_timeout.into(),
+        websocket_timeout: config.tcp_connection_timeout.map(Into::into),
         disable_http_logs: config.disable_http_logs,
         _phantom_data: PhantomData,
     });
@@ -425,8 +425,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         protocol: Protocol::Https {
             port: config.https_port,
         },
-        http_request_timeout: config.http_request_timeout,
-        websocket_timeout: config.tcp_connection_timeout,
+        http_request_timeout: config.http_request_timeout.into(),
+        websocket_timeout: config.tcp_connection_timeout.map(Into::into),
         disable_http_logs: config.disable_http_logs,
         _phantom_data: PhantomData,
     });

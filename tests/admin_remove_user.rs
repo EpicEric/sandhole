@@ -2,6 +2,7 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use axum::{extract::Request, response::IntoResponse, routing::post, Json, Router};
+use clap::Parser;
 use http::StatusCode;
 use hyper::{body::Incoming, service::service_fn};
 use hyper_util::{
@@ -14,7 +15,7 @@ use russh::{
     Channel,
 };
 use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use sandhole::{entrypoint, ApplicationConfig, BindHostnames, LoadBalancing};
+use sandhole::{entrypoint, ApplicationConfig};
 use serde::Deserialize;
 use tokio::{
     io::AsyncWriteExt,
@@ -25,41 +26,35 @@ use tokio::{
 use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn admin_interface() {
+async fn admin_remove_user() {
     // 1. Initialize Sandhole
-    let config = ApplicationConfig {
-        domain: "foobar.tld".into(),
-        domain_redirect: "https://tokio.rs/".into(),
-        user_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys").into(),
-        admin_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys").into(),
-        certificates_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates")
-            .into(),
-        private_key_file: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh").into(),
-        disable_directory_creation: true,
-        listen_address: "127.0.0.1".into(),
-        password_authentication_url: Some("http://localhost:38080/authenticate".into()),
-        ssh_port: 18022,
-        http_port: 18080,
-        https_port: 18443,
-        connect_ssh_on_https_port: false,
-        force_https: false,
-        disable_http_logs: false,
-        disable_tcp_logs: false,
-        acme_contact_email: None,
-        acme_cache_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache").into(),
-        acme_use_staging: true,
-        bind_hostnames: BindHostnames::All,
-        load_balancing: LoadBalancing::Allow,
-        allow_requested_subdomains: true,
-        allow_requested_ports: true,
-        quota_per_user: None,
-        random_subdomain_seed: None,
-        txt_record_prefix: "_sandhole".into(),
-        idle_connection_timeout: Duration::from_millis(800),
-        authentication_request_timeout: Duration::from_secs(5),
-        http_request_timeout: Duration::from_secs(5),
-        tcp_connection_timeout: None,
-    };
+    let config = ApplicationConfig::parse_from([
+        "sandhole",
+        "--domain=foobar.tld",
+        "--user-keys-directory",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
+        "--admin-keys-directory",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys"),
+        "--certificates-directory",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates"),
+        "--private-key-file",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh"),
+        "--acme-cache-directory",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
+        "--disable-directory-creation",
+        "--listen-address=127.0.0.1",
+        "--ssh-port=18022",
+        "--http-port=18080",
+        "--https-port=18443",
+        "--acme-use-staging",
+        "--password-authentication-url=http://localhost:38080/authenticate",
+        "--bind-hostnames=all",
+        "--allow-requested-subdomains",
+        "--allow-requested-ports",
+        "--idle-connection-timeout=1s",
+        "--authentication-request-timeout=5s",
+        "--http-request-timeout=5s",
+    ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
         while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {

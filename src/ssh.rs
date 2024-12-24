@@ -234,11 +234,14 @@ impl Handler for ServerHandler {
         _session: &mut Session,
     ) -> Result<bool, Self::Error> {
         let Some(mut rx) = self.rx.take() else {
+            if matches!(
+                self.auth_data,
+                AuthenticatedData::None | AuthenticatedData::Proxy
+            ) {
+                return Err(russh::Error::Disconnect);
+            }
             return Ok(false);
         };
-        if let AuthenticatedData::None { .. } = self.auth_data {
-            return Err(russh::Error::Disconnect);
-        }
         let mut stream = channel.into_stream();
         let join_handle = tokio::spawn(async move {
             while let Some(message) = rx.recv().await {
@@ -353,8 +356,8 @@ impl Handler for ServerHandler {
             }
         }
         info!(
-            "{} ({}) connected with {} (public key)",
-            user, self.peer, self.auth_data
+            "{} ({}) connected with {} (public key {})",
+            user, self.peer, self.auth_data, fingerprint
         );
         Ok(Auth::Accept)
     }

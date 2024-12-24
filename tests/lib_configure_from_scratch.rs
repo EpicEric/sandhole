@@ -1,13 +1,14 @@
 use std::{fs, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use clap::Parser;
 use rand::{seq::SliceRandom, thread_rng};
 use russh::{
     client::{Msg, Session},
     Channel,
 };
 use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use sandhole::{entrypoint, ApplicationConfig, BindHostnames, LoadBalancing};
+use sandhole::{entrypoint, ApplicationConfig};
 use ssh_key::HashAlg;
 use tokio::{
     net::TcpStream,
@@ -30,38 +31,32 @@ async fn lib_configure_from_scratch() {
     .unwrap();
     let temp_dir = std::env::temp_dir().join(random_name);
     fs::create_dir(temp_dir.as_path()).expect("Unable to create tempdir");
-    let config = ApplicationConfig {
-        domain: "foobar.tld".into(),
-        domain_redirect: "https://tokio.rs/".into(),
-        user_keys_directory: temp_dir.join("user_keys"),
-        admin_keys_directory: temp_dir.join("admin_keys"),
-        certificates_directory: temp_dir.join("certificates"),
-        private_key_file: temp_dir.join("server_keys/ssh"),
-        disable_directory_creation: false,
-        listen_address: "127.0.0.1".into(),
-        password_authentication_url: None,
-        ssh_port: 18022,
-        http_port: 18080,
-        https_port: 18443,
-        connect_ssh_on_https_port: false,
-        force_https: false,
-        disable_http_logs: false,
-        disable_tcp_logs: false,
-        acme_contact_email: None,
-        acme_cache_directory: temp_dir.join("acme_cache"), // Doesn't get created because ACME is disabled
-        acme_use_staging: true,
-        bind_hostnames: BindHostnames::None,
-        load_balancing: LoadBalancing::Allow,
-        allow_requested_subdomains: false,
-        allow_requested_ports: true,
-        quota_per_user: None,
-        random_subdomain_seed: None,
-        txt_record_prefix: "_sandhole".into(),
-        idle_connection_timeout: Duration::from_secs(1),
-        authentication_request_timeout: Duration::from_secs(5),
-        http_request_timeout: Duration::from_secs(5),
-        tcp_connection_timeout: None,
-    };
+    let temp_dir_path = |path: &str| temp_dir.join(path).to_string_lossy().to_string();
+    let config = ApplicationConfig::parse_from([
+        "sandhole",
+        "--domain=foobar.tld",
+        "--user-keys-directory",
+        &temp_dir_path("user_keys"),
+        "--admin-keys-directory",
+        &temp_dir_path("admin_keys"),
+        "--certificates-directory",
+        &temp_dir_path("certificates"),
+        "--private-key-file",
+        &temp_dir_path("server_keys/ssh"),
+        // Doesn't get created because ACME is disabled
+        "--acme-cache-directory",
+        &temp_dir_path("acme_cache"),
+        "--listen-address=127.0.0.1",
+        "--ssh-port=18022",
+        "--http-port=18080",
+        "--https-port=18443",
+        "--acme-use-staging",
+        "--bind-hostnames=none",
+        "--allow-requested-ports",
+        "--idle-connection-timeout=1s",
+        "--authentication-request-timeout=5s",
+        "--http-request-timeout=5s",
+    ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
         while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {

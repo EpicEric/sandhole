@@ -209,6 +209,7 @@ impl<R: Resolver> AddressDelegator<R> {
         let mut hash_initialized = false;
         if let Some(ref strategy) = self.random_subdomain_seed {
             match strategy {
+                // Requested address and user
                 RandomSubdomainSeed::User => {
                     if let Some(user) = user {
                         requested_address.hash(&mut hasher);
@@ -218,7 +219,8 @@ impl<R: Resolver> AddressDelegator<R> {
                         warn!("No SSH user when assigning subdomain. Defaulting to random.")
                     }
                 }
-                RandomSubdomainSeed::UserAndFingerprint => {
+                // Requested address, user, and fingerprint
+                RandomSubdomainSeed::Fingerprint => {
                     if let Some(user) = user {
                         requested_address.hash(&mut hasher);
                         user.hash(&mut hasher);
@@ -236,6 +238,7 @@ impl<R: Resolver> AddressDelegator<R> {
                         )
                     }
                 }
+                // Requested address, IP, and user
                 RandomSubdomainSeed::IpAndUser => {
                     requested_address.hash(&mut hasher);
                     socket_address.ip().hash(&mut hasher);
@@ -244,7 +247,8 @@ impl<R: Resolver> AddressDelegator<R> {
                     }
                     hash_initialized = true;
                 }
-                RandomSubdomainSeed::SocketAddress => {
+                // Requested address
+                RandomSubdomainSeed::Address => {
                     requested_address.hash(&mut hasher);
                     socket_address.hash(&mut hasher);
                     hash_initialized = true;
@@ -286,7 +290,7 @@ mod address_delegator_tests {
     use std::net::SocketAddr;
     use webpki::types::DnsName;
 
-    use crate::config::BindHostnames;
+    use crate::{config::BindHostnames, RandomSubdomainSeed};
 
     use super::{AddressDelegator, MockResolver};
 
@@ -753,7 +757,7 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::None,
             true,
-            Some(crate::config::RandomSubdomainSeed::User),
+            Some(RandomSubdomainSeed::User),
         );
         let address1_u1_a1 = delegator
             .get_address(
@@ -829,7 +833,7 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::None,
             true,
-            Some(crate::config::RandomSubdomainSeed::UserAndFingerprint),
+            Some(RandomSubdomainSeed::Fingerprint),
         );
         let address1_f1_a1_u0 = delegator
             .get_address(
@@ -1019,7 +1023,7 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::None,
             true,
-            Some(crate::config::RandomSubdomainSeed::IpAndUser),
+            Some(RandomSubdomainSeed::IpAndUser),
         );
         let address1_u1_i1 = delegator
             .get_address(
@@ -1089,7 +1093,7 @@ mod address_delegator_tests {
             "root.tld".into(),
             BindHostnames::None,
             true,
-            Some(crate::config::RandomSubdomainSeed::SocketAddress),
+            Some(RandomSubdomainSeed::Address),
         );
         let address1_s1_a1 = delegator
             .get_address(

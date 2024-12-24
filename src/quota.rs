@@ -75,12 +75,12 @@ impl QuotaHandler for DummyQuotaHandler {
 }
 
 pub(crate) struct QuotaMap {
-    max_quota: NonZero<usize>,
-    map: DashMap<UserIdentification, usize>,
+    max_quota: NonZero<u32>,
+    map: DashMap<UserIdentification, u32>,
 }
 
 impl QuotaMap {
-    pub(crate) fn new(max_quota: NonZero<usize>) -> Self {
+    pub(crate) fn new(max_quota: NonZero<u32>) -> Self {
         QuotaMap {
             max_quota,
             map: DashMap::new(),

@@ -6,10 +6,12 @@
 
 - Add user detail popups to admin interface.
 - Add functionality to remove users via the admin interface.
+- Add CLI to integration tests.
 
 ### Changed
 
 - Bump MSRV to 1.82.0.
+- Consolidate configurations.
 
 ## 0.2.1 (2024-12-22)
 

@@ -1,13 +1,14 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use clap::Parser;
 use rand::rngs::OsRng;
 use russh::{
     client::{self, Msg, Session},
     Channel,
 };
 use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use sandhole::{entrypoint, ApplicationConfig, BindHostnames, LoadBalancing};
+use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
@@ -21,39 +22,31 @@ use tokio::{
 #[tokio::test(flavor = "multi_thread")]
 async fn auth_prevent_unauthorized_actions() {
     // 1. Initialize Sandhole
-    let config = ApplicationConfig {
-        domain: "foobar.tld".into(),
-        domain_redirect: "https://tokio.rs/".into(),
-        user_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys").into(),
-        admin_keys_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys").into(),
-        certificates_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates")
-            .into(),
-        private_key_file: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh").into(),
-        disable_directory_creation: true,
-        listen_address: "127.0.0.1".into(),
-        password_authentication_url: None,
-        ssh_port: 18022,
-        http_port: 18080,
-        https_port: 18443,
-        connect_ssh_on_https_port: false,
-        force_https: false,
-        disable_http_logs: false,
-        disable_tcp_logs: false,
-        acme_contact_email: None,
-        acme_cache_directory: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache").into(),
-        acme_use_staging: true,
-        bind_hostnames: BindHostnames::All,
-        load_balancing: LoadBalancing::Allow,
-        allow_requested_subdomains: false,
-        allow_requested_ports: true,
-        quota_per_user: None,
-        random_subdomain_seed: None,
-        txt_record_prefix: "_sandhole".into(),
-        idle_connection_timeout: Duration::from_millis(800),
-        authentication_request_timeout: Duration::from_secs(5),
-        http_request_timeout: Duration::from_secs(5),
-        tcp_connection_timeout: None,
-    };
+    let config = ApplicationConfig::parse_from([
+        "sandhole",
+        "--domain=foobar.tld",
+        "--user-keys-directory",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
+        "--admin-keys-directory",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys"),
+        "--certificates-directory",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates"),
+        "--private-key-file",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh"),
+        "--acme-cache-directory",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
+        "--disable-directory-creation",
+        "--listen-address=127.0.0.1",
+        "--ssh-port=18022",
+        "--http-port=18080",
+        "--https-port=18443",
+        "--acme-use-staging",
+        "--bind-hostnames=all",
+        "--allow-requested-ports",
+        "--idle-connection-timeout=800ms",
+        "--authentication-request-timeout=5s",
+        "--http-request-timeout=5s",
+    ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
         while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {
@@ -167,7 +160,7 @@ async fn auth_prevent_unauthorized_actions() {
     );
     assert!(session.is_closed(), "didn't disconnect unauthed user");
 
-    // 3d. Try to open session without credentials
+    // 3d. Try to open multiple sessions without credentials
     let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
@@ -184,8 +177,13 @@ async fn auth_prevent_unauthorized_actions() {
         "authentication didn't succeed"
     );
     assert!(
+        session.channel_open_session().await.is_ok(),
+        "should allow one open session for unauthed user"
+    );
+    assert!(!session.is_closed(), "shouldn't disconnect unauthed user");
+    assert!(
         session.channel_open_session().await.is_err(),
-        "shouldn't allow open session for unauthed user"
+        "shouldn't allow a second open session for unauthed user"
     );
     assert!(session.is_closed(), "didn't disconnect unauthed user");
 
