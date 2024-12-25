@@ -3,7 +3,10 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt::Display,
     net::SocketAddr,
-    sync::{atomic::Ordering, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
 use crate::{
@@ -12,6 +15,7 @@ use crate::{
     droppable_handle::DroppableHandle,
     error::ServerError,
     fingerprints::AuthenticationType,
+    http::proxy_handler,
     login::AuthenticationRequest,
     quota::{TokenHolder, UserIdentification},
     tcp::{is_alias, PortHandler, NO_ALIAS_HOST},
@@ -20,6 +24,12 @@ use crate::{
 };
 
 use async_trait::async_trait;
+use http::Request;
+use hyper::{body::Incoming, service::service_fn};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto,
+};
 use log::{debug, info, warn};
 use russh::{
     server::{Auth, Handler, Msg, Session},
@@ -29,9 +39,11 @@ use russh_keys::PublicKey;
 use ssh_key::{Fingerprint, HashAlg};
 use tokio::{
     io::{copy_bidirectional, AsyncWriteExt},
-    sync::{mpsc, watch, RwLock},
+    sync::{mpsc, watch, Mutex, RwLock},
     time::{sleep, timeout},
 };
+
+type FingerprintFn = dyn Fn(Option<&Fingerprint>) -> bool + Send + Sync;
 
 #[derive(Clone)]
 pub(crate) struct SshTunnelHandler {
@@ -110,8 +122,6 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
     }
 }
 
-type FingerprintFn = dyn Fn(Option<&Fingerprint>) -> bool + Send + Sync;
-
 struct UserData {
     allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
     quota_key: TokenHolder,
@@ -153,8 +163,9 @@ impl AdminData {
 }
 
 enum AuthenticatedData {
-    None,
-    Proxy,
+    None {
+        proxy_count: Arc<AtomicUsize>,
+    },
     User {
         user_data: Box<UserData>,
     },
@@ -168,7 +179,6 @@ impl Display for AuthenticatedData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AuthenticatedData::None { .. } => f.write_str("no authentication"),
-            AuthenticatedData::Proxy => f.write_str("no authentication (proxy)"),
             AuthenticatedData::User { .. } => f.write_str("user authentication"),
             AuthenticatedData::Admin { .. } => f.write_str("admin authentication"),
         }
@@ -177,7 +187,7 @@ impl Display for AuthenticatedData {
 
 pub(crate) struct ServerHandler {
     id: usize,
-    timeout_handle: Option<DroppableHandle<()>>,
+    timeout_handle: Arc<Mutex<Option<DroppableHandle<()>>>>,
     peer: SocketAddr,
     user: Option<String>,
     key_fingerprint: Option<Fingerprint>,
@@ -209,12 +219,14 @@ impl Server for Arc<SandholeServer> {
         let (tx, rx) = mpsc::unbounded_channel();
         ServerHandler {
             id,
-            timeout_handle: None,
+            timeout_handle: Arc::new(Mutex::new(None)),
             peer: peer_address,
             user: None,
             key_fingerprint: None,
             cancelation_tx,
-            auth_data: AuthenticatedData::None,
+            auth_data: AuthenticatedData::None {
+                proxy_count: Arc::new(AtomicUsize::new(0)),
+            },
             tx,
             rx: Some(rx),
             open_session_join_handle: None,
@@ -234,10 +246,7 @@ impl Handler for ServerHandler {
         _session: &mut Session,
     ) -> Result<bool, Self::Error> {
         let Some(mut rx) = self.rx.take() else {
-            if matches!(
-                self.auth_data,
-                AuthenticatedData::None | AuthenticatedData::Proxy
-            ) {
+            if matches!(self.auth_data, AuthenticatedData::None { .. }) {
                 return Err(russh::Error::Disconnect);
             }
             return Ok(false);
@@ -327,10 +336,11 @@ impl Handler for ServerHandler {
                 // Otherwise, the connection will be canceled upon expiration
                 let cancelation_tx = self.cancelation_tx.clone();
                 let timeout = self.server.idle_connection_timeout;
-                self.timeout_handle = Some(DroppableHandle(tokio::spawn(async move {
-                    sleep(timeout).await;
-                    let _ = cancelation_tx.send(());
-                })));
+                *self.timeout_handle.lock().await =
+                    Some(DroppableHandle(tokio::spawn(async move {
+                        sleep(timeout).await;
+                        let _ = cancelation_tx.send(());
+                    })));
             }
             AuthenticationType::User => {
                 self.server
@@ -369,15 +379,14 @@ impl Handler for ServerHandler {
         data: &[u8],
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        // Sending Ctrl+C ends the session and disconnects the client
+        // Ctrl+C ends the session and disconnects the client
         if data == b"\x03" {
             let _ = self.cancelation_tx.send(());
             return Ok(());
         }
         debug!("received data {:?}", data);
         match &mut self.auth_data {
-            AuthenticatedData::None { .. } => return Err(russh::Error::Disconnect),
-            AuthenticatedData::Proxy | AuthenticatedData::User { .. } => (),
+            AuthenticatedData::None { .. } | AuthenticatedData::User { .. } => (),
             AuthenticatedData::Admin { admin_data, .. } => {
                 if let Some(admin_interface) = admin_data.admin_interface.as_mut() {
                     match data {
@@ -477,7 +486,7 @@ impl Handler for ServerHandler {
                 user_data.row_height = Some(row_height);
                 session.channel_success(channel)?;
             }
-            AuthenticatedData::None { .. } | AuthenticatedData::Proxy => (),
+            AuthenticatedData::None { .. } => (),
         }
         Ok(())
     }
@@ -523,9 +532,7 @@ impl Handler for ServerHandler {
         let user_data = match &mut self.auth_data {
             AuthenticatedData::User { user_data, .. }
             | AuthenticatedData::Admin { user_data, .. } => user_data,
-            AuthenticatedData::None { .. } | AuthenticatedData::Proxy => {
-                return Err(russh::Error::Disconnect)
-            }
+            AuthenticatedData::None { .. } => return Err(russh::Error::Disconnect),
         };
         let handle = session.handle();
         match *port {
@@ -824,9 +831,7 @@ impl Handler for ServerHandler {
         let user_data = match &mut self.auth_data {
             AuthenticatedData::User { user_data, .. }
             | AuthenticatedData::Admin { user_data, .. } => user_data,
-            AuthenticatedData::None { .. } | AuthenticatedData::Proxy => {
-                return Err(russh::Error::Disconnect)
-            }
+            AuthenticatedData::None { .. } => return Err(russh::Error::Disconnect),
         };
         match port {
             22 => {
@@ -899,39 +904,44 @@ impl Handler for ServerHandler {
         }
         let port_to_connect = port_to_connect as u16;
         if port_to_connect == self.server.http_port || port_to_connect == self.server.https_port {
-            if let Some(handler) = self.server.http.get(host_to_connect) {
-                if let Ok(mut io) = handler
-                    .aliasing_channel(
-                        originator_address,
-                        originator_port as u16,
-                        self.key_fingerprint.as_ref(),
-                    )
-                    .await
-                {
-                    if self.timeout_handle.take().is_some() {
-                        self.auth_data = AuthenticatedData::Proxy;
-                    }
-                    let _ = handler.log_channel().send(
-                        format!(
-                            "New HTTP proxy from {}:{} => http://{}\r\n",
-                            originator_address, originator_port, host_to_connect
-                        )
-                        .into_bytes(),
-                    );
+            let peer = self.peer;
+            let fingerprint = self.key_fingerprint;
+            let proxy_data = Arc::clone(&self.server.aliasing_proxy_data);
+            let service = service_fn(move |req: Request<Incoming>| {
+                proxy_handler(req, peer, fingerprint, Arc::clone(&proxy_data))
+            });
+            let io = TokioIo::new(channel.into_stream());
+            match self.auth_data {
+                AuthenticatedData::None { ref proxy_count } => {
+                    self.timeout_handle.lock().await.take();
+                    proxy_count.fetch_add(1, Ordering::Release);
+                    let proxy_count = Arc::clone(proxy_count);
+                    let timeout_handle = Arc::clone(&self.timeout_handle);
+                    let idle_connection_timeout = self.server.idle_connection_timeout;
+                    let cancelation_tx = self.cancelation_tx.clone();
                     tokio::spawn(async move {
-                        let mut stream = channel.into_stream();
-                        let _ = copy_bidirectional(&mut stream, &mut io).await;
+                        let server = auto::Builder::new(TokioExecutor::new());
+                        let conn = server.serve_connection_with_upgrades(io, service);
+                        let _ = conn.await;
+                        if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
+                            *timeout_handle.lock().await =
+                                Some(DroppableHandle(tokio::spawn(async move {
+                                    sleep(idle_connection_timeout).await;
+                                    let _ = cancelation_tx.send(());
+                                })));
+                        }
                     });
-                    info!(
-                        "Accepted connection from {} => {} ({})",
-                        self.peer, host_to_connect, handler.peer,
-                    );
-                    let _ = self
-                        .tx
-                        .send(format!("Forwarding HTTP from {}\r\n", host_to_connect).into_bytes());
-                    return Ok(true);
+                }
+                _ => {
+                    tokio::spawn(async move {
+                        let server = auto::Builder::new(TokioExecutor::new());
+                        let conn = server.serve_connection_with_upgrades(io, service);
+                        let _ = conn.await;
+                    });
                 }
             }
+
+            return Ok(true);
         } else if port_to_connect == self.server.ssh_port {
             if let Some(handler) = self.server.ssh.get(host_to_connect) {
                 if let Ok(mut io) = handler
@@ -942,9 +952,6 @@ impl Handler for ServerHandler {
                     )
                     .await
                 {
-                    if self.timeout_handle.take().is_some() {
-                        self.auth_data = AuthenticatedData::Proxy;
-                    }
                     let _ = handler.log_channel().send(
                         format!(
                             "New SSH proxy from {}:{} => {}:{}\r\n",
@@ -952,10 +959,55 @@ impl Handler for ServerHandler {
                         )
                         .into_bytes(),
                     );
-                    tokio::spawn(async move {
-                        let mut stream = channel.into_stream();
-                        let _ = copy_bidirectional(&mut stream, &mut io).await;
-                    });
+                    match self.auth_data {
+                        AuthenticatedData::None { ref proxy_count } => {
+                            self.timeout_handle.lock().await.take();
+                            proxy_count.fetch_add(1, Ordering::Release);
+                            let proxy_count = Arc::clone(proxy_count);
+                            let timeout_handle = Arc::clone(&self.timeout_handle);
+                            let idle_connection_timeout = self.server.idle_connection_timeout;
+                            let cancelation_tx = self.cancelation_tx.clone();
+                            let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                            tokio::spawn(async move {
+                                let mut stream = channel.into_stream();
+                                match tcp_connection_timeout {
+                                    Some(duration) => {
+                                        let _ = timeout(duration, async {
+                                            copy_bidirectional(&mut stream, &mut io).await
+                                        })
+                                        .await;
+                                    }
+                                    None => {
+                                        let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                    }
+                                }
+                                if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
+                                    *timeout_handle.lock().await =
+                                        Some(DroppableHandle(tokio::spawn(async move {
+                                            sleep(idle_connection_timeout).await;
+                                            let _ = cancelation_tx.send(());
+                                        })));
+                                }
+                            });
+                        }
+                        _ => {
+                            let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                            tokio::spawn(async move {
+                                let mut stream = channel.into_stream();
+                                match tcp_connection_timeout {
+                                    Some(duration) => {
+                                        let _ = timeout(duration, async {
+                                            copy_bidirectional(&mut stream, &mut io).await
+                                        })
+                                        .await;
+                                    }
+                                    None => {
+                                        let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                    }
+                                }
+                            });
+                        }
+                    }
                     info!(
                         "Accepted connection from {} => {} ({})",
                         self.peer, host_to_connect, handler.peer,
@@ -979,9 +1031,6 @@ impl Handler for ServerHandler {
                 )
                 .await
             {
-                if self.timeout_handle.take().is_some() {
-                    self.auth_data = AuthenticatedData::Proxy;
-                }
                 let _ = handler.log_channel().send(
                     format!(
                         "New TCP proxy from {}:{} => {}:{}\r\n",
@@ -989,10 +1038,55 @@ impl Handler for ServerHandler {
                     )
                     .into_bytes(),
                 );
-                tokio::spawn(async move {
-                    let mut stream = channel.into_stream();
-                    let _ = copy_bidirectional(&mut stream, &mut io).await;
-                });
+                match self.auth_data {
+                    AuthenticatedData::None { ref proxy_count } => {
+                        self.timeout_handle.lock().await.take();
+                        proxy_count.fetch_add(1, Ordering::Release);
+                        let proxy_count = Arc::clone(proxy_count);
+                        let timeout_handle = Arc::clone(&self.timeout_handle);
+                        let idle_connection_timeout = self.server.idle_connection_timeout;
+                        let cancelation_tx = self.cancelation_tx.clone();
+                        let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                        tokio::spawn(async move {
+                            let mut stream = channel.into_stream();
+                            match tcp_connection_timeout {
+                                Some(duration) => {
+                                    let _ = timeout(duration, async {
+                                        copy_bidirectional(&mut stream, &mut io).await
+                                    })
+                                    .await;
+                                }
+                                None => {
+                                    let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                }
+                            }
+                            if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
+                                *timeout_handle.lock().await =
+                                    Some(DroppableHandle(tokio::spawn(async move {
+                                        sleep(idle_connection_timeout).await;
+                                        let _ = cancelation_tx.send(());
+                                    })));
+                            }
+                        });
+                    }
+                    _ => {
+                        let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                        tokio::spawn(async move {
+                            let mut stream = channel.into_stream();
+                            match tcp_connection_timeout {
+                                Some(duration) => {
+                                    let _ = timeout(duration, async {
+                                        copy_bidirectional(&mut stream, &mut io).await
+                                    })
+                                    .await;
+                                }
+                                None => {
+                                    let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                }
+                            }
+                        });
+                    }
+                }
                 info!(
                     "Accepted connection from {} => {} ({})",
                     self.peer, host_to_connect, handler.peer,
@@ -1003,11 +1097,12 @@ impl Handler for ServerHandler {
                 return Ok(true);
             }
         }
-        if let AuthenticatedData::None { .. } = self.auth_data {
-            Err(russh::Error::Disconnect)
-        } else {
-            Ok(false)
+        if let AuthenticatedData::None { ref proxy_count } = self.auth_data {
+            if proxy_count.load(Ordering::Acquire) == 0 {
+                return Err(russh::Error::Disconnect);
+            }
         }
+        Ok(false)
     }
 }
 
@@ -1042,7 +1137,7 @@ impl Drop for ServerHandler {
                         });
                 });
             }
-            AuthenticatedData::Proxy | AuthenticatedData::None { .. } => (),
+            AuthenticatedData::None { .. } => (),
         }
     }
 }

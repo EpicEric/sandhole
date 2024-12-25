@@ -12,14 +12,20 @@ use std::{
 
 use anyhow::Context;
 use connections::ConnectionMapReactor;
-use http::{DomainRedirect, ProxyData};
-use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
-use hyper_util::rt::TokioIo;
+use http::{DomainRedirect, ProxyData, ProxyType};
+use hyper::{body::Incoming, service::service_fn, Request};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto,
+};
 use log::{debug, error, info, warn};
 use login::ApiLogin;
 use quota::{DummyQuotaHandler, QuotaHandler, QuotaMap};
 use rand::rngs::OsRng;
-use russh::server::Config;
+use russh::{
+    server::{Config, Msg},
+    ChannelStream,
+};
 use russh_keys::decode_secret_key;
 use rustls::ServerConfig;
 use rustls_acme::is_tls_alpn_challenge;
@@ -106,6 +112,8 @@ pub(crate) struct SandholeServer {
     pub(crate) ssh_data: DataTable<String, BTreeMap<SocketAddr, String>>,
     pub(crate) tcp_data: DataTable<TcpAlias, BTreeMap<SocketAddr, String>>,
     pub(crate) system_data: Arc<RwLock<SystemData>>,
+    pub(crate) aliasing_proxy_data:
+        Arc<ProxyData<SshTunnelHandler, ChannelStream<Msg>, HttpReactor>>,
     pub(crate) fingerprints_validator: FingerprintsValidator,
     pub(crate) api_login: Option<ApiLogin>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
@@ -117,6 +125,7 @@ pub(crate) struct SandholeServer {
     pub(crate) force_random_ports: bool,
     pub(crate) authentication_request_timeout: Duration,
     pub(crate) idle_connection_timeout: Duration,
+    pub(crate) tcp_connection_timeout: Option<Duration>,
 }
 
 #[doc(hidden)]
@@ -330,6 +339,19 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         keys: vec![key],
         ..Default::default()
     });
+    let aliasing_proxy_data = Arc::new(ProxyData {
+        conn_manager: Arc::clone(&http_connections),
+        telemetry: Arc::clone(&telemetry),
+        domain_redirect: Arc::clone(&domain_redirect),
+        protocol: Protocol::Http {
+            port: config.http_port,
+        },
+        proxy_type: ProxyType::Aliasing,
+        http_request_timeout: config.http_request_timeout.into(),
+        websocket_timeout: config.tcp_connection_timeout.map(Into::into),
+        disable_http_logs: config.disable_http_logs,
+        _phantom_data: PhantomData,
+    });
     let mut sandhole = Arc::new(SandholeServer {
         session_id: AtomicUsize::new(0),
         sessions_password: Mutex::default(),
@@ -341,6 +363,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         ssh_data,
         tcp_data,
         system_data,
+        aliasing_proxy_data,
         fingerprints_validator: fingerprints,
         api_login,
         address_delegator: addressing,
@@ -352,6 +375,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         force_random_ports: !config.allow_requested_ports,
         authentication_request_timeout: config.authentication_request_timeout.into(),
         idle_connection_timeout: config.idle_connection_timeout.into(),
+        tcp_connection_timeout: config.tcp_connection_timeout.map(Into::into),
     });
 
     // HTTP handler
@@ -376,6 +400,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 port: config.http_port,
             }
         },
+        proxy_type: ProxyType::Tunneling,
         http_request_timeout: config.http_request_timeout.into(),
         websocket_timeout: config.tcp_connection_timeout.map(Into::into),
         disable_http_logs: config.disable_http_logs,
@@ -392,13 +417,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 }
             };
             let service = service_fn(move |req: Request<Incoming>| {
-                proxy_handler(req, address, Arc::clone(&proxy_data))
+                proxy_handler(req, address, None, Arc::clone(&proxy_data))
             });
             let io = TokioIo::new(stream);
             tokio::spawn(async move {
-                let conn = http1::Builder::new()
-                    .serve_connection(io, service)
-                    .with_upgrades();
+                let server = auto::Builder::new(TokioExecutor::new());
+                let conn = server.serve_connection_with_upgrades(io, service);
                 let _ = conn.await;
             });
         }
@@ -425,6 +449,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         protocol: Protocol::Https {
             port: config.https_port,
         },
+        proxy_type: ProxyType::Tunneling,
         http_request_timeout: config.http_request_timeout.into(),
         websocket_timeout: config.tcp_connection_timeout.map(Into::into),
         disable_http_logs: config.disable_http_logs,
@@ -459,7 +484,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             let proxy_data = Arc::clone(&https_proxy_data);
             let server_config = Arc::clone(&tls_server_config);
             let service = service_fn(move |req: Request<Incoming>| {
-                proxy_handler(req, address, Arc::clone(&proxy_data))
+                proxy_handler(req, address, None, Arc::clone(&proxy_data))
             });
             match LazyConfigAcceptor::new(Default::default(), stream).await {
                 Ok(handshake) => {
@@ -476,9 +501,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                         tokio::spawn(async move {
                             match handshake.into_stream(server_config).await {
                                 Ok(stream) => {
-                                    let conn = http1::Builder::new()
-                                        .serve_connection(TokioIo::new(stream), service)
-                                        .with_upgrades();
+                                    let server = auto::Builder::new(TokioExecutor::new());
+                                    let conn = server.serve_connection_with_upgrades(
+                                        TokioIo::new(stream),
+                                        service,
+                                    );
                                     let _ = conn.await;
                                 }
                                 Err(err) => {

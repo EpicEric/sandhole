@@ -19,6 +19,7 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use log::warn;
+use ssh_key::Fingerprint;
 use tokio::{
     io::{copy_bidirectional, AsyncRead, AsyncWrite},
     sync::mpsc,
@@ -90,7 +91,7 @@ pub(crate) enum Protocol {
     Http {
         port: u16,
     },
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     TlsRedirect {
         from: u16,
         to: u16,
@@ -105,6 +106,11 @@ pub(crate) struct DomainRedirect {
     pub(crate) to: String,
 }
 
+pub(crate) enum ProxyType {
+    Tunneling,
+    Aliasing,
+}
+
 pub(crate) struct ProxyData<H, T, R>
 where
     H: ConnectionHandler<T>,
@@ -115,6 +121,7 @@ where
     pub(crate) telemetry: Arc<Telemetry>,
     pub(crate) domain_redirect: Arc<DomainRedirect>,
     pub(crate) protocol: Protocol,
+    pub(crate) proxy_type: ProxyType,
     pub(crate) http_request_timeout: Duration,
     pub(crate) websocket_timeout: Option<Duration>,
     pub(crate) disable_http_logs: bool,
@@ -125,6 +132,7 @@ where
 pub(crate) async fn proxy_handler<B, H, T, R>(
     mut request: Request<B>,
     tcp_address: SocketAddr,
+    fingerprint: Option<Fingerprint>,
     proxy_data: Arc<ProxyData<H, T, R>>,
 ) -> anyhow::Result<Response<AxumBody>>
 where
@@ -219,7 +227,14 @@ where
         .insert(X_FORWARDED_PORT, port.parse().unwrap());
     telemetry.add_http_request(host.clone());
 
-    let Ok(io) = handler.tunneling_channel(&ip, tcp_address.port()).await else {
+    let Ok(io) = (match proxy_data.proxy_type {
+        ProxyType::Tunneling => handler.tunneling_channel(&ip, tcp_address.port()).await,
+        ProxyType::Aliasing => {
+            handler
+                .aliasing_channel(&ip, tcp_address.port(), fingerprint.as_ref())
+                .await
+        }
+    }) else {
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
     let tx = handler.log_channel();
@@ -347,7 +362,7 @@ mod proxy_handler_tests {
         telemetry::Telemetry,
     };
 
-    use super::{proxy_handler, ConnectionMap, DomainRedirect, Protocol, ProxyData};
+    use super::{proxy_handler, ConnectionMap, DomainRedirect, Protocol, ProxyData, ProxyType};
 
     #[tokio::test]
     async fn errors_on_missing_host_header() {
@@ -370,6 +385,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
+            None,
             Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
@@ -378,6 +394,7 @@ mod proxy_handler_tests {
                     to: "https://example.com".into(),
                 }),
                 protocol: Protocol::Http { port: 80 },
+                proxy_type: ProxyType::Tunneling,
                 http_request_timeout: Duration::from_secs(5),
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -410,6 +427,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
+            None,
             Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
@@ -418,6 +436,7 @@ mod proxy_handler_tests {
                     to: "https://example.com".into(),
                 }),
                 protocol: Protocol::Http { port: 80 },
+                proxy_type: ProxyType::Tunneling,
                 http_request_timeout: Duration::from_secs(5),
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -452,6 +471,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
+            None,
             Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
@@ -460,6 +480,7 @@ mod proxy_handler_tests {
                     to: "https://example.com".into(),
                 }),
                 protocol: Protocol::Http { port: 80 },
+                proxy_type: ProxyType::Tunneling,
                 http_request_timeout: Duration::from_secs(5),
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -509,6 +530,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
+            None,
             Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
@@ -517,6 +539,7 @@ mod proxy_handler_tests {
                     to: "https://example.com".into(),
                 }),
                 protocol: Protocol::TlsRedirect { from: 80, to: 443 },
+                proxy_type: ProxyType::Tunneling,
                 http_request_timeout: Duration::from_secs(5),
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -569,6 +592,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
+            None,
             Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
@@ -577,6 +601,7 @@ mod proxy_handler_tests {
                     to: "https://example.com".into(),
                 }),
                 protocol: Protocol::TlsRedirect { from: 80, to: 8443 },
+                proxy_type: ProxyType::Tunneling,
                 http_request_timeout: Duration::from_secs(5),
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -661,6 +686,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "127.0.0.1:12345".parse().unwrap(),
+            None,
             Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
@@ -669,6 +695,7 @@ mod proxy_handler_tests {
                     to: "https://example.com".into(),
                 }),
                 protocol: Protocol::Https { port: 443 },
+                proxy_type: ProxyType::Tunneling,
                 http_request_timeout: Duration::from_secs(5),
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -751,6 +778,7 @@ mod proxy_handler_tests {
         let response = proxy_handler(
             request,
             "192.168.0.1:12345".parse().unwrap(),
+            None,
             Arc::new(ProxyData {
                 conn_manager: Arc::clone(&conn_manager),
                 telemetry: Arc::new(Telemetry::new()),
@@ -759,6 +787,7 @@ mod proxy_handler_tests {
                     to: "https://this.is.ignored".into(),
                 }),
                 protocol: Protocol::Https { port: 443 },
+                proxy_type: ProxyType::Tunneling,
                 http_request_timeout: Duration::from_secs(5),
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -835,6 +864,7 @@ mod proxy_handler_tests {
             proxy_handler(
                 request,
                 "127.0.0.1:12345".parse().unwrap(),
+                None,
                 Arc::new(ProxyData {
                     conn_manager: Arc::clone(&conn_manager),
                     telemetry: Arc::new(Telemetry::new()),
@@ -843,6 +873,7 @@ mod proxy_handler_tests {
                         to: "https://example.com".into(),
                     }),
                     protocol: Protocol::Https { port: 443 },
+                    proxy_type: ProxyType::Tunneling,
                     http_request_timeout: Duration::from_secs(5),
                     websocket_timeout: None,
                     disable_http_logs: false,

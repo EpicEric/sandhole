@@ -7,11 +7,13 @@
 - Add user detail popups to admin interface.
 - Add functionality to remove users via the admin interface.
 - Add CLI to integration tests.
+- Add mechanism to disconnect unproxied unauthed users.
 
 ### Changed
 
 - Bump MSRV to 1.82.0.
 - Consolidate configurations.
+- Use `proxy_handler` for HTTP local forwardings.
 
 ## 0.2.1 (2024-12-22)
 

@@ -281,6 +281,40 @@ async fn auth_prevent_unauthorized_actions() {
         session.is_closed(),
         "didn't disconnect lingering unauthed user"
     );
+
+    // 3h. Local-forward, then idle
+    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
+    let ssh_client = SshClient;
+    let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
+    assert!(
+        session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
+    let channel = session
+        .channel_open_direct_tcpip("proxy.hostname", 12345, "my.hostname", 23456)
+        .await
+        .expect("didn't create valid local forwarding");
+    assert!(
+        !session.is_closed(),
+        "shouldn't disconnect valid local forwarding session"
+    );
+    channel
+        .close()
+        .await
+        .expect("shouldn't panic on channel close");
+    sleep(Duration::from_millis(1_000)).await;
+    assert!(
+        session.is_closed(),
+        "didn't disconnect lingering unauthed user"
+    );
 }
 
 struct SshClient;
