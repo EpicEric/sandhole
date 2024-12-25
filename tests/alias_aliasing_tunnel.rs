@@ -37,7 +37,6 @@ async fn alias_aliasing_tunnel() {
         "--https-port=18443",
         "--acme-use-staging",
         "--bind-hostnames=none",
-        "--allow-requested-ports",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",

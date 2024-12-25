@@ -8,12 +8,15 @@
 - Add functionality to remove users via the admin interface.
 - Add CLI to integration tests.
 - Add mechanism to disconnect unproxied unauthed users.
+- Add `tcp-alias` option for remote forwarding connections.
+- Add `--disable-aliasing` CLI flag.
 
 ### Changed
 
 - Bump MSRV to 1.82.0.
 - Consolidate configurations.
 - Use `proxy_handler` for HTTP local forwardings.
+- Improve support for HTTP aliases.
 
 ## 0.2.1 (2024-12-22)
 

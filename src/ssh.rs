@@ -124,6 +124,7 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
 
 struct UserData {
     allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
+    tcp_alias_only: bool,
     quota_key: TokenHolder,
     col_width: Option<u32>,
     row_height: Option<u32>,
@@ -138,6 +139,7 @@ impl UserData {
     fn new(quota_key: TokenHolder) -> Self {
         Self {
             allow_fingerprint: Arc::new(RwLock::new(Box::new(|_| true))),
+            tcp_alias_only: false,
             quota_key,
             col_width: Default::default(),
             row_height: Default::default(),
@@ -415,11 +417,12 @@ impl Handler for ServerHandler {
     // Receive and handle any additional commands from the client where appropriate.
     async fn exec_request(
         &mut self,
-        _channel: ChannelId,
+        channel: ChannelId,
         data: &[u8],
-        _session: &mut Session,
+        session: &mut Session,
     ) -> Result<(), Self::Error> {
         debug!("exec_request data {:?}", data);
+        let mut success = true;
         let cmd = String::from_utf8_lossy(data);
         for command in cmd.split_whitespace() {
             match (command, &mut self.auth_data) {
@@ -444,13 +447,116 @@ impl Handler for ServerHandler {
                     AuthenticatedData::User { user_data, .. }
                     | AuthenticatedData::Admin { user_data, .. },
                 ) if command.starts_with("allowed-fingerprints=") => {
+                    if self.server.disable_aliasing {
+                        let _ = self.tx.send(
+                            b"Invalid option allowed-fingerprints: aliasing is disabled\r\n"
+                                .to_vec(),
+                        );
+                        success = false;
+                        break;
+                    }
+                    user_data.tcp_alias_only = true;
                     let set: BTreeSet<Fingerprint> = command
                         .trim_start_matches("allowed-fingerprints=")
                         .split(',')
                         .filter_map(|key| key.parse::<Fingerprint>().ok())
                         .collect();
                     *user_data.allow_fingerprint.write().await =
-                        Box::new(move |fingerprint| fingerprint.is_some_and(|fp| set.contains(fp)))
+                        Box::new(move |fingerprint| fingerprint.is_some_and(|fp| set.contains(fp)));
+                    let handlers = self.server.http.remove_by_address(&self.peer);
+                    for host in user_data.http_hosts.drain() {
+                        user_data.tcp_aliases.insert(TcpAlias(host, 80));
+                    }
+                    for (_, handler) in handlers.into_iter() {
+                        let address = handler.address.clone();
+                        if !is_alias(&address) {
+                            let _ = self.tx.send(
+                                format!(
+                                    "Cannot listen to HTTP alias of {} (must be alias, not localhost)\r\n",
+                                    address
+                                )
+                                .into_bytes(),
+                            );
+                            success = false;
+                            let _ = self.cancelation_tx.send(());
+                            break;
+                        }
+                        if let Err(err) = self.server.tcp.insert(
+                            TcpAlias(address.clone(), 80),
+                            self.peer,
+                            user_data.quota_key.clone(),
+                            handler,
+                        ) {
+                            info!(
+                                "Failed to bind HTTP alias {} ({}) - {}",
+                                &address, self.peer, err,
+                            );
+                            let _ = self.tx.send(
+                                format!(
+                                    "Cannot listen to HTTP alias of {} ({})\r\n",
+                                    &address, err,
+                                )
+                                .into_bytes(),
+                            );
+                            success = false;
+                            let _ = self.cancelation_tx.send(());
+                            break;
+                        }
+                    }
+                }
+                (
+                    "tcp-alias",
+                    AuthenticatedData::User { user_data, .. }
+                    | AuthenticatedData::Admin { user_data, .. },
+                ) => {
+                    if self.server.disable_aliasing {
+                        let _ = self
+                            .tx
+                            .send(b"Invalid option tcp-alias: aliasing is disabled\r\n".to_vec());
+                        success = false;
+                        break;
+                    }
+                    user_data.tcp_alias_only = true;
+                    let handlers = self.server.http.remove_by_address(&self.peer);
+                    for host in user_data.http_hosts.drain() {
+                        user_data.tcp_aliases.insert(TcpAlias(host, 80));
+                    }
+                    for (_, handler) in handlers.into_iter() {
+                        let address = handler.address.clone();
+                        if !is_alias(&address) {
+                            let _ = self.tx.send(
+                                format!(
+                                    "Cannot listen to HTTP alias of {} (must be alias, not localhost)\r\n",
+                                    address
+                                )
+                                .into_bytes(),
+                            );
+                            success = false;
+                            let _ = self.cancelation_tx.send(());
+                            break;
+                        }
+                        if let Err(err) = self.server.tcp.insert(
+                            TcpAlias(address.clone(), 80),
+                            self.peer,
+                            user_data.quota_key.clone(),
+                            handler,
+                        ) {
+                            info!(
+                                "Failed to bind HTTP alias {} ({}) - {}",
+                                &address, self.peer, err,
+                            );
+                            let _ = self.tx.send(
+                                format!(
+                                    "Cannot listen to HTTP alias of {} ({})\r\n",
+                                    &address, err,
+                                )
+                                .into_bytes(),
+                            );
+                            success = false;
+                            let _ = self.cancelation_tx.send(());
+                            break;
+                        }
+                    }
                 }
                 (command, _) => {
                     debug!(
@@ -460,10 +566,15 @@ impl Handler for ServerHandler {
                     let _ = self
                         .tx
                         .send(format!("Ignoring unknown command {}...", command).into_bytes());
+                    success = false;
                 }
             }
         }
-        Ok(())
+        if success {
+            session.channel_success(channel)
+        } else {
+            session.channel_failure(channel)
+        }
     }
 
     // Set up data for the PTY in order to properly use the TUI.
@@ -484,22 +595,21 @@ impl Handler for ServerHandler {
             | AuthenticatedData::Admin { user_data, .. } => {
                 user_data.col_width = Some(col_width);
                 user_data.row_height = Some(row_height);
-                session.channel_success(channel)?;
+                session.channel_success(channel)
             }
-            AuthenticatedData::None { .. } => (),
+            AuthenticatedData::None { .. } => session.channel_failure(channel),
         }
-        Ok(())
     }
 
     // Handle changes to the client's window size.
     async fn window_change_request(
         &mut self,
-        _channel: ChannelId,
+        channel: ChannelId,
         col_width: u32,
         row_height: u32,
         _pix_width: u32,
         _pix_height: u32,
-        _session: &mut Session,
+        session: &mut Session,
     ) -> Result<(), Self::Error> {
         if let AuthenticatedData::Admin {
             ref mut admin_data, ..
@@ -508,14 +618,16 @@ impl Handler for ServerHandler {
             if let Some(ref mut admin_interface) = admin_data.admin_interface {
                 if admin_interface
                     .resize(col_width as u16, row_height as u16)
-                    .is_err()
+                    .is_ok()
                 {
+                    return session.channel_success(channel);
+                } else {
                     warn!("Failed to resize terminal for {}", self.peer);
                 }
             }
         }
 
-        Ok(())
+        session.channel_failure(channel)
     }
 
     // Handle a remote forwarding request for the client.
@@ -538,6 +650,10 @@ impl Handler for ServerHandler {
         match *port {
             // Assign SSH host through config
             22 => {
+                if self.server.disable_aliasing {
+                    let _ = self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
+                    return Ok(false);
+                }
                 let assigned_host = self
                     .server
                     .address_delegator
@@ -548,11 +664,9 @@ impl Handler for ServerHandler {
                         "Failed to bind SSH for {}: must be alias, not localhost",
                         self.peer
                     );
-                    let _ = self.tx.send(
-                        "Error: Alias is required for SSH host\r\n"
-                            .to_string()
-                            .into_bytes(),
-                    );
+                    let _ = self
+                        .tx
+                        .send(b"Error: Alias is required for SSH host\r\n".to_vec());
                     return Ok(false);
                 }
                 if let Err(err) = self.server.ssh.insert(
@@ -612,70 +726,128 @@ impl Handler for ServerHandler {
             }
             // Assign HTTP host through config
             80 | 443 => {
-                let assigned_host = self
-                    .server
-                    .address_delegator
-                    .get_address(address, &self.user, &self.key_fingerprint, &self.peer)
-                    .await;
-                if let Err(err) = self.server.http.insert(
-                    assigned_host.clone(),
-                    self.peer,
-                    user_data.quota_key.clone(),
-                    Arc::new(SshTunnelHandler::new(
-                        Arc::clone(&user_data.allow_fingerprint),
-                        handle,
-                        self.tx.clone(),
+                if user_data.tcp_alias_only {
+                    if self.server.disable_aliasing {
+                        let _ = self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
+                        return Ok(false);
+                    }
+                    if !is_alias(address) {
+                        let _ = self.tx.send(
+                            format!(
+                                "Failed to bind HTTP alias {} (must be alias, not localhost)\r\n",
+                                address
+                            )
+                            .into_bytes(),
+                        );
+                        return Ok(false);
+                    }
+                    if let Err(err) = self.server.tcp.insert(
+                        TcpAlias(address.into(), 80),
                         self.peer,
-                        address.to_string(),
-                        *port,
-                    )),
-                ) {
-                    info!(
-                        "Rejecting HTTP for {} ({}) - {}",
-                        &assigned_host, self.peer, err
-                    );
-                    let _ = self.tx.send(
-                        format!(
-                            "Cannot listen to HTTP on http://{}{} ({})\r\n",
-                            &assigned_host,
-                            match self.server.http_port {
-                                80 => "".into(),
-                                port => format!(":{}", port),
-                            },
-                            err,
-                        )
-                        .into_bytes(),
-                    );
-                    Ok(false)
+                        user_data.quota_key.clone(),
+                        Arc::new(SshTunnelHandler::new(
+                            Arc::clone(&user_data.allow_fingerprint),
+                            handle,
+                            self.tx.clone(),
+                            self.peer,
+                            address.into(),
+                            *port,
+                        )),
+                    ) {
+                        info!(
+                            "Rejecting HTTP alias for {} ({}) - {}",
+                            address, self.peer, err
+                        );
+                        let _ = self.tx.send(
+                            format!("Failed to bind HTTP alias {} ({})\r\n", address, err)
+                                .into_bytes(),
+                        );
+                        Ok(false)
+                    } else {
+                        info!("Tunneling HTTP for {} ({})", address, self.peer);
+                        let _ = self.tx.send(
+                            format!(
+                                "Tunneling HTTP for alias {}{}\r\n",
+                                address,
+                                match self.server.http_port {
+                                    80 => "".into(),
+                                    port => format!(":{}", port),
+                                }
+                            )
+                            .into_bytes(),
+                        );
+                        user_data.tcp_aliases.insert(TcpAlias(address.into(), 80));
+                        user_data
+                            .port_addressing
+                            .insert(TcpAlias(address.into(), 80), TcpAlias(address.into(), 80));
+                        Ok(true)
+                    }
                 } else {
-                    info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
-                    let _ = self.tx.send(
-                        format!(
-                            "Serving HTTP on http://{}{}\r\n",
-                            &assigned_host,
-                            match self.server.http_port {
-                                80 => "".into(),
-                                port => format!(":{}", port),
-                            }
-                        )
-                        .into_bytes(),
-                    );
-                    let _ = self.tx.send(
-                        format!(
-                            "Serving HTTPS on https://{}{}\r\n",
-                            &assigned_host,
-                            match self.server.https_port {
-                                443 => "".into(),
-                                port => format!(":{}", port),
-                            }
-                        )
-                        .into_bytes(),
-                    );
-                    user_data.http_hosts.insert(assigned_host.clone());
-                    user_data
-                        .host_addressing
-                        .insert(TcpAlias(address.to_string(), *port as u16), assigned_host);
-                    Ok(true)
+                    let assigned_host = self
+                        .server
+                        .address_delegator
+                        .get_address(address, &self.user, &self.key_fingerprint, &self.peer)
+                        .await;
+                    if let Err(err) = self.server.http.insert(
+                        assigned_host.clone(),
+                        self.peer,
+                        user_data.quota_key.clone(),
+                        Arc::new(SshTunnelHandler::new(
+                            Arc::clone(&user_data.allow_fingerprint),
+                            handle,
+                            self.tx.clone(),
+                            self.peer,
+                            address.to_string(),
+                            *port,
+                        )),
+                    ) {
+                        info!(
+                            "Rejecting HTTP for {} ({}) - {}",
+                            &assigned_host, self.peer, err
+                        );
+                        let _ = self.tx.send(
+                            format!(
+                                "Cannot listen to HTTP on http://{}{} ({})\r\n",
+                                &assigned_host,
+                                match self.server.http_port {
+                                    80 => "".into(),
+                                    port => format!(":{}", port),
+                                },
+                                err,
+                            )
+                            .into_bytes(),
+                        );
+                        Ok(false)
+                    } else {
+                        info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
+                        let _ = self.tx.send(
+                            format!(
+                                "Serving HTTP on http://{}{}\r\n",
+                                address,
+                                match self.server.http_port {
+                                    80 => "".into(),
+                                    port => format!(":{}", port),
+                                }
+                            )
+                            .into_bytes(),
+                        );
+                        let _ = self.tx.send(
+                            format!(
+                                "Serving HTTPS on https://{}{}\r\n",
+                                &assigned_host,
+                                match self.server.https_port {
+                                    443 => "".into(),
+                                    port => format!(":{}", port),
+                                }
+                            )
+                            .into_bytes(),
+                        );
+                        user_data.http_hosts.insert(assigned_host.clone());
+                        user_data
+                            .host_addressing
+                            .insert(TcpAlias(address.to_string(), *port as u16), assigned_host);
+                        Ok(true)
+                    }
                 }
             }
             // Handle TCP
@@ -694,6 +866,11 @@ impl Handler for ServerHandler {
                 Ok(false)
             }
             _ => {
+                let is_alias = is_alias(address);
+                if is_alias && self.server.disable_aliasing {
+                    let _ = self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
+                    return Ok(false);
+                }
                 let assigned_port = if *port == 0 {
                     let assigned_port = match self.server.tcp_handler.get_free_port().await {
                         Ok(port) => port,
@@ -714,7 +891,7 @@ impl Handler for ServerHandler {
                     };
                     *port = assigned_port.into();
                     assigned_port
-                } else if self.server.force_random_ports {
+                } else if !is_alias && self.server.force_random_ports {
                     match self.server.tcp_handler.get_free_port().await {
                         Ok(port) => port,
                         Err(err) => {
@@ -735,11 +912,7 @@ impl Handler for ServerHandler {
                 } else {
                     *port as u16
                 };
-                let tcp_alias = if is_alias(address) {
-                    address
-                } else {
-                    NO_ALIAS_HOST
-                };
+                let tcp_alias = if is_alias { address } else { NO_ALIAS_HOST };
                 if let Err(err) = self.server.tcp.insert(
                     TcpAlias(tcp_alias.to_string(), assigned_port),
                     self.peer,
@@ -753,7 +926,7 @@ impl Handler for ServerHandler {
                         *port,
                     )),
                 ) {
-                    if is_alias(address) {
+                    if is_alias {
                         info!(
                             "Rejecting TCP port {} for alias {} ({}) - {}",
                             &assigned_port, address, self.peer, err,
@@ -787,7 +960,7 @@ impl Handler for ServerHandler {
                         TcpAlias(address.to_string(), *port as u16),
                         TcpAlias(tcp_alias.to_string(), assigned_port),
                     );
-                    if is_alias(address) {
+                    if is_alias {
                         info!(
                             "Tunneling TCP port {} for alias {} ({})",
                             &assigned_port, address, self.peer
@@ -903,6 +1076,10 @@ impl Handler for ServerHandler {
             return Err(russh::Error::Disconnect);
         }
         let port_to_connect = port_to_connect as u16;
+        if self.server.disable_aliasing {
+            let _ = self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
+            return Ok(false);
+        }
         if port_to_connect == self.server.http_port || port_to_connect == self.server.https_port {
             let peer = self.peer;
             let fingerprint = self.key_fingerprint;
@@ -1116,8 +1293,8 @@ impl Drop for ServerHandler {
                 let id = self.id;
                 let peer = self.peer;
                 tokio::task::spawn_blocking(move || {
-                    server.ssh.remove_by_address(&peer);
                     server.http.remove_by_address(&peer);
+                    server.ssh.remove_by_address(&peer);
                     server.tcp.remove_by_address(&peer);
                     server
                         .sessions_password

@@ -11,7 +11,7 @@ use std::{
 };
 
 use anyhow::Context;
-use connections::ConnectionMapReactor;
+use connections::{ConnectionMapReactor, HttpAliasingConnection};
 use http::{DomainRedirect, ProxyData, ProxyType};
 use hyper::{body::Incoming, service::service_fn, Request};
 use hyper_util::{
@@ -100,6 +100,8 @@ struct SystemData {
 
 type SessionMap = HashMap<usize, watch::Sender<()>>;
 type DataTable<K, V> = Arc<RwLock<BTreeMap<K, V>>>;
+type AliasingProxyData =
+    Arc<ProxyData<Arc<HttpAliasingConnection>, SshTunnelHandler, ChannelStream<Msg>>>;
 
 pub(crate) struct SandholeServer {
     pub(crate) session_id: AtomicUsize,
@@ -112,8 +114,7 @@ pub(crate) struct SandholeServer {
     pub(crate) ssh_data: DataTable<String, BTreeMap<SocketAddr, String>>,
     pub(crate) tcp_data: DataTable<TcpAlias, BTreeMap<SocketAddr, String>>,
     pub(crate) system_data: Arc<RwLock<SystemData>>,
-    pub(crate) aliasing_proxy_data:
-        Arc<ProxyData<SshTunnelHandler, ChannelStream<Msg>, HttpReactor>>,
+    pub(crate) aliasing_proxy_data: AliasingProxyData,
     pub(crate) fingerprints_validator: FingerprintsValidator,
     pub(crate) api_login: Option<ApiLogin>,
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
@@ -123,6 +124,7 @@ pub(crate) struct SandholeServer {
     pub(crate) https_port: u16,
     pub(crate) ssh_port: u16,
     pub(crate) force_random_ports: bool,
+    pub(crate) disable_aliasing: bool,
     pub(crate) authentication_request_timeout: Duration,
     pub(crate) idle_connection_timeout: Duration,
     pub(crate) tcp_connection_timeout: Option<Duration>,
@@ -340,7 +342,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         ..Default::default()
     });
     let aliasing_proxy_data = Arc::new(ProxyData {
-        conn_manager: Arc::clone(&http_connections),
+        conn_manager: Arc::new(HttpAliasingConnection::new(
+            Arc::clone(&http_connections),
+            Arc::clone(&tcp_connections),
+        )),
         telemetry: Arc::clone(&telemetry),
         domain_redirect: Arc::clone(&domain_redirect),
         protocol: Protocol::Http {
@@ -373,6 +378,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         https_port: config.https_port,
         ssh_port: config.ssh_port,
         force_random_ports: !config.allow_requested_ports,
+        disable_aliasing: config.disable_aliasing,
         authentication_request_timeout: config.authentication_request_timeout.into(),
         idle_connection_timeout: config.idle_connection_timeout.into(),
         tcp_connection_timeout: config.tcp_connection_timeout.map(Into::into),

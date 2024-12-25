@@ -12,6 +12,7 @@
 # User guide
 
 - [Exposing your first service](./exposing_your_first_service.md)
+- [Local forwarding](./local_forwarding.md)
 - [Advanced uses](./advanced_uses.md)
 
 # Reference

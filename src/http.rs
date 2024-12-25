@@ -4,10 +4,10 @@ use std::time::{Duration, Instant};
 use std::{net::SocketAddr, sync::Arc};
 
 use crate::connection_handler::ConnectionHandler;
-use crate::connections::ConnectionMapReactor;
+use crate::connections::ConnectionGetByHttpHost;
 use crate::telemetry::Telemetry;
 
-use super::{connections::ConnectionMap, error::ServerError};
+use super::error::ServerError;
 use axum::{
     body::Body as AxumBody,
     response::{IntoResponse, Redirect},
@@ -111,13 +111,13 @@ pub(crate) enum ProxyType {
     Aliasing,
 }
 
-pub(crate) struct ProxyData<H, T, R>
+pub(crate) struct ProxyData<M, H, T>
 where
+    M: ConnectionGetByHttpHost<Arc<H>>,
     H: ConnectionHandler<T>,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
-    R: ConnectionMapReactor<String> + Send + 'static,
 {
-    pub(crate) conn_manager: Arc<ConnectionMap<String, Arc<H>, R>>,
+    pub(crate) conn_manager: M,
     pub(crate) telemetry: Arc<Telemetry>,
     pub(crate) domain_redirect: Arc<DomainRedirect>,
     pub(crate) protocol: Protocol,
@@ -125,20 +125,20 @@ where
     pub(crate) http_request_timeout: Duration,
     pub(crate) websocket_timeout: Option<Duration>,
     pub(crate) disable_http_logs: bool,
-    pub(crate) _phantom_data: PhantomData<T>,
+    pub(crate) _phantom_data: PhantomData<(H, T)>,
 }
 
 // Receive an HTTP request and appropriately proxy it, with a possible upgrade to WebSocket.
-pub(crate) async fn proxy_handler<B, H, T, R>(
+pub(crate) async fn proxy_handler<B, M, H, T>(
     mut request: Request<B>,
     tcp_address: SocketAddr,
     fingerprint: Option<Fingerprint>,
-    proxy_data: Arc<ProxyData<H, T, R>>,
+    proxy_data: Arc<ProxyData<M, H, T>>,
 ) -> anyhow::Result<Response<AxumBody>>
 where
+    M: ConnectionGetByHttpHost<Arc<H>>,
     H: ConnectionHandler<T>,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
-    R: ConnectionMapReactor<String> + Send + 'static,
     B: Body + Send + 'static,
     <B as Body>::Data: Send + Sync + 'static,
     <B as Body>::Error: Error + Send + Sync + 'static,
@@ -159,7 +159,7 @@ where
         .ok_or(ServerError::InvalidHostHeader)?
         .to_owned();
     let ip = tcp_address.ip().to_canonical().to_string();
-    let Some(handler) = conn_manager.get(&host) else {
+    let Some(handler) = conn_manager.get_by_http_host(&host) else {
         if domain_redirect.from == host {
             let elapsed_time = timer.elapsed();
             let response = Redirect::to(&domain_redirect.to).into_response();
@@ -357,12 +357,12 @@ mod proxy_handler_tests {
     use crate::{
         config::LoadBalancing,
         connection_handler::MockConnectionHandler,
-        connections::MockConnectionMapReactor,
+        connections::{ConnectionMap, MockConnectionMapReactor},
         quota::{DummyQuotaHandler, TokenHolder, UserIdentification},
         telemetry::Telemetry,
     };
 
-    use super::{proxy_handler, ConnectionMap, DomainRedirect, Protocol, ProxyData, ProxyType};
+    use super::{proxy_handler, DomainRedirect, Protocol, ProxyData, ProxyType};
 
     #[tokio::test]
     async fn errors_on_missing_host_header() {

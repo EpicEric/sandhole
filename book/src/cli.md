@@ -159,6 +159,10 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
       <b>--allow-requested-ports</b>
           Allow user-requested ports. By default, ports are always random
 
+      <b>--disable-aliasing</b>
+          Disable all aliasing (i.e. local forwarding). By default, this is
+          enabled globally
+
       <b>--quota-per-user</b> &lt;MAX&gt;
           How many services can be exposed for a single user at once.
           Doesn&#39;t apply to admin users.

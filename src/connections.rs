@@ -15,6 +15,10 @@ use crate::{
     config::LoadBalancing,
     error::ServerError,
     quota::{QuotaHandler, QuotaToken, TokenHolder},
+    ssh::SshTunnelHandler,
+    tcp::TcpHandler,
+    tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
+    HttpReactor,
 };
 
 #[cfg_attr(test, automock)]
@@ -136,14 +140,22 @@ where
         })
     }
 
-    pub(crate) fn remove<Q>(&self, key: &Q, address: &SocketAddr)
+    pub(crate) fn remove<Q>(&self, key: &Q, address: &SocketAddr) -> Option<(K, H)>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         let len = self.map.len();
-        self.map.remove_if_mut(key, |_, value| {
-            value.retain(|ConnectionMapEntry { address: addr, .. }| addr != address);
+        let mut element = None;
+        self.map.remove_if_mut(key, |inner_key, value| {
+            let mut i = 0;
+            while i < value.len() {
+                if value[i].address == *address {
+                    element = Some((inner_key.clone(), value.swap_remove(i).handler));
+                    break;
+                }
+                i += 1;
+            }
             value.is_empty()
         });
         if self.map.len() < len {
@@ -151,12 +163,21 @@ where
                 reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
             }
         }
+        element
     }
 
-    pub(crate) fn remove_by_address(&self, address: &SocketAddr) {
+    pub(crate) fn remove_by_address(&self, address: &SocketAddr) -> Vec<(K, H)> {
         let len = self.map.len();
-        self.map.retain(|_, value| {
-            value.retain(|ConnectionMapEntry { address: addr, .. }| addr != address);
+        let mut elements = Vec::new();
+        self.map.retain(|key, value| {
+            let mut i = 0;
+            while i < value.len() {
+                if value[i].address == *address {
+                    elements.push((key.clone(), value.swap_remove(i).handler));
+                    break;
+                }
+                i += 1;
+            }
             !value.is_empty()
         });
         if self.map.len() < len {
@@ -164,6 +185,7 @@ where
                 reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
             }
         }
+        elements
     }
 
     pub(crate) fn update_reactor(&self, reactor: Option<R>) {
@@ -184,6 +206,43 @@ where
                 )
             })
             .collect()
+    }
+}
+
+pub(crate) trait ConnectionGetByHttpHost<H> {
+    fn get_by_http_host(&self, host: &str) -> Option<H>;
+}
+
+impl<H, R> ConnectionGetByHttpHost<H> for Arc<ConnectionMap<String, H, R>>
+where
+    H: Clone,
+    R: ConnectionMapReactor<String> + Send + 'static,
+{
+    fn get_by_http_host(&self, host: &str) -> Option<H> {
+        self.get(host)
+    }
+}
+
+pub(crate) struct HttpAliasingConnection {
+    http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
+    tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
+}
+
+impl HttpAliasingConnection {
+    pub(crate) fn new(
+        http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
+        tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
+    ) -> Self {
+        HttpAliasingConnection { http, tcp }
+    }
+}
+
+impl ConnectionGetByHttpHost<Arc<SshTunnelHandler>> for Arc<HttpAliasingConnection> {
+    fn get_by_http_host(&self, host: &str) -> Option<Arc<SshTunnelHandler>> {
+        self.http.get(host).or_else(|| {
+            self.tcp
+                .get(&BorrowedTcpAlias(host, &80) as &dyn TcpAliasKey)
+        })
     }
 }
 

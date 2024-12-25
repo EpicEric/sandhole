@@ -227,6 +227,10 @@ pub struct ApplicationConfig {
     #[arg(long, default_value_t = false)]
     pub allow_requested_ports: bool,
 
+    /// Disable all aliasing (i.e. local forwarding). By default, this is enabled globally.
+    #[arg(long, default_value_t = false)]
+    pub disable_aliasing: bool,
+
     /// How many services can be exposed for a single user at once. Doesn't apply to admin users.
     ///
     /// Each user is distinguished by their key fingerprint or, in the case of API logins, by their username.
