@@ -44,6 +44,7 @@ async fn auth_prevent_unauthorized_actions() {
         "--bind-hostnames=all",
         "--allow-requested-ports",
         "--idle-connection-timeout=800ms",
+        "--unproxied-connection-timeout=700ms",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
     ]);

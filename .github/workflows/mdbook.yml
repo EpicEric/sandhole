@@ -36,8 +36,8 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: up9cloud/action-rsync@master
         env:
-          HOST: sish.top
-          PORT: "2222"
-          KEY: ${{secrets.BOOK_SSH_KEY}}
           SOURCE: book/book/
-          TARGET: sandhole-book/book/
+          TARGET: ${{ secrets.BOOK_SSH_TARGET }}
+          HOST: ${{ secrets.BOOK_SSH_HOST }}
+          PORT: ${{ secrets.BOOK_SSH_PORT }}
+          KEY: ${{ secrets.BOOK_SSH_KEY }}

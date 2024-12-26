@@ -334,15 +334,21 @@ impl Handler for ServerHandler {
             .authenticate_fingerprint(&fingerprint);
         match authentication {
             AuthenticationType::None => {
-                // Start timer for user to do local port forwarding.
-                // Otherwise, the connection will be canceled upon expiration
-                let cancelation_tx = self.cancelation_tx.clone();
-                let timeout = self.server.idle_connection_timeout;
-                *self.timeout_handle.lock().await =
-                    Some(DroppableHandle(tokio::spawn(async move {
-                        sleep(timeout).await;
-                        let _ = cancelation_tx.send(());
-                    })));
+                if self.server.disable_aliasing {
+                    return Ok(Auth::Reject {
+                        proceed_with_methods: None,
+                    });
+                } else {
+                    // Start timer for user to do local port forwarding.
+                    // Otherwise, the connection will be canceled upon expiration
+                    let cancelation_tx = self.cancelation_tx.clone();
+                    let timeout = self.server.idle_connection_timeout;
+                    *self.timeout_handle.lock().await =
+                        Some(DroppableHandle(tokio::spawn(async move {
+                            sleep(timeout).await;
+                            let _ = cancelation_tx.send(());
+                        })));
+                }
             }
             AuthenticationType::User => {
                 self.server
@@ -1091,25 +1097,22 @@ impl Handler for ServerHandler {
                 proxy_handler(req, peer, fingerprint, Arc::clone(&proxy_data))
             });
             let io = TokioIo::new(channel.into_stream());
-            dbg!("a");
             match self.auth_data {
                 AuthenticatedData::None { ref proxy_count } => {
-                    dbg!("b");
                     self.timeout_handle.lock().await.take();
                     proxy_count.fetch_add(1, Ordering::Release);
                     let proxy_count = Arc::clone(proxy_count);
                     let timeout_handle = Arc::clone(&self.timeout_handle);
-                    let idle_connection_timeout = self.server.idle_connection_timeout;
+                    let unproxied_connection_timeout = self.server.unproxied_connection_timeout;
                     let cancelation_tx = self.cancelation_tx.clone();
                     tokio::spawn(async move {
-                        dbg!("c");
                         let server = auto::Builder::new(TokioExecutor::new());
                         let conn = server.serve_connection_with_upgrades(io, service);
                         let _ = conn.await;
                         if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
                             *timeout_handle.lock().await =
                                 Some(DroppableHandle(tokio::spawn(async move {
-                                    sleep(idle_connection_timeout).await;
+                                    sleep(unproxied_connection_timeout).await;
                                     let _ = cancelation_tx.send(());
                                 })));
                         }
@@ -1148,7 +1151,8 @@ impl Handler for ServerHandler {
                             proxy_count.fetch_add(1, Ordering::Release);
                             let proxy_count = Arc::clone(proxy_count);
                             let timeout_handle = Arc::clone(&self.timeout_handle);
-                            let idle_connection_timeout = self.server.idle_connection_timeout;
+                            let unproxied_connection_timeout =
+                                self.server.unproxied_connection_timeout;
                             let cancelation_tx = self.cancelation_tx.clone();
                             let tcp_connection_timeout = self.server.tcp_connection_timeout;
                             tokio::spawn(async move {
@@ -1167,7 +1171,7 @@ impl Handler for ServerHandler {
                                 if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
                                     *timeout_handle.lock().await =
                                         Some(DroppableHandle(tokio::spawn(async move {
-                                            sleep(idle_connection_timeout).await;
+                                            sleep(unproxied_connection_timeout).await;
                                             let _ = cancelation_tx.send(());
                                         })));
                                 }
@@ -1227,7 +1231,7 @@ impl Handler for ServerHandler {
                         proxy_count.fetch_add(1, Ordering::Release);
                         let proxy_count = Arc::clone(proxy_count);
                         let timeout_handle = Arc::clone(&self.timeout_handle);
-                        let idle_connection_timeout = self.server.idle_connection_timeout;
+                        let unproxied_connection_timeout = self.server.unproxied_connection_timeout;
                         let cancelation_tx = self.cancelation_tx.clone();
                         let tcp_connection_timeout = self.server.tcp_connection_timeout;
                         tokio::spawn(async move {
@@ -1246,7 +1250,7 @@ impl Handler for ServerHandler {
                             if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
                                 *timeout_handle.lock().await =
                                     Some(DroppableHandle(tokio::spawn(async move {
-                                        sleep(idle_connection_timeout).await;
+                                        sleep(unproxied_connection_timeout).await;
                                         let _ = cancelation_tx.send(());
                                     })));
                             }

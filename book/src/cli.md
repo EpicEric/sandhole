@@ -199,6 +199,15 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           [default: 2s]
 
+      <b>--unproxied-connection-timeout</b> &lt;DURATION&gt;
+          Grace period for unauthenticated SSH connections after closing the
+          last proxy tunnel before they are forcefully disconnected.
+
+          A low value may cause valid proxy/tunnel connections to be erroneously
+          removed.
+
+          If unset, this defaults to the value set by --idle-connection-timeout
+
       <b>--authentication-request-timeout</b> &lt;DURATION&gt;
           Time until a user+password authentication request is canceled. Any
           timed out requests will not authenticate the user
@@ -211,8 +220,8 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           [default: 10s]
 
       <b>--tcp-connection-timeout</b> &lt;DURATION&gt;
-          How long until TCP connections (including Websockets) are
-          automatically garbage-collected.
+          How long until TCP connections (including Websockets and local
+          forwardings) are automatically garbage-collected.
 
           By default, these connections are not terminated by Sandhole.
 

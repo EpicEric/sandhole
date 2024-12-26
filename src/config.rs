@@ -254,6 +254,14 @@ pub struct ApplicationConfig {
     #[arg(long, default_value = "2s", value_name = "DURATION")]
     pub idle_connection_timeout: Duration,
 
+    /// Grace period for unauthenticated SSH connections after closing the last proxy tunnel before they are forcefully disconnected.
+    ///
+    /// A low value may cause valid proxy/tunnel connections to be erroneously removed.
+    ///
+    /// If unset, this defaults to the value set by --idle-connection-timeout
+    #[arg(long, value_name = "DURATION")]
+    pub unproxied_connection_timeout: Option<Duration>,
+
     /// Time until a user+password authentication request is canceled.
     /// Any timed out requests will not authenticate the user.
     #[arg(long, default_value = "5s", value_name = "DURATION")]
@@ -263,7 +271,7 @@ pub struct ApplicationConfig {
     #[arg(long, default_value = "10s", value_name = "DURATION")]
     pub http_request_timeout: Duration,
 
-    /// How long until TCP connections (including Websockets) are automatically garbage-collected.
+    /// How long until TCP connections (including Websockets and local forwardings) are automatically garbage-collected.
     ///
     /// By default, these connections are not terminated by Sandhole.
     #[arg(long, value_name = "DURATION")]

@@ -10,6 +10,7 @@
 - Add mechanism to disconnect unproxied unauthed users.
 - Add `tcp-alias` option for remote forwarding connections.
 - Add `--disable-aliasing` CLI flag.
+- Add `--unproxied-connection-timeout` CLI flag.
 
 ### Changed
 

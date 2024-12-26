@@ -127,6 +127,7 @@ pub(crate) struct SandholeServer {
     pub(crate) disable_aliasing: bool,
     pub(crate) authentication_request_timeout: Duration,
     pub(crate) idle_connection_timeout: Duration,
+    pub(crate) unproxied_connection_timeout: Duration,
     pub(crate) tcp_connection_timeout: Option<Duration>,
 }
 
@@ -381,6 +382,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         disable_aliasing: config.disable_aliasing,
         authentication_request_timeout: config.authentication_request_timeout.into(),
         idle_connection_timeout: config.idle_connection_timeout.into(),
+        unproxied_connection_timeout: config
+            .unproxied_connection_timeout
+            .map(Into::into)
+            .unwrap_or(config.idle_connection_timeout.into()),
         tcp_connection_timeout: config.tcp_connection_timeout.map(Into::into),
     });
 
