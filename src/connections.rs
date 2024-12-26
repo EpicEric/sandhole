@@ -240,6 +240,7 @@ impl HttpAliasingConnection {
 impl ConnectionGetByHttpHost<Arc<SshTunnelHandler>> for Arc<HttpAliasingConnection> {
     fn get_by_http_host(&self, host: &str) -> Option<Arc<SshTunnelHandler>> {
         self.http.get(host).or_else(|| {
+            dbg!(host, "d");
             self.tcp
                 .get(&BorrowedTcpAlias(host, &80) as &dyn TcpAliasKey)
         })

@@ -4,11 +4,13 @@ use async_trait::async_trait;
 use axum::{routing::get, Router};
 use clap::Parser;
 use http::{Request, StatusCode};
+use http_body_util::BodyExt;
 use hyper::{body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
+use rand::rngs::OsRng;
 use russh::{
     client::{self, Msg, Session},
     Channel,
@@ -27,7 +29,7 @@ use tower::Service;
 ///
 /// This test ensures that any other actions result in an error with a disconnect.
 #[tokio::test(flavor = "multi_thread")]
-async fn alias_http_finagling() {
+async fn alias_local_forward_existing_http() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -48,7 +50,7 @@ async fn alias_http_finagling() {
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
-        "--bind-hostnames=none",
+        "--bind-hostnames=all",
         "--idle-connection-timeout=800ms",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
@@ -86,60 +88,12 @@ async fn alias_http_finagling() {
         "authentication didn't succeed"
     );
     session
-        .tcpip_forward("proxy.first", 80)
-        .await
-        .expect("tcpip_forward failed");
-    let channel = session
-        .channel_open_session()
-        .await
-        .expect("channel_open_session_failed");
-    channel
-        .exec(
-            false,
-            // key1 and admin
-            "allowed-fingerprints=\
-            SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ,\
-            SHA256:eDZoeAWBWd+SO64PPW1VBrdlBxYM4OEywSkGlIy0Kro",
-        )
-        .await
-        .expect("exec failed");
-
-    // 2. Start SSH client that will be proxied via alias for specific fingerprints
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
-        None,
-    )
-    .expect("Missing file key2");
-    let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
-    assert!(
-        session
-            .authenticate_publickey(
-                "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-            )
-            .await
-            .expect("SSH authentication failed"),
-        "authentication didn't succeed"
-    );
-    let channel = session
-        .channel_open_session()
-        .await
-        .expect("channel_open_session_failed");
-    channel.exec(false, "tcp-alias").await.expect("exec failed");
-    session
-        .tcpip_forward("proxy.second", 80)
+        .tcpip_forward("example.foobar.tld", 80)
         .await
         .expect("tcpip_forward failed");
 
-    // 3a. Local-forward with valid key
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
-        None,
-    )
-    .expect("Missing file key1");
+    // 3. Local-forward instead of connecting directly
+    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -155,12 +109,12 @@ async fn alias_http_finagling() {
         "authentication didn't succeed"
     );
 
-    let channel_first = session
-        .channel_open_direct_tcpip("proxy.first", 80, "my.hostname", 12345)
+    let channel = session
+        .channel_open_direct_tcpip("example.foobar.tld", 18080, "localhost", 12345)
         .await
         .expect("channel_open_direct_tcpip failed");
     let (mut sender, conn) =
-        hyper::client::conn::http1::handshake(TokioIo::new(channel_first.into_stream()))
+        hyper::client::conn::http1::handshake(TokioIo::new(channel.into_stream()))
             .await
             .expect("HTTP handshake failed");
     tokio::spawn(async move {
@@ -171,38 +125,7 @@ async fn alias_http_finagling() {
     let request = Request::builder()
         .method("GET")
         .uri("/")
-        .header("host", "foobar.tld")
-        .body(http_body_util::Empty::<bytes::Bytes>::new())
-        .unwrap();
-    let Ok(response) = timeout(Duration::from_secs(5), async {
-        sender
-            .send_request(request)
-            .await
-            .expect("Error sending HTTP request")
-    })
-    .await
-    else {
-        panic!("Timeout waiting for server to reply.")
-    };
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-    let channel_second = session
-        .channel_open_direct_tcpip("proxy.second", 80, "my.hostname", 23456)
-        .await
-        .expect("channel_open_direct_tcpip failed");
-    let (mut sender, conn) =
-        hyper::client::conn::http1::handshake(TokioIo::new(channel_second.into_stream()))
-            .await
-            .expect("HTTP handshake failed");
-    tokio::spawn(async move {
-        if let Err(err) = conn.await {
-            eprintln!("Connection failed: {:?}", err);
-        }
-    });
-    let request = Request::builder()
-        .method("GET")
-        .uri("/")
-        .header("host", "foobar.tld")
+        .header("host", "localhost")
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();
     let Ok(response) = timeout(Duration::from_secs(5), async {
@@ -215,7 +138,18 @@ async fn alias_http_finagling() {
     else {
         panic!("Timeout waiting for server to reply.");
     };
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_body = String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .expect("Error collecting response")
+            .to_bytes()
+            .into(),
+    )
+    .expect("Invalid response body");
+    assert_eq!(response_body, "Connected via local forwarding!");
 }
 
 struct SshClient;
@@ -238,7 +172,10 @@ impl russh::client::Handler for SshClient {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let router = Router::new()
-            .route("/", get(|| async move { StatusCode::NO_CONTENT }))
+            .route(
+                "/",
+                get(|| async move { "Connected via local forwarding!" }),
+            )
             .into_service();
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {

@@ -1084,12 +1084,17 @@ impl Handler for ServerHandler {
             let peer = self.peer;
             let fingerprint = self.key_fingerprint;
             let proxy_data = Arc::clone(&self.server.aliasing_proxy_data);
-            let service = service_fn(move |req: Request<Incoming>| {
+            let host_to_connect = host_to_connect.to_string();
+            let service = service_fn(move |mut req: Request<Incoming>| {
+                req.headers_mut()
+                    .insert("host", host_to_connect.clone().try_into().unwrap());
                 proxy_handler(req, peer, fingerprint, Arc::clone(&proxy_data))
             });
             let io = TokioIo::new(channel.into_stream());
+            dbg!("a");
             match self.auth_data {
                 AuthenticatedData::None { ref proxy_count } => {
+                    dbg!("b");
                     self.timeout_handle.lock().await.take();
                     proxy_count.fetch_add(1, Ordering::Release);
                     let proxy_count = Arc::clone(proxy_count);
@@ -1097,6 +1102,7 @@ impl Handler for ServerHandler {
                     let idle_connection_timeout = self.server.idle_connection_timeout;
                     let cancelation_tx = self.cancelation_tx.clone();
                     tokio::spawn(async move {
+                        dbg!("c");
                         let server = auto::Builder::new(TokioExecutor::new());
                         let conn = server.serve_connection_with_upgrades(io, service);
                         let _ = conn.await;
