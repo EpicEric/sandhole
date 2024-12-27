@@ -14,6 +14,7 @@
 
 ### Changed
 
+- **BREAKING**: Downgrade HTTP hosts to aliases when passing `allowed-fingerprints`.
 - Bump MSRV to 1.82.0.
 - Consolidate configurations.
 - Use `proxy_handler` for HTTP local forwardings.

@@ -50,9 +50,13 @@ impl AlpnChallengeResolver for DummyAlpnChallengeResolver {
 
 #[derive(Debug)]
 pub(crate) struct CertificateResolver {
+    // Data for certificates based on an efficient trie lookup.
     certificates: Arc<RwLock<Trie<String, Arc<CertifiedKey>>>>,
+    // Resolver for TLS-ALPN-01 challenges and its ACME certificates.
     alpn_resolver: RwLock<Box<dyn AlpnChallengeResolver>>,
+    // Task that updates certificates data upon filesystem changes.
     _join_handle: DroppableHandle<()>,
+    // Filesystem change watcher.
     _watcher: RecommendedWatcher,
 }
 
@@ -75,12 +79,14 @@ impl CertificateResolver {
                 let mut builder = TrieBuilder::new();
                 match read_dir(directory.as_path()).await {
                     Ok(mut read_dir) => {
+                        // For each subdirectory in the certificates directory
                         while let Ok(Some(entry)) = read_dir.next_entry().await {
                             if entry
                                 .file_type()
                                 .await
                                 .is_ok_and(|filetype| filetype.is_dir())
                             {
+                                // Get the certificate(s) from the fullchain.pem file
                                 let cert = match CertificateDer::pem_file_iter(
                                     entry.path().join("fullchain.pem"),
                                 )
@@ -96,6 +102,7 @@ impl CertificateResolver {
                                         continue;
                                     }
                                 };
+                                // Get the associated private key privkey.pem file
                                 let key = match PrivateKeyDer::from_pem_file(
                                     entry.path().join("privkey.pem"),
                                 ) {
@@ -116,7 +123,9 @@ impl CertificateResolver {
                                     );
                                     continue;
                                 };
+                                // Create the certificate + key pair
                                 let ck = Arc::new(CertifiedKey::new(cert, key));
+                                // Populate the trie with the valid DNS names for the certificate
                                 for eec in ck
                                     .end_entity_cert()
                                     .iter()
@@ -144,12 +153,14 @@ impl CertificateResolver {
                         );
                     }
                 }
+                // Notify about initial certificates population
                 if let Some(tx) = init_tx.take() {
                     let _ = tx.send(());
                 }
                 tokio::time::sleep(Duration::from_secs(2)).await
             }
         }));
+        // Wait until the certificates have been populated once
         init_rx.await.unwrap();
         Ok(CertificateResolver {
             certificates,
@@ -161,12 +172,14 @@ impl CertificateResolver {
 
     // Find the certificate that matches the given server name
     fn resolve_server_name(&self, server_name: &str) -> Option<Arc<CertifiedKey>> {
+        // Get the server name for the provided address
         let Ok(dns_server_name) = DnsName::try_from(server_name).map(ServerName::DnsName) else {
             return None;
         };
         self.certificates
             .read()
             .unwrap()
+            // Return all certificates whose prefix match the server name
             .common_prefix_search(
                 server_name
                     .split('.')
@@ -174,6 +187,7 @@ impl CertificateResolver {
                     .map(String::from)
                     .collect::<Vec<_>>(),
             )
+            // Find a certificate that is valid for the given server name
             .find(|(_, ck): &(String, &Arc<CertifiedKey>)| {
                 ck.end_entity_cert().is_ok_and(|eec| {
                     ParsedCertificate::try_from(eec)
@@ -183,6 +197,7 @@ impl CertificateResolver {
             .map(|(_, ck)| Arc::clone(ck))
     }
 
+    // Return the config for TLS-ALPN-01 challenges
     pub(crate) fn challenge_rustls_config(&self) -> Option<Arc<ServerConfig>> {
         self.alpn_resolver.read().unwrap().challenge_rustls_config()
     }
@@ -194,13 +209,16 @@ impl ResolvesServerCert for CertificateResolver {
             .server_name()
             .and_then(|server_name| self.resolve_server_name(server_name))
         {
+            // Return the certificate that we have if it matches
             Some(cert) => Some(cert),
+            // Otherwise, return any certificate from the ACME resolver
             None => self.alpn_resolver.read().unwrap().resolve(client_hello),
         }
     }
 }
 
 impl ConnectionMapReactor<String> for Arc<CertificateResolver> {
+    // Find the list of domains that don't have a certificate associated with them, and request ACME challenges for them.
     fn call(&self, hostnames: Vec<String>) {
         let domains = hostnames
             .into_iter()

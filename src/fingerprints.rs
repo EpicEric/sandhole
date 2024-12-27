@@ -15,6 +15,7 @@ use tokio::{
     sync::oneshot,
 };
 
+// Authentication identified for a given fingerprint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum AuthenticationType {
     /// Not authenticated.
@@ -35,19 +36,29 @@ impl std::fmt::Display for AuthenticationType {
     }
 }
 
+// Data related to a given key.
 #[derive(Debug, Clone)]
 pub(crate) struct KeyData {
+    // File associated with the key.
     pub(crate) file: PathBuf,
+    // The key's comment.
     pub(crate) comment: String,
+    // Authentication type associated with the key.
     pub(crate) auth: AuthenticationType,
 }
 
+// Service that validates fingerprints from directories of public key files.
 #[derive(Debug)]
 pub(crate) struct FingerprintsValidator {
+    // Data for fingerprints with user authorization.
     user_fingerprints: Arc<RwLock<BTreeMap<Fingerprint, KeyData>>>,
+    // Data for fingerprints with admin authorization.
     admin_fingerprints: Arc<RwLock<BTreeMap<Fingerprint, KeyData>>>,
+    // Task that updates user keys data upon filesystem changes.
     _user_join_handle: DroppableHandle<()>,
+    // Task that updates admin keys data upon filesystem changes.
     _admin_join_handle: DroppableHandle<()>,
+    // Filesystem change watchers.
     _watchers: [RecommendedWatcher; 2],
 }
 
@@ -77,12 +88,15 @@ impl FingerprintsValidator {
                 let mut user_set = BTreeMap::new();
                 match read_dir(user_keys_directory.as_path()).await {
                     Ok(mut read_dir) => {
+                        // For each file in the user keys directory
                         while let Ok(Some(entry)) = read_dir.next_entry().await {
                             match read_to_string(entry.path()).await {
                                 Ok(data) => {
                                     user_set.extend(
+                                        // Try to find a key for each line
                                         data.lines()
                                             .flat_map(|line| PublicKey::from_openssh(line).ok())
+                                            // Generate the SHA256 fingerprint and metadata for the given key
                                             .map(|key| {
                                                 (
                                                     key.fingerprint(HashAlg::Sha256),
@@ -113,6 +127,7 @@ impl FingerprintsValidator {
                         );
                     }
                 }
+                // Notify about initial keys population
                 if let Some(tx) = user_init_tx.take() {
                     let _ = tx.send(());
                 };
@@ -131,12 +146,15 @@ impl FingerprintsValidator {
                 let mut admin_set = BTreeMap::new();
                 match read_dir(admin_keys_directory.as_path()).await {
                     Ok(mut read_dir) => {
+                        // For each file in the admin keys directory
                         while let Ok(Some(entry)) = read_dir.next_entry().await {
                             match read_to_string(entry.path()).await {
                                 Ok(data) => {
                                     admin_set.extend(
+                                        // Try to find a key for each line
                                         data.lines()
                                             .flat_map(|line| PublicKey::from_openssh(line).ok())
+                                            // Generate the SHA256 fingerprint and metadata for the given key
                                             .map(|key| {
                                                 (
                                                     key.fingerprint(HashAlg::Sha256),
@@ -167,12 +185,14 @@ impl FingerprintsValidator {
                         );
                     }
                 }
+                // Notify about initial keys population
                 if let Some(tx) = admin_init_tx.take() {
                     let _ = tx.send(());
                 };
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }));
+        // Wait until the user and admin keys have been populated once
         tokio::try_join!(user_init_rx, admin_init_rx)?;
         Ok(FingerprintsValidator {
             user_fingerprints,
@@ -185,6 +205,7 @@ impl FingerprintsValidator {
 
     // Find the right authentication type for a given fingerprint
     pub(crate) fn authenticate_fingerprint(&self, fingerprint: &Fingerprint) -> AuthenticationType {
+        // Check admin keys first
         if self
             .admin_fingerprints
             .read()
@@ -192,6 +213,7 @@ impl FingerprintsValidator {
             .contains_key(fingerprint)
         {
             AuthenticationType::Admin
+        // Check user keys next
         } else if self
             .user_fingerprints
             .read()
@@ -199,14 +221,18 @@ impl FingerprintsValidator {
             .contains_key(fingerprint)
         {
             AuthenticationType::User
+        // No authentication match
         } else {
             AuthenticationType::None
         }
     }
 
+    // Return the key data related to a given fingerprint
     pub(crate) fn get_data_for_fingerprint(&self, fingerprint: &Fingerprint) -> Option<KeyData> {
+        // Check admin keys first
         if let Some(key_data) = self.admin_fingerprints.read().unwrap().get(fingerprint) {
             Some(key_data.clone())
+        // Check user keys next
         } else {
             self.user_fingerprints
                 .read()
@@ -216,6 +242,7 @@ impl FingerprintsValidator {
         }
     }
 
+    // Delete a user key from the fingerprints matcher and the filesystem
     pub(crate) fn remove_user_key(&self, fingerprint: &Fingerprint) -> anyhow::Result<()> {
         if let Some(KeyData { file, .. }) =
             self.user_fingerprints.write().unwrap().remove(fingerprint)

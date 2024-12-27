@@ -5,6 +5,7 @@ use dashmap::DashMap;
 use mockall::automock;
 use ssh_key::Fingerprint;
 
+// The unique identifications for each user, to discriminate across multiple sessions.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum UserIdentification {
     PublicKey(Fingerprint),
@@ -24,12 +25,14 @@ impl Hash for UserIdentification {
     }
 }
 
+// Which kind of user the quota token will be generated for.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) enum TokenHolder {
     User(UserIdentification),
     Admin(UserIdentification),
 }
 
+// Return a string representation of the user identifier.
 impl TokenHolder {
     pub(crate) fn get_user(&self) -> String {
         match self {
@@ -41,7 +44,9 @@ impl TokenHolder {
     }
 }
 
+// A token that represents a unit of the user-allowed quota.
 pub(crate) struct QuotaToken {
+    // A function to call when the token is dropped.
     callback: Option<Box<dyn FnOnce() + Send + Sync>>,
 }
 
@@ -74,8 +79,12 @@ impl QuotaHandler for DummyQuotaHandler {
     }
 }
 
+// A map tracking the quota for each user.
+// The tokens it generates keep track of when they're dropped, and update the underlying entry accordingly.
 pub(crate) struct QuotaMap {
+    // The maximum quota for each user.
     max_quota: NonZero<u32>,
+    // The structure storing data for each user.
     map: DashMap<UserIdentification, u32>,
 }
 
@@ -91,24 +100,29 @@ impl QuotaMap {
 impl QuotaHandler for Arc<QuotaMap> {
     fn get_token(&self, holder: TokenHolder) -> Option<QuotaToken> {
         match holder {
+            // If the holder is a user, generate a limited amount of tokens
             TokenHolder::User(holder) => {
                 let mut entry = self.map.entry(holder.clone()).or_default();
+                // If the max quota is reached, don't return a new token
                 if *entry >= self.max_quota.into() {
                     return None;
                 }
                 *entry += 1;
                 drop(entry);
                 let this = Arc::clone(self);
+                // Add a callback to decrease the token count on drop
                 let callback = move || {
                     this.map.remove_if_mut(&holder, |_, entry| {
                         *entry -= 1;
                         *entry == 0
                     });
                 };
+                // Return the token instance
                 Some(QuotaToken {
                     callback: Some(Box::new(callback)),
                 })
             }
+            // If the holder is an admin, generate a new token indiscriminately
             TokenHolder::Admin(_) => Some(QuotaToken { callback: None }),
         }
     }

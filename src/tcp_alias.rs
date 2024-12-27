@@ -6,9 +6,11 @@ use std::{
     hash::{Hash, Hasher},
 };
 
+// A TCP alias, with an address and a port.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct TcpAlias(pub(crate) String, pub(crate) u16);
 
+// A borrowed TCP alias, with references to an address and a port. Useful for accessing the TCP connection map.
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct BorrowedTcpAlias<'a>(pub(crate) &'a str, pub(crate) &'a u16);
 

@@ -11,13 +11,20 @@ use tokio_stream::StreamExt;
 
 use crate::{certificates::AlpnChallengeResolver, droppable_handle::DroppableHandle};
 
+// Service that resolves ACME TLS-ALPN-01 challenges and the certificates they generate.
 #[derive(Debug)]
 pub(crate) struct AcmeResolver {
+    // Path where the cache is stored.
     cache_dir: PathBuf,
+    // E-mail address for the Let's Encrypt account.
     contact: String,
+    // Whether to use the staging server of Let's Encrypt or not.
     use_staging: bool,
+    // Task that listens for connections.
     join_handle: Option<DroppableHandle<()>>,
+    // Configuration used for TLS-ALPN-01 challenges.
     config: Option<Arc<ServerConfig>>,
+    // TLS certificate resolver.
     resolver: Option<Arc<ResolvesServerCertAcme>>,
 }
 
@@ -37,14 +44,15 @@ impl AcmeResolver {
 impl AlpnChallengeResolver for AcmeResolver {
     // Handle the new list of domains to manage certificates for with TLS-ALPN-01 challenges.
     fn update_domains(&mut self, domains: Vec<String>) {
+        // Don't do anything if the list is empty.
         if domains.is_empty() {
             return;
         }
-        self.join_handle.take();
         info!(
             "Generating ACME certificates for the following domains: {:?}",
             &domains
         );
+        // Create a new ACME config state.
         let mut new_state = AcmeConfig::new(domains)
             .contact_push(format!("mailto:{}", self.contact))
             .cache(DirCache::new(self.cache_dir.clone()))
@@ -52,6 +60,7 @@ impl AlpnChallengeResolver for AcmeResolver {
             .state();
         self.config = Some(new_state.challenge_rustls_config());
         self.resolver = Some(new_state.resolver());
+        // Spawn the new background task.
         self.join_handle = Some(DroppableHandle(tokio::spawn(async move {
             loop {
                 match new_state.next().await.unwrap() {
@@ -69,6 +78,7 @@ impl AlpnChallengeResolver for AcmeResolver {
             .and_then(|resolver| resolver.resolve(client_hello))
     }
 
+    // Return the config used for TLS-ALPN-01 challenges.
     fn challenge_rustls_config(&self) -> Option<Arc<ServerConfig>> {
         self.config.clone()
     }

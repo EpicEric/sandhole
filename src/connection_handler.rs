@@ -4,6 +4,7 @@ use mockall::automock;
 use ssh_key::Fingerprint;
 use tokio::sync::mpsc;
 
+// Trait for creating tunneling or aliasing channels (via an underlying SSH session).
 #[cfg_attr(test, automock)]
 #[async_trait]
 pub(crate) trait ConnectionHandler<T: Sync> {

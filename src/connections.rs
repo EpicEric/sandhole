@@ -32,17 +32,27 @@ impl<K> ConnectionMapReactor<K> for DummyConnectionMapReactor {
     fn call(&self, _: Vec<K>) {}
 }
 
+// Data stored for a connection map entry.
 struct ConnectionMapEntry<H> {
+    // The user that created this connection.
     user: String,
+    // The IP and socket for the SSH connection.
     address: SocketAddr,
+    // Handler randomly selected for a given key (usually SshTunnelHandler).
     handler: H,
+    // Quota token for the user, to limit their maximum amount of connections.
     _token: QuotaToken,
 }
 
+// Map that stores handlers to be randomly selected and returned.
 pub(crate) struct ConnectionMap<K, H, R = DummyConnectionMapReactor> {
+    // Policy on how to handle new services getting added to this map.
     load_balancing: LoadBalancing,
+    // The actual data structure storing connections, selected by key.
     map: DashMap<K, Vec<ConnectionMapEntry<H>>>,
+    // Service to generate new QuotaTokens.
     quota_handler: Arc<Box<dyn QuotaHandler + Send + Sync>>,
+    // Optional callable to send data to when the list of connection keys changes.
     reactor: RwLock<Option<R>>,
 }
 
@@ -65,6 +75,8 @@ where
         }
     }
 
+    // Add an entry to this map.
+    // This may fail if the LoadBalancing::Deny policy is in place, and an entry already exists for the given key.
     pub(crate) fn insert(
         &self,
         key: K,
@@ -75,6 +87,7 @@ where
         let len = self.map.len();
         let user = holder.get_user();
         match self.load_balancing {
+            // Add this entry to the list of possible handlers returned for this key.
             LoadBalancing::Allow => {
                 let Some(token) = self.quota_handler.get_token(holder) else {
                     return Err(ServerError::QuotaReached.into());
@@ -86,6 +99,7 @@ where
                     _token: token,
                 });
             }
+            // Replace the existing handler entry if it exists.
             LoadBalancing::Replace => {
                 let Some(token) = self.quota_handler.get_token(holder) else {
                     return Err(ServerError::QuotaReached.into());
@@ -100,6 +114,7 @@ where
                     }],
                 );
             }
+            // Reject the new handler if an entry already exists.
             LoadBalancing::Deny => {
                 if self.map.contains_key(&key) {
                     return Err(ServerError::LoadBalancingAlreadyBound.into());
@@ -118,6 +133,7 @@ where
                 );
             }
         }
+        // If the entry count increased, notify the reactor.
         if self.map.len() > len {
             if let Some(reactor) = self.reactor.read().unwrap().as_ref() {
                 reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
@@ -126,6 +142,7 @@ where
         Ok(())
     }
 
+    // Return a random handler for the given key.
     pub(crate) fn get<Q>(&self, key: &Q) -> Option<H>
     where
         K: Borrow<Q>,
@@ -140,6 +157,8 @@ where
         })
     }
 
+    // Remove the handler under the given key and SSH connection address.
+    // Called when the client closes a remote forwarding session.
     pub(crate) fn remove<Q>(&self, key: &Q, address: &SocketAddr) -> Option<(K, H)>
     where
         K: Borrow<Q>,
@@ -147,6 +166,7 @@ where
     {
         let len = self.map.len();
         let mut element = None;
+        // Find the entry and store it under the element variable if it exists.
         self.map.remove_if_mut(key, |inner_key, value| {
             let mut i = 0;
             while i < value.len() {
@@ -156,8 +176,10 @@ where
                 }
                 i += 1;
             }
+            // If the entry is empty, remove it
             value.is_empty()
         });
+        // If the entry was removed, notify the reactor.
         if self.map.len() < len {
             if let Some(reactor) = self.reactor.read().unwrap().as_ref() {
                 reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
@@ -166,9 +188,12 @@ where
         element
     }
 
+    // Remove every handler under the given SSH connection address.
+    // Called when the client disconnects, or when HTTP connections are flushed to TCP alias connections.
     pub(crate) fn remove_by_address(&self, address: &SocketAddr) -> Vec<(K, H)> {
         let len = self.map.len();
         let mut elements = Vec::new();
+        // Find the entries with the address and store them in the elements Vec.
         self.map.retain(|key, value| {
             let mut i = 0;
             while i < value.len() {
@@ -178,8 +203,10 @@ where
                 }
                 i += 1;
             }
+            // If the entries are empty, remove them
             !value.is_empty()
         });
+        // If one or more entries were removed, notify the reactor.
         if self.map.len() < len {
             if let Some(reactor) = self.reactor.read().unwrap().as_ref() {
                 reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
@@ -188,10 +215,13 @@ where
         elements
     }
 
+    // Update the reactor value.
+    // This should only be called near the connection map's initialization, not during its lifetime.
     pub(crate) fn update_reactor(&self, reactor: Option<R>) {
         *self.reactor.write().unwrap() = reactor;
     }
 
+    // Return tabular data from all the existing connections.
     pub(crate) fn data(&self) -> BTreeMap<K, BTreeMap<SocketAddr, String>> {
         self.map
             .iter()
@@ -209,6 +239,7 @@ where
     }
 }
 
+// Helper trait for getting HTTP-specific entries via the hostname.
 pub(crate) trait ConnectionGetByHttpHost<H> {
     fn get_by_http_host(&self, host: &str) -> Option<H>;
 }
@@ -223,6 +254,7 @@ where
     }
 }
 
+// Struct that can select HTTP hosts from HTTP forwardings or TCP alias forwardings under port 80.
 pub(crate) struct HttpAliasingConnection {
     http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
     tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,

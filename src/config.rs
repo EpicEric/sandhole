@@ -4,6 +4,8 @@ use clap::{command, Parser, ValueEnum};
 use humantime::Duration;
 use webpki::types::DnsName;
 
+// Which value to seed with when generating random subdomains, for determinism.
+// This allows binding to the same random address until Sandhole is restarted.
 #[doc(hidden)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum RandomSubdomainSeed {
@@ -17,6 +19,7 @@ pub enum RandomSubdomainSeed {
     Address,
 }
 
+// Policy on whether to allow binding specific hostnames.
 #[doc(hidden)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum BindHostnames {
@@ -30,6 +33,7 @@ pub enum BindHostnames {
     None,
 }
 
+// Strategy for load-balancing when multiple services request the same hostname/port.
 #[doc(hidden)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum LoadBalancing {
@@ -41,6 +45,7 @@ pub enum LoadBalancing {
     Deny,
 }
 
+// CLI configuration for Sandhole.
 #[doc(hidden)]
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]

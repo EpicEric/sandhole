@@ -111,19 +111,28 @@ pub(crate) enum ProxyType {
     Aliasing,
 }
 
+// Data commonly reused between HTTP proxy requests.
 pub(crate) struct ProxyData<M, H, T>
 where
     M: ConnectionGetByHttpHost<Arc<H>>,
     H: ConnectionHandler<T>,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
+    // An HTTP connection manager (usually ConnectionMap) that returns a tunneling/aliasing handler.
     pub(crate) conn_manager: M,
+    // Telemetry service, where HTTP requests are tracked.
     pub(crate) telemetry: Arc<Telemetry>,
+    // Tuple containing where to redirect requests from the main domain to.
     pub(crate) domain_redirect: Arc<DomainRedirect>,
+    // The HTTP protocol for the current connection.
     pub(crate) protocol: Protocol,
+    // Configuration on which type of channel to retrieve from the handler.
     pub(crate) proxy_type: ProxyType,
+    // Duration until an outgoing request is canceled.
     pub(crate) http_request_timeout: Duration,
+    // Optional duration until an established Websocket connection is canceled.
     pub(crate) websocket_timeout: Option<Duration>,
+    // If set, disables sending HTTP logs to the handler.
     pub(crate) disable_http_logs: bool,
     pub(crate) _phantom_data: PhantomData<(H, T)>,
 }
@@ -149,6 +158,7 @@ where
     let protocol = &proxy_data.protocol;
     let disable_http_logs = proxy_data.disable_http_logs;
     let timer = Instant::now();
+    // Retrieve host from the headers
     let host = request
         .headers()
         .get(HOST)
@@ -159,8 +169,11 @@ where
         .ok_or(ServerError::InvalidHostHeader)?
         .to_owned();
     let ip = tcp_address.ip().to_canonical().to_string();
+    // Find the HTTP handler for the given host
     let Some(handler) = conn_manager.get_by_http_host(&host) else {
+        // If no handler was found, check if this is a request to the root domain
         if domain_redirect.from == host {
+            // If so, redirect to the configured URL
             let elapsed_time = timer.elapsed();
             let response = Redirect::to(&domain_redirect.to).into_response();
             http_log(
@@ -177,11 +190,14 @@ where
             );
             return Ok(response);
         }
+        // No handler was found, return 404
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
+    // Read protocol information for X-Forwarded headers
     let (proto, port) = match protocol {
         Protocol::Http { port } => ("http", port.to_string()),
         Protocol::Https { port } => ("https", port.to_string()),
+        // If --force-https is true, redirect this HTTP request to HTTPS
         Protocol::TlsRedirect { to: to_port, .. } => {
             let elapsed_time = timer.elapsed();
             let response = Redirect::permanent(
@@ -213,6 +229,7 @@ where
             return Ok(response);
         }
     };
+    // Add proxied info to the proper headers
     request
         .headers_mut()
         .insert(X_FORWARDED_FOR, ip.parse().unwrap());
@@ -225,8 +242,10 @@ where
     request
         .headers_mut()
         .insert(X_FORWARDED_PORT, port.parse().unwrap());
+    // Add this request to the telemetry for the host
     telemetry.add_http_request(host.clone());
 
+    // Find the appropriate handler for this proxy type
     let Ok(io) = (match proxy_data.proxy_type {
         ProxyType::Tunneling => handler.tunneling_channel(&ip, tcp_address.port()).await,
         ProxyType::Aliasing => {
@@ -235,20 +254,25 @@ where
                 .await
         }
     }) else {
+        // If getting the handler failed, return 404 (they may have an allowlist for fingerprints)
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
     let tx = handler.log_channel();
+    // Create an HTTP handshake over the selected channel
     let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(io)).await?;
 
     let method = request.method().to_string();
     let uri = request.uri().path().to_string();
+    // Check for an Upgrade header
     match request.headers().get(UPGRADE) {
+        // If not present, handle the request as usual
         None => {
             tokio::spawn(async move {
                 if let Err(err) = conn.await {
                     warn!("Connection failed: {:?}", err);
                 }
             });
+            // Await for a response under the given duration.
             let response = timeout(
                 proxy_data.http_request_timeout,
                 sender.send_request(request),
@@ -268,9 +292,11 @@ where
                 Some(tx),
                 disable_http_logs,
             );
+            // Return the received response to the client
             Ok(response.into_response())
         }
 
+        // If there is an Upgrade header, make sure that it's a valid Websocket upgrade.
         Some(request_upgrade) => {
             tokio::spawn(async move {
                 if let Err(err) = conn.with_upgrades().await {
@@ -278,7 +304,9 @@ where
                 }
             });
             let request_type = request_upgrade.to_str()?.to_string();
+            // Retrieve the OnUpgrade from the incoming request
             let upgraded_request = hyper::upgrade::on(&mut request);
+            // Await for a response under the given duration.
             let mut response = timeout(
                 proxy_data.http_request_timeout,
                 sender.send_request(request),
@@ -298,6 +326,7 @@ where
                 Some(tx),
                 disable_http_logs,
             );
+            // Check if the underlying server accepts the Upgrade request
             match response.status() {
                 StatusCode::SWITCHING_PROTOCOLS => {
                     if request_type
@@ -307,13 +336,16 @@ where
                             .ok_or(ServerError::MissingUpgradeHeader)?
                             .to_str()?
                     {
+                        // Retrieve the upgraded connection from the response
                         let upgraded_response = hyper::upgrade::on(&mut response).await?;
                         let websocket_timeout = proxy_data.websocket_timeout;
+                        // Start a task to copy data between the two Upgraded parts
                         tokio::spawn(async move {
                             let mut upgraded_request =
                                 TokioIo::new(upgraded_request.await.unwrap());
                             let mut upgraded_response = TokioIo::new(upgraded_response);
                             match websocket_timeout {
+                                // If there is a Websocket timeout, copy until the deadline is reached.
                                 Some(duration) => {
                                     let _ = timeout(duration, async {
                                         copy_bidirectional(
@@ -324,6 +356,7 @@ where
                                     })
                                     .await;
                                 }
+                                // If there isn't a Websocket timeout, copy data between both sides unconditionally.
                                 None => {
                                     let _ = copy_bidirectional(
                                         &mut upgraded_response,
@@ -334,6 +367,7 @@ where
                             }
                         });
                     }
+                    // Return the response to the client
                     Ok(response.into_response())
                 }
                 _ => Ok(response.into_response()),

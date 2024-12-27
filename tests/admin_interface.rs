@@ -147,7 +147,6 @@ async fn admin_interface() {
     });
     if timeout(Duration::from_secs(3), async move {
         // 4a. Validate header, system information, and HTTP tab data
-        dbg!("4a");
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",
             r"System information",
@@ -170,7 +169,6 @@ async fn admin_interface() {
             }
         }
         // 4b. Switch tabs and validate SSH tab data
-        dbg!("4b");
         writer
             .write(&b"\t"[..])
             .await
@@ -197,7 +195,6 @@ async fn admin_interface() {
             }
         }
         // 4c. Switch tabs again and validate TCP tab data
-        dbg!("4c");
         writer
             .write(&b"\t"[..])
             .await
@@ -224,7 +221,6 @@ async fn admin_interface() {
             }
         }
         // 4d. Go back one tab
-        dbg!("4d");
         writer
             .write(&b"\x1b[Z"[..])
             .await
@@ -251,7 +247,6 @@ async fn admin_interface() {
             }
         }
         // 4e. Quit the admin interface with Ctrl-C (ETX)
-        dbg!("4e");
         writer
             .write(&b"\x03"[..])
             .await

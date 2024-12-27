@@ -62,6 +62,7 @@ enum Tab {
 }
 
 impl Tab {
+    // Render the tabs at the top of the table
     fn render(area: Rect, buf: &mut Buffer, selected: usize) {
         Tabs::new(vec![
             Line::from("  HTTP  ".black().bg(Tab::Http.color())),
@@ -91,22 +92,35 @@ impl Tab {
     }
 }
 
+// Pop-up window displaying detailed information
 enum AdminPrompt {
+    // General information
     Infobox(String),
+    // User selection
     SelectUser(Vec<String>, TableState),
+    // User details
     UserDetails(String, Option<(Fingerprint, KeyData)>),
+    // Prompt to remove a user
     RemoveUser(String, Option<(Fingerprint, KeyData)>),
 }
 
+// Data used to render the admin interface.
 struct AdminState {
+    // Reference to the server for collecting data and interacting with user keys.
     server: Arc<SandholeServer>,
+    // Whether this is rendered in a pseudo-terminal or not.
     is_pty: bool,
+    // Currently selected tab.
     tab: Tab,
+    // State of the selected tab's table.
     table_state: TableState,
+    // State of the scrollbar for the selected tab's table.
     vertical_scroll: ScrollbarState,
+    // Which pop-up to show, if any.
     prompt: Option<AdminPrompt>,
 }
 
+// Helper utility to display canonical socket addresses.
 fn to_socket_addr_string(addr: &SocketAddr) -> String {
     let ip = addr.ip().to_canonical();
     if ip.is_ipv4() {
@@ -120,8 +134,10 @@ impl AdminState {
     // Render the admin interface
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         if self.is_pty {
+            // Display the title at the top
             let title =
                 Line::from(concat!(" Sandhole admin v", env!("CARGO_PKG_VERSION"), " ").bold());
+            // Display the commands at the bottom
             let instructions = Line::from(vec![
                 " <Tab> ".blue().bold(),
                 "Change tab ".into(),
@@ -135,6 +151,7 @@ impl AdminState {
                 .title_bottom(instructions.centered())
                 .border_set(border::THICK);
             block.render(area, buf);
+            // Break the layout vertically for system info and the selected tab
             let [system_data_area, _, tabs_area, inner_area] = Layout::vertical([
                 Constraint::Length(4),
                 Constraint::Length(1),
@@ -151,6 +168,7 @@ impl AdminState {
             self.render_tab(inner_area.inner(Margin::new(2, 1)), buf);
             self.render_prompt(area, buf);
         } else {
+            // If this is not a pseudo-terminal, show some information on how to allocate one
             let text = Text::from(vec![
                 Line::from(
                     "PTY not detected! Make sure to connect with \"ssh -t ... admin\" instead."
@@ -163,6 +181,7 @@ impl AdminState {
         }
     }
 
+    // Render the prompt over other data
     fn render_prompt(&mut self, area: Rect, buf: &mut Buffer) {
         if let Some(ref mut prompt) = self.prompt {
             let vertical = Layout::vertical([Constraint::Max(8)]).flex(Flex::Center);
@@ -171,8 +190,10 @@ impl AdminState {
             let [area] = horizontal.areas(area);
             let block = Block::bordered().black().on_white();
             let inner = block.inner(area);
+            // Clear area underneath the prompt
             Widget::render(Clear, area, buf);
             match prompt {
+                // Show the infobox
                 AdminPrompt::Infobox(text) => {
                     let block = block.title_bottom(
                         Line::from(vec![" <Enter> ".bold(), "Close ".into()]).centered(),
@@ -183,6 +204,7 @@ impl AdminState {
                     Widget::render(block, area, buf);
                     Widget::render(text, inner, buf);
                 }
+                // Show the user selection prompt
                 AdminPrompt::SelectUser(users, table_state) => {
                     let block = block.title(Line::raw("Connected users")).title_bottom(
                         Line::from(vec![" <Enter> ".bold(), "Details ".into()]).centered(),
@@ -195,6 +217,7 @@ impl AdminState {
                     Widget::render(block, area, buf);
                     StatefulWidget::render(users, inner, buf, table_state);
                 }
+                // Show the user details pop-up
                 AdminPrompt::UserDetails(user, data) => {
                     let block = block.title(Line::raw("User details")).title_bottom(
                         if data
@@ -214,12 +237,14 @@ impl AdminState {
                     );
                     let (user_type, comment) = data
                         .as_ref()
+                        // If fingerprint, get key data
                         .map(|(_, data)| {
                             (
                                 format!("Type: {}", data.auth),
                                 format!("Key comment: {}", data.comment),
                             )
                         })
+                        // If not, get generic user data
                         .unwrap_or(("Type: User".into(), "(authenticated with password)".into()));
                     let text = Paragraph::new(vec![
                         Line::from(user.as_str()).centered(),
@@ -230,6 +255,7 @@ impl AdminState {
                     Widget::render(block, area, buf);
                     Widget::render(text, inner, buf);
                 }
+                // Show the user removal confirmation prompt
                 AdminPrompt::RemoveUser(user, data) => {
                     let block = block.title(Line::raw("Remove user?")).title_bottom(
                         Line::from(vec![
@@ -245,7 +271,7 @@ impl AdminState {
                             .centered(),
                         Line::from(user.as_str()).centered(),
                         Line::from(if data.is_some() {
-                            "They will lose all forwarding permissions!"
+                            "Any keys in the given file will lose all forwarding permissions!"
                         } else {
                             "They might still be able to reconnect via the login API!"
                         })
@@ -264,8 +290,10 @@ impl AdminState {
         let color = self.tab.color();
         let table = match self.tab {
             Tab::Http => {
+                // Get data for HTTP
                 let data = self.server.http_data.read().unwrap().clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
+                // Create rows for each host
                 let rows: Vec<Row<'_>> = data
                     .iter()
                     .map(|(host, (connections, req_per_min))| {
@@ -297,8 +325,10 @@ impl AdminState {
                     .row_highlight_style(Style::new().fg(color).reversed())
             }
             Tab::Ssh => {
+                // Get data for SSH
                 let data = self.server.ssh_data.read().unwrap().clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
+                // Create rows for each alias
                 let rows: Vec<Row<'_>> = data
                     .iter()
                     .map(|(host, connections)| {
@@ -328,8 +358,10 @@ impl AdminState {
                     .row_highlight_style(Style::new().fg(color).reversed())
             }
             Tab::Tcp => {
+                // Get data for TCP
                 let data = self.server.tcp_data.read().unwrap().clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
+                // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
                     .iter()
                     .map(|(TcpAlias(alias, port), connections)| {
@@ -380,6 +412,7 @@ impl AdminState {
             cpu_usage,
         } = self.server.system_data.read().unwrap().clone();
         let block = Block::bordered().title("System information");
+        // Break into four areas, first horizontally then vertically
         let [left_area, right_area] =
             Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
                 .areas(block.inner(area));
@@ -416,14 +449,21 @@ impl AdminState {
     }
 }
 
+// Data for a terminal interface
 struct AdminTerminal {
+    // The underlying terminal backend used by Ratatui
     terminal: Terminal<CrosstermBackend<BufferedSender>>,
+    // Stateful data for the terminal
     state: AdminState,
 }
 
+// Instance of the displayed admin interface
 pub(crate) struct AdminInterface {
+    // Reference to the terminal interface
     interface: Arc<Mutex<AdminTerminal>>,
+    // Task that updates the interface
     _join_handle: DroppableHandle<()>,
+    // Handler for change events, such as key presses
     change_notifier: watch::Sender<()>,
 }
 
@@ -437,6 +477,7 @@ impl AdminInterface {
         let options = TerminalOptions {
             viewport: Viewport::Fixed(Rect::new(0, 0, 120, 60)),
         };
+        // Create a channel to listen for user-generated events
         let (change_notifier, mut subscriber) = watch::channel(());
         let interface = Arc::new(Mutex::new(AdminTerminal {
             terminal: Terminal::with_options(backend, options).unwrap(),
@@ -450,6 +491,7 @@ impl AdminInterface {
             },
         }));
         let interface_clone = Arc::clone(&interface);
+        // Start task to update the admin interface
         let join_handle = DroppableHandle(tokio::spawn(async move {
             loop {
                 {
@@ -460,12 +502,14 @@ impl AdminInterface {
                     } = interface.deref_mut();
                     terminal
                         .draw(|frame| {
+                            // Render the terminal
                             state.render(frame.area(), frame.buffer_mut());
+                            // Update the cursor position (avoids cursor from disappearing on disconnect)
                             frame.set_cursor_position((0, 0));
                         })
                         .unwrap();
-                    drop(interface);
                 }
+                // Wait one second or for an user-generated event to refresh the interface
                 tokio::select! {
                     _ = sleep(Duration::from_millis(1_000)) => (),
                     _ = subscriber.changed() => ()
@@ -538,7 +582,7 @@ impl AdminInterface {
         let _ = self.change_notifier.send(());
     }
 
-    // Move down in the selected tab's table
+    // Move down in the prompt or selected tab's table
     pub(crate) fn move_down(&mut self) {
         let notify = {
             let mut interface = self.interface.lock().unwrap();
@@ -563,7 +607,7 @@ impl AdminInterface {
         }
     }
 
-    // Move up in the selected tab's table
+    // Move up in the prompt or selected tab's table
     pub(crate) fn move_up(&mut self) {
         let notify = {
             let mut interface = self.interface.lock().unwrap();
@@ -588,7 +632,7 @@ impl AdminInterface {
         }
     }
 
-    // Cancel current selection in the table or prompt
+    // Cancel current selection in the prompt or table
     pub(crate) fn cancel(&mut self) {
         let notify = {
             let mut interface = self.interface.lock().unwrap();
@@ -618,10 +662,12 @@ impl AdminInterface {
         let notify = {
             let mut interface = self.interface.lock().unwrap();
             match interface.state.prompt.take() {
+                // Close the infobox
                 Some(AdminPrompt::Infobox(_)) => {
                     interface.state.prompt = None;
                     true
                 }
+                // Confirm removal of the user
                 Some(AdminPrompt::RemoveUser(user, data)) => {
                     let mut text = "User removed successfully!".into();
                     if let Some(fingerprint) = data.map(|(fingerprint, _)| fingerprint) {
@@ -660,6 +706,7 @@ impl AdminInterface {
                     interface.state.prompt = Some(AdminPrompt::Infobox(text));
                     true
                 }
+                // Select a user
                 Some(AdminPrompt::SelectUser(users, table_state)) => {
                     if let Some(user) = table_state
                         .selected()
@@ -686,6 +733,7 @@ impl AdminInterface {
                     interface.state.prompt = Some(prompt);
                     false
                 }
+                // No prompt, select from table
                 None => {
                     if let Some(row) = interface.state.table_state.selected() {
                         let users: Option<Vec<String>> = match interface.state.tab {
@@ -758,6 +806,7 @@ impl AdminInterface {
         }
     }
 
+    // Mark user to prompt for deletion
     pub(crate) fn delete(&mut self) {
         let notify = {
             let mut interface = self.interface.lock().unwrap();

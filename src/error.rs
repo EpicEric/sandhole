@@ -18,4 +18,6 @@ pub(crate) enum ServerError {
     QuotaReached,
     #[error("No matching user key")]
     NoMatchingUserKey,
+    #[error("Unknown scheme (must be set to either http:// or https://)")]
+    UnknownHttpScheme,
 }

@@ -16,13 +16,19 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use webpki::types::ServerName;
 
-use crate::droppable_handle::DroppableHandle;
+use crate::{droppable_handle::DroppableHandle, error::ServerError};
 
+// Parsed data for login HTTP requests.
 pub(crate) struct ApiLogin {
+    // URL for the POST requests
     url: Uri,
+    // Address and port of the login API
     address: String,
+    // Which scheme to connect with (HTTP or HTTPS)
     scheme: ApiScheme,
+    // The hostname for the server
     host: String,
+    // Which server name to specify for TLS requests
     server_name: ServerName<'static>,
 }
 
@@ -41,6 +47,7 @@ pub(crate) struct AuthenticationRequest<'a> {
 impl ApiLogin {
     // Create the login client with the shared configuration for HTTP requests.
     pub(crate) fn new(endpoint: &str) -> anyhow::Result<Self> {
+        // Parse data from the URL
         let url: Uri = endpoint
             .parse()
             .with_context(|| "Invalid endpoint for API login")?;
@@ -48,19 +55,22 @@ impl ApiLogin {
             .scheme()
             .with_context(|| "API login URL has no scheme")?
             .clone();
+        // Check the scheme from the URL
         let scheme = if scheme == Scheme::HTTP {
             ApiScheme::Http
         } else if scheme == Scheme::HTTPS {
             ApiScheme::Https(Arc::new(ClientConfig::with_platform_verifier()))
         } else {
-            panic!("API login URL has unknown scheme (must be set to either http:// or https://)");
+            return Err(ServerError::UnknownHttpScheme).with_context(|| "Invalid API login URL")?;
         };
         let host = url
             .host()
             .with_context(|| "API login URL has no host")?
             .to_string();
+        //
         let server_name = ServerName::try_from(host.clone())
             .with_context(|| "Invalid server name for API login URL")?;
+        // Create address from host and port
         let address = format!(
             "{}:{}",
             host,
@@ -80,6 +90,7 @@ impl ApiLogin {
 
     // Sends a POST request with the authentication body to the configured service, returning true if authenticated.
     pub(crate) async fn authenticate(&self, data: &AuthenticationRequest<'_>) -> bool {
+        // Connect to the remote host
         let tcp_stream = match TcpStream::connect(&self.address).await {
             Ok(tcp_stream) => tcp_stream,
             Err(err) => {
@@ -87,6 +98,7 @@ impl ApiLogin {
                 return false;
             }
         };
+        // Create the request
         let request = Request::builder()
             .method("POST")
             .uri(&self.url)
@@ -95,7 +107,9 @@ impl ApiLogin {
             .body(serde_json::to_string(data).unwrap())
             .expect("Invalid request");
         let (response, _join_handle) = match self.scheme {
+            // Send an HTTP request (usually to an internal server)
             ApiScheme::Http => {
+                // Create an HTTP handshake
                 let (mut sender, conn) =
                     match hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream)).await {
                         Ok(result) => result,
@@ -109,6 +123,7 @@ impl ApiLogin {
                         warn!("API login TCP connection errored: {:?}", err);
                     }
                 }));
+                // Get the response via HTTP
                 match sender.send_request(request).await {
                     Ok(response) => (response, _join_handle),
                     Err(err) => {
@@ -117,7 +132,9 @@ impl ApiLogin {
                     }
                 }
             }
+            // Send an HTTPS request (usually to an external server)
             ApiScheme::Https(ref config) => {
+                // Establish the TLS stream
                 let connector = TlsConnector::from(Arc::clone(config));
                 let tls_stream = match connector
                     .connect(self.server_name.clone(), tcp_stream)
@@ -129,6 +146,7 @@ impl ApiLogin {
                         return false;
                     }
                 };
+                // Create an HTTP handshake
                 let (mut sender, conn) =
                     match hyper::client::conn::http1::handshake(TokioIo::new(tls_stream)).await {
                         Ok(result) => result,
@@ -142,6 +160,7 @@ impl ApiLogin {
                         warn!("API login TCP connection errored: {:?}", err);
                     }
                 }));
+                // Get the response via HTTP
                 match sender.send_request(request).await {
                     Ok(response) => (response, _join_handle),
                     Err(err) => {
@@ -151,6 +170,7 @@ impl ApiLogin {
                 }
             }
         };
+        // Authenticate if status code is within 200-299
         response.status().is_success()
     }
 }

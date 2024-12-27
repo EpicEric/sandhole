@@ -18,8 +18,10 @@ use crate::{
     tcp::is_alias,
 };
 
+// Struct wrapping a DNS async resolver.
 pub(crate) struct DnsResolver(TokioAsyncResolver);
 
+// Trait for DNS record verification.
 #[cfg_attr(test, automock)]
 #[async_trait]
 pub(crate) trait Resolver {
@@ -46,19 +48,23 @@ impl DnsResolver {
 
 #[async_trait]
 impl Resolver for DnsResolver {
+    // Check if there is a TXT record for the provided fingerprint.
     async fn has_txt_record_for_fingerprint(
         &self,
         txt_record_prefix: &str,
         requested_address: &str,
         fingerprint: &Fingerprint,
     ) -> bool {
+        // Find the TXT entries.
         if let Ok(lookup) = self
             .0
             .txt_lookup(format!("{}.{}.", txt_record_prefix, requested_address))
             .await
         {
+            // Iterate over the TXT records
             lookup.iter().any(|txt| {
                 txt.iter().any(|data| {
+                    // See if the parsed record matches the given fingerprint
                     String::from_utf8_lossy(data)
                         .parse::<Fingerprint>()
                         .as_ref()
@@ -70,21 +76,26 @@ impl Resolver for DnsResolver {
         }
     }
 
+    // Check if there is a CNAME record pointing to Sandhole's domain.
     async fn has_cname_record_for_domain(&self, requested_address: &str, domain: &str) -> bool {
+        // Find the CNAME entries
         if let Ok(lookup) = self
             .0
             .lookup(format!("{}.", requested_address), RecordType::CNAME)
             .await
         {
+            // Iterate over the CNAME records
             lookup
                 .iter()
                 .filter_map(|rdata| rdata.clone().into_cname().ok())
                 .any(|cname| {
+                    // Retrieve the domain name from the pieces
                     let cname = cname
                         .iter()
                         .map(|data| String::from_utf8_lossy(data))
                         .join(".");
                     debug!("cname {}", &cname);
+                    // Check if the domain name matches
                     cname == domain
                 })
         } else {
@@ -93,19 +104,30 @@ impl Resolver for DnsResolver {
     }
 }
 
+// Service that assigns addresses to HTTP proxies.
 pub(crate) struct AddressDelegator<R> {
+    // DNS resolver.
     resolver: R,
+    // Prefix to add for TXT records.
     txt_record_prefix: String,
+    // Root domain for Sandhole.
     root_domain: String,
+    // Random seed for generating consistent yet secure random values.
     seed: u64,
+    // Mapping between numbers and IDs.
     block_id: BlockId<char>,
+    // Counter to generate random IDs with the block ID.
     block_rng: Mutex<u64>,
+    // Policy for generating random subdomains.
     random_subdomain_seed: Option<RandomSubdomainSeed>,
+    // Policy on how to allow binding hostnames.
     bind_hostnames: BindHostnames,
+    // Whether subdomains should be random or not.
     force_random_subdomains: bool,
 }
 
 impl<R: Resolver> AddressDelegator<R> {
+    // Create the address delegator service.
     pub(crate) fn new(
         resolver: R,
         txt_record_prefix: String,
@@ -138,10 +160,13 @@ impl<R: Resolver> AddressDelegator<R> {
         fingerprint: &Option<Fingerprint>,
         socket_address: &SocketAddr,
     ) -> String {
+        // Only consider valid DNS addresses
         if DnsName::try_from(requested_address).is_ok() {
+            // If we bind all hostnames, return the provided address
             if matches!(self.bind_hostnames, BindHostnames::All) {
                 return requested_address.to_string();
             }
+            // If we bind by CNAME records, check that this address points to Sandhole's root domain
             if matches!(self.bind_hostnames, BindHostnames::Cname)
                 && requested_address != self.root_domain
                 && self
@@ -151,6 +176,7 @@ impl<R: Resolver> AddressDelegator<R> {
             {
                 return requested_address.to_string();
             }
+            // If we bind by TXT records, check that the public key's fingerprint is among the records.
             if matches!(
                 self.bind_hostnames,
                 BindHostnames::Cname | BindHostnames::Txt
@@ -169,6 +195,7 @@ impl<R: Resolver> AddressDelegator<R> {
                     }
                 }
             }
+            // If subdomains aren't random, check if user provided a valid one
             if !self.force_random_subdomains {
                 // Assign specified subdomain under the root domain
                 let address = requested_address.trim_end_matches(&format!(".{}", self.root_domain));
@@ -176,6 +203,7 @@ impl<R: Resolver> AddressDelegator<R> {
                     return format!("{}.{}", address, self.root_domain);
                 }
             }
+            // Warn if user requested an invalid address that isn't localhost or empty
             if is_alias(requested_address) {
                 warn!(
                     "Invalid address requested ({}), defaulting to random",
@@ -204,9 +232,13 @@ impl<R: Resolver> AddressDelegator<R> {
         fingerprint: &Option<Fingerprint>,
         socket_address: &SocketAddr,
     ) -> String {
+        // Use a hasher to generate the random address
         let mut hasher = SipHasher::default();
+        // Populate initially with the address delegator's random seed
         self.seed.hash(&mut hasher);
+        // Keep track of whether the hash was initialized in the first pass or not
         let mut hash_initialized = false;
+        // Hash with the given strategy
         if let Some(ref strategy) = self.random_subdomain_seed {
             match strategy {
                 // Requested address and user
@@ -271,7 +303,7 @@ impl<R: Resolver> AddressDelegator<R> {
             )
             .unwrap()
         } else {
-            // Random seed
+            // Hash hasn't been initialized properly, use block ID to generate a random string
             let mut block_rng = self.block_rng.lock().unwrap();
             let mut string = self.block_id.encode_string(*block_rng).unwrap();
             string.drain(6..);

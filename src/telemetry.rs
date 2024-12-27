@@ -8,10 +8,16 @@ use dashmap::DashMap;
 
 use crate::connections::ConnectionMapReactor;
 
+// A value that increases with time.
 struct Counter {
+    // The history of the value across several instants.
     history: VecDeque<(Instant, u64)>,
+    // The sliding window of values to consider.
     window: Duration,
+    // The period as a correction factor over the sliding window.
+    // This will divide the count in order to return the rate over time.
     period: f64,
+    // The current value.
     count: u64,
 }
 
@@ -32,7 +38,11 @@ impl Counter {
             let Some(element) = self.history.front() else {
                 break;
             };
+            // Remove elements at the front if they are too old.
             if element.0.elapsed() >= self.window {
+                // Don't remove the first element if it is the last one.
+                // Instead, update its instant.
+                // This ensures that the first call to add is counted.
                 if self.history.len() == 1 {
                     self.history.front_mut().unwrap().0 = Instant::now();
                     break;
@@ -49,22 +59,28 @@ impl Counter {
     // Measure the counter, taking the period and window into account.
     fn measure(&mut self) -> f64 {
         let delta = loop {
+            // If there are no elements in the history, return the current count.
             let Some(element) = self.history.front() else {
                 break self.count;
             };
+            // If the count hasn't changed, return the current count (rate will be 0).
             if element.1 == self.count {
                 self.history.pop_front();
                 break self.count;
+            // The count has changed; if within window, return the front element.
             } else if element.0.elapsed() < self.window {
                 break element.1;
+            // Element is no longer within window; remove from history.
             } else {
                 self.history.pop_front();
             }
         };
+        // If the last element has a different count value, add the current count to the end.
         if let Some(element) = self.history.back() {
             if element.1 != self.count {
                 self.history.push_back((Instant::now(), self.count));
             }
+        // Also add the current count to the end if the history is empty.
         } else {
             self.history.push_back((Instant::now(), self.count));
         }
@@ -102,7 +118,9 @@ mod counter_tests {
     }
 }
 
+// Metadata to display on the admin interface.
 pub(crate) struct Telemetry {
+    // Requests per minute for each HTTP host.
     http_requests_per_minute: DashMap<String, Counter>,
 }
 

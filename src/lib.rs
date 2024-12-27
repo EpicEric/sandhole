@@ -82,6 +82,9 @@ struct HttpReactor {
     telemetry: Arc<Telemetry>,
 }
 
+// When the list of hostnames served by Sandhole changes, we must notify the
+// certificates resolver (in order to update the ACME challenges) and the telemetry
+// (in order to tell which hostnames are still being tracked or not).
 impl ConnectionMapReactor<String> for HttpReactor {
     fn call(&self, identifiers: Vec<String>) {
         self.certificates.call(identifiers.clone());
@@ -89,6 +92,7 @@ impl ConnectionMapReactor<String> for HttpReactor {
     }
 }
 
+// Data collected from the system and displayed on the admin interface.
 #[derive(Default, Clone)]
 struct SystemData {
     used_memory: u64,
@@ -98,36 +102,64 @@ struct SystemData {
     cpu_usage: f32,
 }
 
+// A list of sessions and their cancelation channels.
 type SessionMap = HashMap<usize, watch::Sender<()>>;
+// A generic table with data for the admin interface.
 type DataTable<K, V> = Arc<RwLock<BTreeMap<K, V>>>;
+// HTTP proxy data used by the local forwarding aliasing connections.
 type AliasingProxyData =
     Arc<ProxyData<Arc<HttpAliasingConnection>, SshTunnelHandler, ChannelStream<Msg>>>;
 
 pub(crate) struct SandholeServer {
+    // A unique ID assigned for each SSH session.
     pub(crate) session_id: AtomicUsize,
+    // A map of all sessions for a given user authenticated with a username+password pair.
     pub(crate) sessions_password: Mutex<HashMap<String, SessionMap>>,
+    // A map of all sessions for a given user authenticated with a public key.
     pub(crate) sessions_publickey: Mutex<BTreeMap<Fingerprint, SessionMap>>,
+    // The map for forwarded HTTP connections.
     pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
+    // The map for forwarded SSH connections.
     pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>>>,
+    // The map for forwarded TCP + alias connections.
     pub(crate) tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
+    // Data related to the HTTP forwardings for the admin interface.
     pub(crate) http_data: DataTable<String, (BTreeMap<SocketAddr, String>, f64)>,
+    // Data related to the SSH forwardings for the admin interface.
     pub(crate) ssh_data: DataTable<String, BTreeMap<SocketAddr, String>>,
+    // Data related to the TCP/alias forwardings for the admin interface.
     pub(crate) tcp_data: DataTable<TcpAlias, BTreeMap<SocketAddr, String>>,
+    // System data for the admin interface.
     pub(crate) system_data: Arc<RwLock<SystemData>>,
+    // HTTP proxy data used by the local forwarding aliasing connections.
     pub(crate) aliasing_proxy_data: AliasingProxyData,
+    // Service for validating fingerprint authentications and automatically update its data when the filesystem changes.
     pub(crate) fingerprints_validator: FingerprintsValidator,
+    // Service for user+password authentication via a login API via a config-provided URL.
     pub(crate) api_login: Option<ApiLogin>,
+    // Service for assigning automatic addresses according to the addressing policies.
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
+    // Service for handling opening and closing TCP sockets for non-aliased services.
     pub(crate) tcp_handler: Arc<TcpHandler>,
+    // The base domain of Sandhole.
     pub(crate) domain: String,
+    // Which port Sandhole listens to for HTTP connections.
     pub(crate) http_port: u16,
+    // Which port Sandhole listens to for HTTPS connections.
     pub(crate) https_port: u16,
+    // Which port Sandhole listens to for SSH connections.
     pub(crate) ssh_port: u16,
+    // If true, allows users to select the TCP ports assigned by tcp_handler.
     pub(crate) force_random_ports: bool,
+    // If true, TCP aliasing is disabled, including SSH and all local forwarding connections.
     pub(crate) disable_aliasing: bool,
+    // How long until a login API request is timed out.
     pub(crate) authentication_request_timeout: Duration,
+    // How long until an unauthed connection is closed.
     pub(crate) idle_connection_timeout: Duration,
+    // How long until an unauthed connection is closed AFTER it successfully local forwards.
     pub(crate) unproxied_connection_timeout: Duration,
+    // How long until TCP, WebSocket, and local forwarding connections are closed.
     pub(crate) tcp_connection_timeout: Option<Duration>,
 }
 
@@ -138,6 +170,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .expect("Unable to install CryptoProvider");
+    // Find the private SSH key for Sandhole or create a new one.
     let key = match fs::read_to_string(config.private_key_file.as_path()).await {
         Ok(key) => decode_secret_key(&key, None).with_context(|| "Error decoding secret key")?,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -180,18 +213,21 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             .await
             .with_context(|| "Error creating admin keys directory")?;
     }
+    // Listen on the user_keys and admin_keys directories for new SSH public keys.
     let fingerprints = FingerprintsValidator::watch(
         config.user_keys_directory.clone(),
         config.admin_keys_directory.clone(),
     )
     .await
     .with_context(|| "Error setting up public keys watcher")?;
+    // Initialize the login API service if a URL has been set.
     let api_login = config
         .password_authentication_url
         .as_ref()
         .map(|url| ApiLogin::new(url))
         .transpose()
         .with_context(|| "Error intializing login API")?;
+    // Initialize the ACME ALPN service if a contact email has been provided.
     let alpn_resolver: Box<dyn AlpnChallengeResolver> = match config.acme_contact_email {
         Some(contact) if config.https_port == 443 => Box::new(AcmeResolver::new(
             config.acme_cache_directory,
@@ -212,6 +248,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             .await
             .with_context(|| "Error creating certificates directory")?;
     }
+    // Listen on the certificates sub-directories for updates to Let's Encrypt certificates.
     let certificates = Arc::new(
         CertificateResolver::watch(
             config.certificates_directory.clone(),
@@ -249,6 +286,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         config.tcp_connection_timeout.map(Into::into),
         config.disable_tcp_logs,
     ));
+    // Add TCP handler service as a listener for TCP port updates.
     tcp_connections.update_reactor(Some(Arc::clone(&tcp_handler)));
     let addressing = Arc::new(AddressDelegator::new(
         DnsResolver::new(),
@@ -258,6 +296,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         !config.allow_requested_subdomains,
         config.random_subdomain_seed,
     ));
+    // Configure the default domain redirect for Sandhole.
     let domain_redirect = Arc::new(DomainRedirect {
         from: config.domain.clone(),
         to: config.domain_redirect,
@@ -268,6 +307,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let data_clone = Arc::clone(&http_data);
     let connections_clone = Arc::clone(&http_connections);
     let telemetry_clone = Arc::clone(&telemetry);
+    // Periodically update HTTP data, based on the connection map and the telemetry counters.
     tokio::spawn(async move {
         loop {
             sleep(Duration::from_millis(3_000)).await;
@@ -286,6 +326,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let ssh_data = Arc::new(RwLock::default());
     let data_clone = Arc::clone(&ssh_data);
     let connections_clone = Arc::clone(&ssh_connections);
+    // Periodically update SSH data, based on the connection map.
     tokio::spawn(async move {
         loop {
             sleep(Duration::from_millis(3_000)).await;
@@ -296,6 +337,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let tcp_data = Arc::new(RwLock::default());
     let data_clone = Arc::clone(&tcp_data);
     let connections_clone = Arc::clone(&tcp_connections);
+    // Periodically update TCP/alias data, based on the connection map.
     tokio::spawn(async move {
         loop {
             sleep(Duration::from_millis(3_000)).await;
@@ -305,6 +347,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     });
     let system_data = Arc::new(RwLock::default());
     let data_clone = Arc::clone(&system_data);
+    // Periodically update system data (every second, as to keep network TX/RX rates accurate).
     tokio::spawn(async move {
         let system_refresh = RefreshKind::nothing()
             .with_cpu(CpuRefreshKind::nothing().with_cpu_usage())
@@ -342,6 +385,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         keys: vec![key],
         ..Default::default()
     });
+    // Create the local forwarding-specific HTTP proxy data.
     let aliasing_proxy_data = Arc::new(ProxyData {
         conn_manager: Arc::new(HttpAliasingConnection::new(
             Arc::clone(&http_connections),
@@ -349,9 +393,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         )),
         telemetry: Arc::clone(&telemetry),
         domain_redirect: Arc::clone(&domain_redirect),
+        // HTTP only.
         protocol: Protocol::Http {
             port: config.http_port,
         },
+        // Always use aliasing channels instead of tunneling channels.
         proxy_type: ProxyType::Aliasing,
         http_request_timeout: config.http_request_timeout.into(),
         websocket_timeout: config.tcp_connection_timeout.map(Into::into),
@@ -401,6 +447,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         conn_manager: Arc::clone(&http_connections),
         telemetry: Arc::clone(&telemetry),
         domain_redirect: Arc::clone(&domain_redirect),
+        // Use TLS redirect if --force-https is set, otherwise allow HTTP.
         protocol: if config.force_https {
             Protocol::TlsRedirect {
                 from: config.http_port,
@@ -411,6 +458,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 port: config.http_port,
             }
         },
+        // Always use tunneling channels.
         proxy_type: ProxyType::Tunneling,
         http_request_timeout: config.http_request_timeout.into(),
         websocket_timeout: config.tcp_connection_timeout.map(Into::into),
@@ -427,6 +475,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     break;
                 }
             };
+            // Create a Hyper service and serve over the accepted TCP connection.
             let service = service_fn(move |req: Request<Incoming>| {
                 proxy_handler(req, address, None, Arc::clone(&proxy_data))
             });
@@ -460,6 +509,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         protocol: Protocol::Https {
             port: config.https_port,
         },
+        // Always use tunneling channels.
         proxy_type: ProxyType::Tunneling,
         http_request_timeout: config.http_request_timeout.into(),
         websocket_timeout: config.tcp_connection_timeout.map(Into::into),
@@ -478,9 +528,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 }
             };
             if config.connect_ssh_on_https_port {
+                // Check if this is an SSH-2.0 handshake.
                 let mut buf = [0u8; 8];
                 if let Ok(n) = stream.peek(&mut buf).await {
                     if buf[..n].starts_with(b"SSH-2.0-") {
+                        // Handle as an SSH connection instead of HTTPS.
                         handle_ssh_connection(
                             stream,
                             address,
@@ -494,11 +546,14 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             }
             let proxy_data = Arc::clone(&https_proxy_data);
             let server_config = Arc::clone(&tls_server_config);
+            // Create a Hyper service and serve over the accepted TLS connection.
             let service = service_fn(move |req: Request<Incoming>| {
                 proxy_handler(req, address, None, Arc::clone(&proxy_data))
             });
+            // Create a ClientHello TLS stream from the TCP stream.
             match LazyConfigAcceptor::new(Default::default(), stream).await {
                 Ok(handshake) => {
+                    // Handle ALPN challenges with the ACME resolver.
                     if is_tls_alpn_challenge(&handshake.client_hello()) {
                         if let Some(challenge_config) = certificates_clone.challenge_rustls_config()
                         {
@@ -546,6 +601,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .with_context(|| "Error listening to SSH port")?;
     info!("Listening for SSH connections on port {}.", config.ssh_port);
     info!("sandhole is now running.");
+    // Add OS signal handlers for termination.
     let signal_handler = wait_for_signal();
     pin!(signal_handler);
     loop {
@@ -585,6 +641,7 @@ async fn handle_ssh_connection(
 ) {
     let config = Arc::clone(config);
     let (tx, mut rx) = watch::channel(());
+    // Create a new SSH handler.
     let handler = server.new_client(address, tx);
     tokio::spawn(async move {
         let mut session = match russh::server::run_stream(config, stream, handler).await {
