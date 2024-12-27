@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     connections::ConnectionMapReactor, directory::watch_directory,
-    droppable_handle::DroppableHandle,
+    droppable_handle::DroppableHandle, error::ServerError,
 };
 use log::{error, warn};
 #[cfg(test)]
@@ -66,6 +66,9 @@ impl CertificateResolver {
         directory: PathBuf,
         alpn_resolver: RwLock<Box<dyn AlpnChallengeResolver>>,
     ) -> anyhow::Result<Self> {
+        if !directory.as_path().is_dir() {
+            return Err(ServerError::MissingDirectory(directory).into());
+        }
         let certificates: Arc<RwLock<Trie<String, Arc<CertifiedKey>>>> =
             Arc::new(RwLock::new(TrieBuilder::new().build()));
         let (watcher, mut certificates_rx) =

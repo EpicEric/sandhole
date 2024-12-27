@@ -1,6 +1,6 @@
 use std::{
     borrow::Borrow,
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt::Display,
     net::SocketAddr,
     sync::{
@@ -54,8 +54,8 @@ pub(crate) struct SshTunnelHandler {
     allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
     // Handle to the SSH connection, in order to create remote forwarding channels.
     handle: russh::server::Handle,
-    // Sender to the opened data session, if any.
-    tx: mpsc::UnboundedSender<Vec<u8>>,
+    // Sender to the opened data session, if any, for logging.
+    tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
     // IP and port of the SSH connection, for logging.
     peer: SocketAddr,
     // Address used for the remote forwarding, required for the client to open the correct session channels.
@@ -68,7 +68,7 @@ impl SshTunnelHandler {
     pub(crate) fn new(
         allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
         handle: russh::server::Handle,
-        tx: mpsc::UnboundedSender<Vec<u8>>,
+        tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
         peer: SocketAddr,
         address: String,
         port: u32,
@@ -87,20 +87,22 @@ impl SshTunnelHandler {
 impl Drop for SshTunnelHandler {
     fn drop(&mut self) {
         // Notify user of their handler being dropped, i.e. when using LoadBalancing::Replace.
-        let _ = self.tx.send(
-            format!(
-                "\x1b[1;33mWARNING:\x1b[0m The handler for {}:{} has been dropped. \
+        self.tx.as_ref().inspect(|tx| {
+            let _ = tx.send(
+                format!(
+                    "\x1b[1;33mWARNING:\x1b[0m The handler for {}:{} has been dropped. \
                 No new connections will be accepted.\r\n",
-                self.address, self.port
-            )
-            .into_bytes(),
-        );
+                    self.address, self.port
+                )
+                .into_bytes(),
+            );
+        });
     }
 }
 
 #[async_trait]
 impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
-    fn log_channel(&self) -> mpsc::UnboundedSender<Vec<u8>> {
+    fn log_channel(&self) -> Option<mpsc::UnboundedSender<Vec<u8>>> {
         self.tx.clone()
     }
 
@@ -161,6 +163,9 @@ impl UserData {
 
 // Data exclusive to the admin SSH session.
 struct AdminData {
+    // Flag indicating whether this session has any forwardings associated with it.
+    // Used to prevent forwardings and the admin interface from being used together in a single session.
+    is_forwarding: bool,
     // An allocated pseudo-terminal with the admin TUI.
     admin_interface: Option<AdminInterface>,
     // Width (in columns) of the user's pseudo-terminal.
@@ -172,6 +177,7 @@ struct AdminData {
 impl AdminData {
     fn new() -> Self {
         Self {
+            is_forwarding: false,
             admin_interface: None,
             col_width: Default::default(),
             row_height: Default::default(),
@@ -206,6 +212,22 @@ impl Display for AuthenticatedData {
     }
 }
 
+struct OptionalSender(Option<mpsc::UnboundedSender<Vec<u8>>>);
+
+impl OptionalSender {
+    fn send(&self, data: Vec<u8>) {
+        let _ = self.0.as_ref().map(|tx| tx.send(data));
+    }
+
+    fn is_some(&self) -> bool {
+        self.0.is_some()
+    }
+
+    fn clone_inner(&self) -> Option<mpsc::UnboundedSender<Vec<u8>>> {
+        self.0.clone()
+    }
+}
+
 // Shared data for each SSH connection.
 pub(crate) struct ServerHandler {
     // The unique ID of this connection.
@@ -223,10 +245,7 @@ pub(crate) struct ServerHandler {
     // User-specific data, set after authentication.
     auth_data: AuthenticatedData,
     // Sender for data session messages, used for sending logs and TUI state to the client.
-    tx: mpsc::UnboundedSender<Vec<u8>>,
-    // Receiver for data session messages (i.e. the connection's console/PTY).
-    // Initially set and consumed upon opening a data session.
-    rx: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
+    tx: OptionalSender,
     // Handle for the opened data session task. Initially None.
     open_session_join_handle: Option<DroppableHandle<()>>,
     // Reference to the Sandhole data, for accessing configuration and services.
@@ -250,7 +269,6 @@ impl Server for Arc<SandholeServer> {
     ) -> ServerHandler {
         let id = self.session_id.fetch_add(1, Ordering::AcqRel);
         info!("{} connected", peer_address);
-        let (tx, rx) = mpsc::unbounded_channel();
         ServerHandler {
             id,
             timeout_handle: Arc::new(Mutex::new(None)),
@@ -261,8 +279,7 @@ impl Server for Arc<SandholeServer> {
             auth_data: AuthenticatedData::None {
                 proxy_count: Arc::new(AtomicUsize::new(0)),
             },
-            tx,
-            rx: Some(rx),
+            tx: OptionalSender(None),
             open_session_join_handle: None,
             server: Arc::clone(self),
         }
@@ -280,12 +297,13 @@ impl Handler for ServerHandler {
         _session: &mut Session,
     ) -> Result<bool, Self::Error> {
         // Only the first session will receive data. Others are rejected.
-        let Some(mut rx) = self.rx.take() else {
+        if self.tx.is_some() {
             if matches!(self.auth_data, AuthenticatedData::None { .. }) {
                 return Err(russh::Error::Disconnect);
             }
             return Ok(false);
         };
+        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let mut stream = channel.into_stream();
         let join_handle = tokio::spawn(async move {
             while let Some(message) = rx.recv().await {
@@ -294,6 +312,7 @@ impl Handler for ServerHandler {
                 }
             }
         });
+        self.tx = OptionalSender(Some(tx));
         self.open_session_join_handle = Some(DroppableHandle(join_handle));
         Ok(true)
     }
@@ -476,12 +495,30 @@ impl Handler for ServerHandler {
         let mut success = true;
         let cmd = String::from_utf8_lossy(data);
         // Split commands by whitespace and handle each.
+        let mut commands = HashSet::<String>::new();
         for command in cmd.split_whitespace() {
             match (command, &mut self.auth_data) {
                 // - `admin` command creates an admin interface if the user is an admin
                 ("admin", AuthenticatedData::Admin { admin_data, .. }) => {
-                    let mut admin_interface =
-                        AdminInterface::new(self.tx.clone(), Arc::clone(&self.server));
+                    if commands.contains("admin") {
+                        self.tx
+                            .send(b"Invalid option \"admin\": duplicated command\r\n".to_vec());
+                        success = false;
+                        break;
+                    }
+                    commands.insert("admin".into());
+                    if admin_data.is_forwarding {
+                        self.tx.send(
+                            b"Invalid option \"admin\": cannot open admin interface while forwarding\r\n"
+                                .to_vec(),
+                        );
+                        success = false;
+                        break;
+                    }
+                    let Some(tx) = self.tx.clone_inner() else {
+                        unreachable!();
+                    };
+                    let mut admin_interface = AdminInterface::new(tx, Arc::clone(&self.server));
                     // Resize if we already have data about the PTY
                     if let (Some(col_width), Some(row_height)) =
                         (admin_data.col_width, admin_data.row_height)
@@ -498,19 +535,40 @@ impl Handler for ServerHandler {
                     | AuthenticatedData::Admin { user_data, .. },
                 ) if command.starts_with("allowed-fingerprints=") => {
                     if self.server.disable_aliasing {
-                        let _ = self.tx.send(
+                        self.tx.send(
                             b"Invalid option \"allowed-fingerprints\": aliasing is disabled\r\n"
                                 .to_vec(),
                         );
                         success = false;
                         break;
                     }
+                    if commands.contains("allowed-fingerprints") {
+                        self.tx.send(
+                            b"Invalid option \"allowed-fingerprints\": duplicated command\r\n"
+                                .to_vec(),
+                        );
+                        success = false;
+                        break;
+                    }
+                    commands.insert("allowed-fingerprints".into());
                     user_data.tcp_alias_only = true;
                     // Create a set from the provided list of fingerprints
                     let set: BTreeSet<Fingerprint> = command
                         .trim_start_matches("allowed-fingerprints=")
                         .split(',')
-                        .filter_map(|key| key.parse::<Fingerprint>().ok())
+                        .filter_map(|key| match key.parse::<Fingerprint>() {
+                            Ok(fingerprint) => Some(fingerprint),
+                            Err(err) => {
+                                self.tx.send(
+                                    format!(
+                                        "Failed to parse fingerprint {}, ignoring ({})\r\n",
+                                        key, err
+                                    )
+                                    .into_bytes(),
+                                );
+                                None
+                            }
+                        })
                         .collect();
                     // Create a validation closure that verifies that the fingerprint is in our new set
                     *user_data.allow_fingerprint.write().await =
@@ -521,7 +579,7 @@ impl Handler for ServerHandler {
                         let address = handler.address.clone();
                         // Ensure that the forwarding address is an alias, otherwise error.
                         if !is_alias(&address) {
-                            let _ = self.tx.send(
+                            self.tx.send(
                                 format!(
                                     "Cannot listen to HTTP alias of {} (must be alias, not localhost)\r\n",
                                     address
@@ -543,7 +601,7 @@ impl Handler for ServerHandler {
                                 "Failed to bind HTTP alias {} ({}) - {}",
                                 &address, self.peer, err,
                             );
-                            let _ = self.tx.send(
+                            self.tx.send(
                                 format!(
                                     "Cannot listen to HTTP alias of {} ({})\r\n",
                                     &address, err,
@@ -563,12 +621,19 @@ impl Handler for ServerHandler {
                     | AuthenticatedData::Admin { user_data, .. },
                 ) => {
                     if self.server.disable_aliasing {
-                        let _ = self.tx.send(
+                        self.tx.send(
                             b"Invalid option \"tcp-alias\": aliasing is disabled\r\n".to_vec(),
                         );
                         success = false;
                         break;
                     }
+                    if commands.contains("tcp-alias") {
+                        self.tx
+                            .send(b"Invalid option \"tcp-alias\": duplicated command\r\n".to_vec());
+                        success = false;
+                        break;
+                    }
+                    commands.insert("tcp-alias".into());
                     user_data.tcp_alias_only = true;
                     // Change any existing HTTP handlers into TCP alias handlers.
                     let handlers = self.server.http.remove_by_address(&self.peer);
@@ -576,7 +641,7 @@ impl Handler for ServerHandler {
                         let address = handler.address.clone();
                         // Ensure that the forwarding address is an alias, otherwise error.
                         if !is_alias(&address) {
-                            let _ = self.tx.send(
+                            self.tx.send(
                                 format!(
                                     "Cannot listen to HTTP alias of {} (must be alias, not localhost)\r\n",
                                     address
@@ -598,7 +663,7 @@ impl Handler for ServerHandler {
                                 "Failed to bind HTTP alias {} ({}) - {}",
                                 &address, self.peer, err,
                             );
-                            let _ = self.tx.send(
+                            self.tx.send(
                                 format!(
                                     "Cannot listen to HTTP alias of {} ({})\r\n",
                                     &address, err,
@@ -617,8 +682,7 @@ impl Handler for ServerHandler {
                         "Invalid command {} received for {} ({})",
                         command, self.auth_data, self.peer
                     );
-                    let _ = self
-                        .tx
+                    self.tx
                         .send(format!("Ignoring unknown command {}...", command).into_bytes());
                     success = false;
                 }
@@ -631,7 +695,7 @@ impl Handler for ServerHandler {
         }
     }
 
-    // Set up data for the PTY in order to properly use the TUI.
+    // Set up data for the pseudo-terminal in order to properly use the TUI.
     async fn pty_request(
         &mut self,
         channel: ChannelId,
@@ -701,18 +765,32 @@ impl Handler for ServerHandler {
         if *port > u16::MAX.into() {
             return Err(russh::Error::Disconnect);
         }
-        // Only allow remote forwarding for authenticated users
+        // Only allow remote forwarding for authenticated users that aren't using the admin interface
         let user_data = match &mut self.auth_data {
-            AuthenticatedData::User { user_data, .. }
-            | AuthenticatedData::Admin { user_data, .. } => user_data,
+            AuthenticatedData::Admin {
+                admin_data,
+                user_data,
+            } => {
+                if admin_data.admin_interface.is_some() {
+                    self.tx
+                        .send(b"Cannot remote forward if admin interface is being used".to_vec());
+                    let _ = self.cancelation_tx.send(());
+                    return Ok(false);
+                } else {
+                    admin_data.is_forwarding = true;
+                    user_data
+                }
+            }
+            AuthenticatedData::User { user_data, .. } => user_data,
             AuthenticatedData::None { .. } => return Err(russh::Error::Disconnect),
         };
+
         let handle = session.handle();
         match *port {
             // Assign SSH host through config (specified by the usual SSH port)
             22 => {
                 if self.server.disable_aliasing {
-                    let _ = self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
+                    self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
                     return Ok(false);
                 }
                 // SSH host must be alias (to be accessed via ProxyJump or ProxyCommand)
@@ -721,8 +799,7 @@ impl Handler for ServerHandler {
                         "Failed to bind SSH for {}: must be alias, not localhost",
                         self.peer
                     );
-                    let _ = self
-                        .tx
+                    self.tx
                         .send(b"Error: Alias is required for SSH host\r\n".to_vec());
                     return Ok(false);
                 }
@@ -734,7 +811,7 @@ impl Handler for ServerHandler {
                     Arc::new(SshTunnelHandler::new(
                         Arc::clone(&user_data.allow_fingerprint),
                         handle,
-                        self.tx.clone(),
+                        self.tx.clone_inner(),
                         self.peer,
                         address.to_string(),
                         *port,
@@ -742,7 +819,7 @@ impl Handler for ServerHandler {
                 ) {
                     // Adding to connection map failed.
                     info!("Rejecting SSH for {} ({}) - {}", address, self.peer, err);
-                    let _ = self.tx.send(
+                    self.tx.send(
                         format!(
                             "Cannot listen to SSH on {}:{} ({})\r\n",
                             address, self.server.ssh_port, err,
@@ -753,7 +830,7 @@ impl Handler for ServerHandler {
                 } else {
                     // Adding to connection map succeeded.
                     info!("Serving SSH for {} ({})", address, self.peer);
-                    let _ = self.tx.send(
+                    self.tx.send(
                         format!(
                             "Serving SSH on {}:{}\r\n\
                                 \x1b[2mhint: connect with ssh -J {}{} {}{}\x1b[0m\r\n",
@@ -786,12 +863,12 @@ impl Handler for ServerHandler {
                 // Handle TCP alias-only mode
                 if user_data.tcp_alias_only {
                     if self.server.disable_aliasing {
-                        let _ = self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
+                        self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
                         return Ok(false);
                     }
                     // HTTP host must be alias (to be accessed via local forwarding)
                     if !is_alias(address) {
-                        let _ = self.tx.send(
+                        self.tx.send(
                             format!(
                                 "Failed to bind HTTP alias {} (must be alias, not localhost)\r\n",
                                 address
@@ -808,7 +885,7 @@ impl Handler for ServerHandler {
                         Arc::new(SshTunnelHandler::new(
                             Arc::clone(&user_data.allow_fingerprint),
                             handle,
-                            self.tx.clone(),
+                            self.tx.clone_inner(),
                             self.peer,
                             address.into(),
                             *port,
@@ -819,7 +896,7 @@ impl Handler for ServerHandler {
                             "Rejecting HTTP alias for {} ({}) - {}",
                             address, self.peer, err
                         );
-                        let _ = self.tx.send(
+                        self.tx.send(
                             format!("Failed to bind HTTP alias {} ({})\r\n", address, err)
                                 .into_bytes(),
                         );
@@ -827,7 +904,7 @@ impl Handler for ServerHandler {
                     } else {
                         // Adding to connection map succeeded.
                         info!("Tunneling HTTP for {} ({})", address, self.peer);
-                        let _ = self.tx.send(
+                        self.tx.send(
                             format!(
                                 "Tunneling HTTP for alias {}{}\r\n",
                                 address,
@@ -859,7 +936,7 @@ impl Handler for ServerHandler {
                         Arc::new(SshTunnelHandler::new(
                             Arc::clone(&user_data.allow_fingerprint),
                             handle,
-                            self.tx.clone(),
+                            self.tx.clone_inner(),
                             self.peer,
                             address.to_string(),
                             *port,
@@ -870,7 +947,7 @@ impl Handler for ServerHandler {
                             "Rejecting HTTP for {} ({}) - {}",
                             &assigned_host, self.peer, err
                         );
-                        let _ = self.tx.send(
+                        self.tx.send(
                             format!(
                                 "Cannot listen to HTTP on http://{}{} ({})\r\n",
                                 &assigned_host,
@@ -886,7 +963,7 @@ impl Handler for ServerHandler {
                     } else {
                         // Adding to connection map succeeded.
                         info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
-                        let _ = self.tx.send(
+                        self.tx.send(
                             format!(
                                 "Serving HTTP on http://{}{}\r\n",
                                 address,
@@ -897,7 +974,7 @@ impl Handler for ServerHandler {
                             )
                             .into_bytes(),
                         );
-                        let _ = self.tx.send(
+                        self.tx.send(
                             format!(
                                 "Serving HTTPS on https://{}{}\r\n",
                                 &assigned_host,
@@ -921,7 +998,7 @@ impl Handler for ServerHandler {
                     "Failed to bind TCP port {} ({}): port too low",
                     port, self.peer
                 );
-                let _ = self.tx.send(
+                self.tx.send(
                     format!(
                         "Cannot listen to TCP on port {}:{} (port too low)\r\n",
                         &self.server.domain, port,
@@ -935,7 +1012,7 @@ impl Handler for ServerHandler {
                 // Store whether this is an alias in a variable, to reuse the result throughout this function
                 let is_alias = is_alias(address);
                 if is_alias && self.server.disable_aliasing {
-                    let _ = self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
+                    self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
                     return Ok(false);
                 }
                 let assigned_port = if *port == 0 {
@@ -945,7 +1022,7 @@ impl Handler for ServerHandler {
                             "Failed to bind random TCP port for alias {} ({}) - cannot assign random port to alias",
                             address, self.peer,
                         );
-                        let _ = self.tx.send(
+                        self.tx.send(
                             format!(
                                 "Cannot listen to TCP on random port of {} (cannot assign random port to alias)\r\n\
                                 Please specify the desired port.\r\n",
@@ -963,7 +1040,7 @@ impl Handler for ServerHandler {
                                     "Failed to bind random TCP port for alias {} ({}) - {}",
                                     address, self.peer, err,
                                 );
-                                let _ = self.tx.send(
+                                self.tx.send(
                                     format!(
                                         "Cannot listen to TCP on random port of {} ({})\r\n",
                                         address, err,
@@ -986,7 +1063,7 @@ impl Handler for ServerHandler {
                                 "Failed to bind random TCP port for alias {} ({}) - {}",
                                 address, self.peer, err,
                             );
-                            let _ = self.tx.send(
+                            self.tx.send(
                                 format!(
                                     "Cannot listen to TCP on random port of {} ({})\r\n",
                                     port, err
@@ -1010,7 +1087,7 @@ impl Handler for ServerHandler {
                     Arc::new(SshTunnelHandler::new(
                         Arc::clone(&user_data.allow_fingerprint),
                         handle,
-                        self.tx.clone(),
+                        self.tx.clone_inner(),
                         self.peer,
                         address.to_string(),
                         *port,
@@ -1022,7 +1099,7 @@ impl Handler for ServerHandler {
                             "Rejecting TCP port {} for alias {} ({}) - {}",
                             &assigned_port, address, self.peer, err,
                         );
-                        let _ = self.tx.send(
+                        self.tx.send(
                             format!(
                                 "Cannot listen to TCP on port {} for alias {} ({})\r\n",
                                 &assigned_port, address, err,
@@ -1034,7 +1111,7 @@ impl Handler for ServerHandler {
                             "Rejecting TCP for localhost:{} ({}) - {}",
                             &assigned_port, self.peer, err,
                         );
-                        let _ = self.tx.send(
+                        self.tx.send(
                             format!(
                                 "Cannot listen to TCP on {}:{} ({})\r\n",
                                 self.server.domain, &assigned_port, err,
@@ -1054,7 +1131,7 @@ impl Handler for ServerHandler {
                             "Tunneling TCP port {} for alias {} ({})",
                             &assigned_port, address, self.peer
                         );
-                        let _ = self.tx.send(
+                        self.tx.send(
                             format!(
                                 "Tunneling TCP port {} for alias {}\r\n",
                                 &assigned_port, address,
@@ -1066,7 +1143,7 @@ impl Handler for ServerHandler {
                             "Serving TCP for localhost:{} ({})",
                             &assigned_port, self.peer
                         );
-                        let _ = self.tx.send(
+                        self.tx.send(
                             format!(
                                 "Serving TCP port on {}:{}\r\n",
                                 self.server.domain, &assigned_port,
@@ -1187,8 +1264,18 @@ impl Handler for ServerHandler {
         let port_to_connect = port_to_connect as u16;
         // Only allow local forwarding if aliasing is enabled
         if self.server.disable_aliasing {
-            let _ = self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
+            self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
             return Ok(false);
+        }
+        if let AuthenticatedData::Admin { admin_data, .. } = &mut self.auth_data {
+            if admin_data.admin_interface.is_some() {
+                self.tx
+                    .send(b"Cannot local forward if admin interface is being used".to_vec());
+                let _ = self.cancelation_tx.send(());
+                return Ok(false);
+            } else {
+                admin_data.is_forwarding = true;
+            }
         }
         // Handle local forwarding for HTTP
         if port_to_connect == self.server.http_port || port_to_connect == self.server.https_port {
@@ -1247,13 +1334,18 @@ impl Handler for ServerHandler {
                     )
                     .await
                 {
-                    let _ = handler.log_channel().send(
-                        format!(
-                            "New SSH proxy from {}:{} => {}:{}\r\n",
-                            originator_address, originator_port, host_to_connect, port_to_connect
-                        )
-                        .into_bytes(),
-                    );
+                    handler.log_channel().inspect(|tx| {
+                        let _ = tx.send(
+                            format!(
+                                "New SSH proxy from {}:{} => {}:{}\r\n",
+                                originator_address,
+                                originator_port,
+                                host_to_connect,
+                                port_to_connect
+                            )
+                            .into_bytes(),
+                        );
+                    });
                     match self.auth_data {
                         // Serve SSH for unauthed user, then add disconnection timeout if this is the last proxy connection
                         AuthenticatedData::None { ref proxy_count } => {
@@ -1310,8 +1402,7 @@ impl Handler for ServerHandler {
                         "Accepted connection from {} => {} ({})",
                         self.peer, host_to_connect, handler.peer,
                     );
-                    let _ = self
-                        .tx
+                    self.tx
                         .send(format!("Forwarding SSH from {}\r\n", host_to_connect).into_bytes());
                     return Ok(true);
                 }
@@ -1330,13 +1421,15 @@ impl Handler for ServerHandler {
                 )
                 .await
             {
-                let _ = handler.log_channel().send(
-                    format!(
-                        "New TCP proxy from {}:{} => {}:{}\r\n",
-                        originator_address, originator_port, host_to_connect, port_to_connect
-                    )
-                    .into_bytes(),
-                );
+                handler.log_channel().inspect(|tx| {
+                    let _ = tx.send(
+                        format!(
+                            "New TCP proxy from {}:{} => {}:{}\r\n",
+                            originator_address, originator_port, host_to_connect, port_to_connect
+                        )
+                        .into_bytes(),
+                    );
+                });
                 match self.auth_data {
                     // Serve TCP for unauthed user, then add disconnection timeout if this is the last proxy connection
                     AuthenticatedData::None { ref proxy_count } => {
@@ -1392,8 +1485,7 @@ impl Handler for ServerHandler {
                     "Accepted connection from {} => {} ({})",
                     self.peer, host_to_connect, handler.peer,
                 );
-                let _ = self
-                    .tx
+                self.tx
                     .send(format!("Forwarding TCP from {}\r\n", host_to_connect).into_bytes());
                 return Ok(true);
             }

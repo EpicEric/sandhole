@@ -91,15 +91,17 @@ impl PortHandler for Arc<TcpHandler> {
                             {
                                 // Log new connection to SSH handler
                                 if !disable_tcp_logs {
-                                    let _ = handler.log_channel().send(
-                                        format!(
-                                            "New connection from {}:{} to TCP port {}",
-                                            address.ip().to_canonical(),
-                                            address.port(),
-                                            port
-                                        )
-                                        .into_bytes(),
-                                    );
+                                    handler.log_channel().inspect(|tx| {
+                                        let _ = tx.send(
+                                            format!(
+                                                "New connection from {}:{} to TCP port {}",
+                                                address.ip().to_canonical(),
+                                                address.port(),
+                                                port
+                                            )
+                                            .into_bytes(),
+                                        );
+                                    });
                                 }
                                 // Copy data between the TCP stream and the reverse forwarding channel, with optional timeout
                                 match tcp_connection_timeout {

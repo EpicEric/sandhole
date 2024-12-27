@@ -12,6 +12,10 @@
 - Add `--disable-aliasing` CLI flag.
 - Add `--unproxied-connection-timeout` CLI flag.
 
+### Fixed
+
+- Prevent memory leak if a session hasn't been opened.
+
 ### Changed
 
 - **BREAKING**: Downgrade HTTP hosts to aliases when passing `allowed-fingerprints`.
@@ -19,6 +23,9 @@
 - Consolidate configurations.
 - Use `proxy_handler` for HTTP local forwardings.
 - Improve support for HTTP aliases.
+- Better handling of `exec_request` commands.
+- Warn when one of multiple parsings fail.
+- Panic if required directories are missing.
 
 ## 0.2.1 (2024-12-22)
 

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ServerError {
     #[error("Missing Host header")]
@@ -20,4 +22,6 @@ pub(crate) enum ServerError {
     NoMatchingUserKey,
     #[error("Unknown scheme (must be set to either http:// or https://)")]
     UnknownHttpScheme,
+    #[error("Missing directory {0}")]
+    MissingDirectory(PathBuf),
 }

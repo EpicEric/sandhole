@@ -68,10 +68,16 @@ impl FingerprintsValidator {
         user_keys_directory: PathBuf,
         admin_keys_directory: PathBuf,
     ) -> anyhow::Result<Self> {
+        if !user_keys_directory.as_path().is_dir() {
+            return Err(ServerError::MissingDirectory(user_keys_directory).into());
+        }
         let user_fingerprints = Arc::new(RwLock::new(BTreeMap::new()));
         let (user_watcher, mut user_rx) =
             watch_directory::<RecommendedWatcher>(user_keys_directory.as_path())?;
         user_rx.mark_changed();
+        if !admin_keys_directory.as_path().is_dir() {
+            return Err(ServerError::MissingDirectory(admin_keys_directory).into());
+        }
         let admin_fingerprints = Arc::new(RwLock::new(BTreeMap::new()));
         let (admin_watcher, mut admin_rx) =
             watch_directory::<RecommendedWatcher>(admin_keys_directory.as_path())?;
@@ -95,7 +101,16 @@ impl FingerprintsValidator {
                                     user_set.extend(
                                         // Try to find a key for each line
                                         data.lines()
-                                            .flat_map(|line| PublicKey::from_openssh(line).ok())
+                                            .flat_map(|line| match PublicKey::from_openssh(line) {
+                                                Ok(key) => Some(key),
+                                                Err(err) => {
+                                                    warn!(
+                                                        "Unable to parse key in {:?} - {}",
+                                                        entry, err
+                                                    );
+                                                    None
+                                                }
+                                            })
                                             // Generate the SHA256 fingerprint and metadata for the given key
                                             .map(|key| {
                                                 (
@@ -153,7 +168,16 @@ impl FingerprintsValidator {
                                     admin_set.extend(
                                         // Try to find a key for each line
                                         data.lines()
-                                            .flat_map(|line| PublicKey::from_openssh(line).ok())
+                                            .flat_map(|line| match PublicKey::from_openssh(line) {
+                                                Ok(key) => Some(key),
+                                                Err(err) => {
+                                                    warn!(
+                                                        "Unable to parse key in {:?} - {}",
+                                                        entry, err
+                                                    );
+                                                    None
+                                                }
+                                            })
                                             // Generate the SHA256 fingerprint and metadata for the given key
                                             .map(|key| {
                                                 (

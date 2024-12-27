@@ -289,7 +289,7 @@ where
                     uri: &uri,
                     elapsed_time,
                 },
-                Some(tx),
+                tx,
                 disable_http_logs,
             );
             // Return the received response to the client
@@ -323,7 +323,7 @@ where
                     uri: &uri,
                     elapsed_time,
                 },
-                Some(tx),
+                tx,
                 disable_http_logs,
             );
             // Check if the underlying server accepts the Upgrade request
@@ -673,7 +673,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || logging_tx);
+            .return_once(move || Some(logging_tx));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -765,7 +765,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || logging_tx);
+            .return_once(move || Some(logging_tx));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -860,7 +860,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || logging_tx);
+            .return_once(move || Some(logging_tx));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
