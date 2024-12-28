@@ -13,10 +13,7 @@ use rand_seeder::SipHasher;
 use ssh_key::Fingerprint;
 use webpki::types::DnsName;
 
-use crate::{
-    config::{BindHostnames, RandomSubdomainSeed},
-    tcp::is_alias,
-};
+use crate::config::{BindHostnames, RandomSubdomainSeed};
 
 // Struct wrapping a DNS async resolver.
 pub(crate) struct DnsResolver(TokioAsyncResolver);
@@ -195,7 +192,7 @@ impl<R: Resolver> AddressDelegator<R> {
             {
                 return requested_address.to_string();
             }
-            // If we bind by TXT records, check that the public key's fingerprint is among the records.
+            // If we bind by TXT or CNAME records, check that the public key's fingerprint is among the TXT records.
             if matches!(
                 self.bind_hostnames,
                 BindHostnames::Cname | BindHostnames::Txt
@@ -220,14 +217,12 @@ impl<R: Resolver> AddressDelegator<R> {
                 let address = requested_address.trim_end_matches(&format!(".{}", self.root_domain));
                 if !address.is_empty() && !address.contains('.') {
                     return format!("{}.{}", address, self.root_domain);
+                } else {
+                    warn!(
+                        "Invalid address requested ({}), defaulting to random",
+                        requested_address
+                    );
                 }
-            }
-            // Warn if user requested an invalid address that isn't localhost or empty
-            if is_alias(requested_address) {
-                warn!(
-                    "Invalid address requested ({}), defaulting to random",
-                    requested_address
-                );
             }
         } else {
             warn!(

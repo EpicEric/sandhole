@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Separate TCP and alias logic.
+- Remove aliasing tabs from admin interface when using `--disable-aliasing`.
+
 ## 0.3.0 (2024-12-28)
 
 ### Added

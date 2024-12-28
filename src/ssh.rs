@@ -18,7 +18,7 @@ use crate::{
     http::proxy_handler,
     login::AuthenticationRequest,
     quota::{TokenHolder, UserIdentification},
-    tcp::{is_alias, PortHandler, NO_ALIAS_HOST},
+    tcp::PortHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
     SandholeServer,
 };
@@ -145,8 +145,10 @@ struct UserData {
     quota_key: TokenHolder,
     // Map to keep track of opened host-based connections (HTTP and SSH), to clean up when the forwarding is canceled.
     host_addressing: HashMap<TcpAlias, String>,
-    // Map to keep track of opened port-based connections (TCP and aliases), to clean up when the forwarding is canceled.
-    port_addressing: HashMap<TcpAlias, TcpAlias>,
+    // Map to keep track of opened port-based connections (TCP), to clean up when the forwarding is canceled.
+    port_addressing: HashMap<TcpAlias, u16>,
+    // Map to keep track of opened alias-based connections (aliases), to clean up when the forwarding is canceled.
+    alias_addressing: HashMap<TcpAlias, TcpAlias>,
 }
 
 impl UserData {
@@ -157,6 +159,7 @@ impl UserData {
             quota_key,
             host_addressing: Default::default(),
             port_addressing: Default::default(),
+            alias_addressing: Default::default(),
         }
     }
 }
@@ -573,12 +576,20 @@ impl Handler for ServerHandler {
                     // Create a validation closure that verifies that the fingerprint is in our new set
                     *user_data.allow_fingerprint.write().await =
                         Box::new(move |fingerprint| fingerprint.is_some_and(|fp| set.contains(fp)));
+                    // Reject TCP ports
+                    if !self.server.tcp.remove_by_address(&self.peer).is_empty() {
+                        self.tx
+                            .send(b"Cannot convert TCP port(s) into aliases\r\n".to_vec());
+                        success = false;
+                        let _ = self.cancelation_tx.send(());
+                        break;
+                    }
                     // Change any existing HTTP handlers into TCP alias handlers.
                     let handlers = self.server.http.remove_by_address(&self.peer);
                     for (_, handler) in handlers.into_iter() {
                         let address = handler.address.clone();
                         // Ensure that the forwarding address is an alias, otherwise error.
-                        if !is_alias(&address) {
+                        if !self.server.is_alias(&address) {
                             self.tx.send(
                                 format!(
                                     "Cannot listen to HTTP alias of {} (must be alias, not localhost)\r\n",
@@ -591,7 +602,7 @@ impl Handler for ServerHandler {
                             break;
                         }
                         // Insert our handler into the TCP alias connections map.
-                        if let Err(err) = self.server.tcp.insert(
+                        if let Err(err) = self.server.alias.insert(
                             TcpAlias(address.clone(), 80),
                             self.peer,
                             user_data.quota_key.clone(),
@@ -635,12 +646,20 @@ impl Handler for ServerHandler {
                     }
                     commands.insert("tcp-alias".into());
                     user_data.tcp_alias_only = true;
+                    // Reject TCP ports
+                    if !self.server.tcp.remove_by_address(&self.peer).is_empty() {
+                        self.tx
+                            .send(b"Cannot convert TCP port(s) into aliases\r\n".to_vec());
+                        success = false;
+                        let _ = self.cancelation_tx.send(());
+                        break;
+                    }
                     // Change any existing HTTP handlers into TCP alias handlers.
                     let handlers = self.server.http.remove_by_address(&self.peer);
                     for (_, handler) in handlers.into_iter() {
                         let address = handler.address.clone();
                         // Ensure that the forwarding address is an alias, otherwise error.
-                        if !is_alias(&address) {
+                        if !self.server.is_alias(&address) {
                             self.tx.send(
                                 format!(
                                     "Cannot listen to HTTP alias of {} (must be alias, not localhost)\r\n",
@@ -653,7 +672,7 @@ impl Handler for ServerHandler {
                             break;
                         }
                         // Insert our handler into the TCP alias connections map.
-                        if let Err(err) = self.server.tcp.insert(
+                        if let Err(err) = self.server.alias.insert(
                             TcpAlias(address.clone(), 80),
                             self.peer,
                             user_data.quota_key.clone(),
@@ -794,7 +813,7 @@ impl Handler for ServerHandler {
                     return Ok(false);
                 }
                 // SSH host must be alias (to be accessed via ProxyJump or ProxyCommand)
-                if !is_alias(address) {
+                if !self.server.is_alias(address) {
                     info!(
                         "Failed to bind SSH for {}: must be alias, not localhost",
                         self.peer
@@ -867,7 +886,7 @@ impl Handler for ServerHandler {
                         return Ok(false);
                     }
                     // HTTP host must be alias (to be accessed via local forwarding)
-                    if !is_alias(address) {
+                    if !self.server.is_alias(address) {
                         self.tx.send(
                             format!(
                                 "Failed to bind HTTP alias {} (must be alias, not localhost)\r\n",
@@ -878,7 +897,7 @@ impl Handler for ServerHandler {
                         return Ok(false);
                     }
                     // Add handler to TCP connection map
-                    if let Err(err) = self.server.tcp.insert(
+                    if let Err(err) = self.server.alias.insert(
                         TcpAlias(address.into(), 80),
                         self.peer,
                         user_data.quota_key.clone(),
@@ -916,7 +935,7 @@ impl Handler for ServerHandler {
                             .into_bytes(),
                         );
                         user_data
-                            .port_addressing
+                            .alias_addressing
                             .insert(TcpAlias(address.into(), 80), TcpAlias(address.into(), 80));
                         Ok(true)
                     }
@@ -992,47 +1011,34 @@ impl Handler for ServerHandler {
                     }
                 }
             }
-            // Forbid binding low TCP ports
-            1..1024 if !is_alias(address) => {
-                info!(
-                    "Failed to bind TCP port {} ({}): port too low",
-                    port, self.peer
-                );
-                self.tx.send(
-                    format!(
-                        "Cannot listen to TCP on port {}:{} (port too low)\r\n",
-                        &self.server.domain, port,
-                    )
-                    .into_bytes(),
-                );
-                Ok(false)
-            }
-            // Assign TCP port or alias through config (specified by other ports)
-            _ => {
-                // Store whether this is an alias in a variable, to reuse the result throughout this function
-                let is_alias = is_alias(address);
-                if is_alias && self.server.disable_aliasing {
-                    self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
-                    return Ok(false);
-                }
-                let assigned_port = if *port == 0 {
-                    if is_alias {
-                        // If alias, the user must provide the port number themselves
-                        info!(
-                            "Failed to bind random TCP port for alias {} ({}) - cannot assign random port to alias",
-                            address, self.peer,
-                        );
-                        self.tx.send(
-                            format!(
-                                "Cannot listen to TCP on random port of {} (cannot assign random port to alias)\r\n\
-                                Please specify the desired port.\r\n",
-                                address,
-                            )
-                            .into_bytes(),
-                        );
-                        return Ok(false);
-                    } else {
-                        // When port is 0, assign a random one
+            // Assign TCP port through config (specified by non-trivial ports)
+            _ if !self.server.is_alias(address) => {
+                // Forbid binding TCP on alias-only mode
+                if user_data.tcp_alias_only {
+                    info!(
+                        "Failed to bind TCP port {} ({}): session is in alias-only mode",
+                        port, self.peer
+                    );
+                    self.tx
+                    .send(format!("Cannot listen to TCP on port {}:{} (session is in alias-only mode)\r\n", &self.server.domain, port,).into_bytes());
+                    Ok(false)
+                // Forbid binding low TCP ports
+                } else if (1..1024).contains(port) {
+                    info!(
+                        "Failed to bind TCP port {} ({}): port too low",
+                        port, self.peer
+                    );
+                    self.tx.send(
+                        format!(
+                            "Cannot listen to TCP on port {}:{} (port too low)\r\n",
+                            &self.server.domain, port,
+                        )
+                        .into_bytes(),
+                    );
+                    Ok(false)
+                } else {
+                    // When port is 0, assign a random one
+                    let assigned_port = if *port == 0 {
                         let assigned_port = match self.server.tcp_handler.get_free_port().await {
                             Ok(port) => port,
                             Err(err) => {
@@ -1053,35 +1059,104 @@ impl Handler for ServerHandler {
                         // Set port to communicate it back to the client
                         *port = assigned_port.into();
                         assigned_port
-                    }
-                } else if !is_alias && self.server.force_random_ports {
                     // Ignore user-requested port, assign any free one
-                    match self.server.tcp_handler.get_free_port().await {
-                        Ok(port) => port,
-                        Err(err) => {
-                            info!(
-                                "Failed to bind random TCP port for alias {} ({}) - {}",
-                                address, self.peer, err,
-                            );
-                            self.tx.send(
-                                format!(
-                                    "Cannot listen to TCP on random port of {} ({})\r\n",
-                                    port, err
-                                )
-                                .into_bytes(),
-                            );
-                            return Ok(false);
+                    } else if self.server.force_random_ports {
+                        match self.server.tcp_handler.get_free_port().await {
+                            Ok(port) => port,
+                            Err(err) => {
+                                info!(
+                                    "Failed to bind random TCP port for alias {} ({}) - {}",
+                                    address, self.peer, err,
+                                );
+                                self.tx.send(
+                                    format!(
+                                        "Cannot listen to TCP on random port of {} ({})\r\n",
+                                        port, err
+                                    )
+                                    .into_bytes(),
+                                );
+                                return Ok(false);
+                            }
                         }
+                    // Allow user-requested port when server allows binding on any port
+                    } else {
+                        *port as u16
+                    };
+                    // Add handler to TCP connection map
+                    if let Err(err) = self.server.tcp.insert(
+                        assigned_port,
+                        self.peer,
+                        user_data.quota_key.clone(),
+                        Arc::new(SshTunnelHandler::new(
+                            Arc::clone(&user_data.allow_fingerprint),
+                            handle,
+                            self.tx.clone_inner(),
+                            self.peer,
+                            address.to_string(),
+                            *port,
+                        )),
+                    ) {
+                        // Adding to connection map failed.
+                        info!(
+                            "Rejecting TCP for localhost:{} ({}) - {}",
+                            &assigned_port, self.peer, err,
+                        );
+                        self.tx.send(
+                            format!(
+                                "Cannot listen to TCP on {}:{} ({})\r\n",
+                                self.server.domain, &assigned_port, err,
+                            )
+                            .into_bytes(),
+                        );
+                        Ok(false)
+                    } else {
+                        // Adding to connection map succeeded.
+                        user_data
+                            .port_addressing
+                            .insert(TcpAlias(address.to_string(), *port as u16), assigned_port);
+                        info!(
+                            "Serving TCP for localhost:{} ({})",
+                            &assigned_port, self.peer
+                        );
+                        self.tx.send(
+                            format!(
+                                "Serving TCP port on {}:{}\r\n",
+                                self.server.domain, &assigned_port,
+                            )
+                            .into_bytes(),
+                        );
+                        Ok(true)
                     }
+                }
+            }
+            // Assign alias through config (specified by non-trivial address and port)
+            _ => {
+                if self.server.disable_aliasing {
+                    self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
+                    return Ok(false);
+                }
+                // If alias, the user must provide the port number themselves
+                let assigned_port = if *port == 0 {
+                    info!(
+                        "Failed to bind random TCP port for alias {} ({}) - cannot assign random port to alias",
+                        address, self.peer,
+                    );
+                    self.tx.send(
+                        format!(
+                            "Cannot listen to TCP on random port of {} (cannot assign random port to alias)\r\n\
+                            Please specify the desired port.\r\n",
+                            address,
+                        )
+                        .into_bytes(),
+                    );
+                    return Ok(false);
+                // Allow user-requested port
                 } else {
-                    // Allow user-requested port when alias or server allows binding on any port
                     *port as u16
                 };
-                // Use "localhost" as the address for non-alias bindings
-                let tcp_alias = if is_alias { address } else { NO_ALIAS_HOST };
                 // Add handler to TCP connection map
-                if let Err(err) = self.server.tcp.insert(
-                    TcpAlias(tcp_alias.to_string(), assigned_port),
+                if let Err(err) = self.server.alias.insert(
+                    TcpAlias(address.to_string(), assigned_port),
                     self.peer,
                     user_data.quota_key.clone(),
                     Arc::new(SshTunnelHandler::new(
@@ -1094,63 +1169,35 @@ impl Handler for ServerHandler {
                     )),
                 ) {
                     // Adding to connection map failed.
-                    if is_alias {
-                        info!(
-                            "Rejecting TCP port {} for alias {} ({}) - {}",
-                            &assigned_port, address, self.peer, err,
-                        );
-                        self.tx.send(
-                            format!(
-                                "Cannot listen to TCP on port {} for alias {} ({})\r\n",
-                                &assigned_port, address, err,
-                            )
-                            .into_bytes(),
-                        );
-                    } else {
-                        info!(
-                            "Rejecting TCP for localhost:{} ({}) - {}",
-                            &assigned_port, self.peer, err,
-                        );
-                        self.tx.send(
-                            format!(
-                                "Cannot listen to TCP on {}:{} ({})\r\n",
-                                self.server.domain, &assigned_port, err,
-                            )
-                            .into_bytes(),
-                        );
-                    }
+                    info!(
+                        "Rejecting TCP port {} for alias {} ({}) - {}",
+                        &assigned_port, address, self.peer, err,
+                    );
+                    self.tx.send(
+                        format!(
+                            "Cannot listen to TCP on port {} for alias {} ({})\r\n",
+                            &assigned_port, address, err,
+                        )
+                        .into_bytes(),
+                    );
                     Ok(false)
                 } else {
                     // Adding to connection map succeeded.
-                    user_data.port_addressing.insert(
+                    user_data.alias_addressing.insert(
                         TcpAlias(address.to_string(), *port as u16),
-                        TcpAlias(tcp_alias.to_string(), assigned_port),
+                        TcpAlias(address.to_string(), assigned_port),
                     );
-                    if is_alias {
-                        info!(
-                            "Tunneling TCP port {} for alias {} ({})",
-                            &assigned_port, address, self.peer
-                        );
-                        self.tx.send(
-                            format!(
-                                "Tunneling TCP port {} for alias {}\r\n",
-                                &assigned_port, address,
-                            )
-                            .into_bytes(),
-                        );
-                    } else {
-                        info!(
-                            "Serving TCP for localhost:{} ({})",
-                            &assigned_port, self.peer
-                        );
-                        self.tx.send(
-                            format!(
-                                "Serving TCP port on {}:{}\r\n",
-                                self.server.domain, &assigned_port,
-                            )
-                            .into_bytes(),
-                        );
-                    }
+                    info!(
+                        "Tunneling TCP port {} for alias {} ({})",
+                        &assigned_port, address, self.peer
+                    );
+                    self.tx.send(
+                        format!(
+                            "Tunneling TCP port {} for alias {}\r\n",
+                            &assigned_port, address,
+                        )
+                        .into_bytes(),
+                    );
                     Ok(true)
                 }
             }
@@ -1196,7 +1243,7 @@ impl Handler for ServerHandler {
                 if user_data.tcp_alias_only {
                     // Handle TCP alias-only mode
                     if let Some(assigned_alias) = user_data
-                        .port_addressing
+                        .alias_addressing
                         .remove(&BorrowedTcpAlias(address, &80) as &dyn TcpAliasKey)
                     {
                         info!(
@@ -1204,7 +1251,7 @@ impl Handler for ServerHandler {
                             &assigned_alias.0, assigned_alias.1, self.peer
                         );
                         let key: &dyn TcpAliasKey = assigned_alias.borrow();
-                        self.server.tcp.remove(key, &self.peer);
+                        self.server.alias.remove(key, &self.peer);
                         Ok(true)
                     } else {
                         Ok(false)
@@ -1227,18 +1274,35 @@ impl Handler for ServerHandler {
                 }
             }
             // Handle TCP disconnection
-            _ => {
-                if let Some(assigned_alias) =
+            _ if !self.server.is_alias(address) => {
+                if let Some(assigned_port) =
                     user_data
                         .port_addressing
                         .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                 {
                     info!(
-                        "Stopped TCP forwarding for {}:{} ({})",
+                        "Stopped TCP forwarding for port {} ({})",
+                        &assigned_port, self.peer
+                    );
+                    self.server.tcp.remove(&assigned_port, &self.peer);
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
+            // Handle alias disconnection
+            _ => {
+                if let Some(assigned_alias) =
+                    user_data
+                        .alias_addressing
+                        .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
+                {
+                    info!(
+                        "Stopped TCP aliasing for {}:{} ({})",
                         &assigned_alias.0, assigned_alias.1, self.peer
                     );
                     let key: &dyn TcpAliasKey = assigned_alias.borrow();
-                    self.server.tcp.remove(key, &self.peer);
+                    self.server.alias.remove(key, &self.peer);
                     Ok(true)
                 } else {
                     Ok(false)
@@ -1406,11 +1470,101 @@ impl Handler for ServerHandler {
                         .send(format!("Forwarding SSH from {}\r\n", host_to_connect).into_bytes());
                     return Ok(true);
                 }
+            } else {
+                self.tx
+                    .send(format!("Unknown SSH alias {}\r\n", host_to_connect).into_bytes());
             }
-        // Handle local forwarding for TCP alias
+        // Handle local forwarding for TCP
+        } else if !self.server.is_alias(host_to_connect) {
+            if let Some(handler) = self.server.tcp.get(&port_to_connect) {
+                if let Ok(mut io) = handler
+                    .aliasing_channel(
+                        originator_address,
+                        originator_port as u16,
+                        self.key_fingerprint.as_ref(),
+                    )
+                    .await
+                {
+                    handler.log_channel().inspect(|tx| {
+                        let _ = tx.send(
+                            format!(
+                                "New TCP proxy from {}:{} => {}:{}\r\n",
+                                originator_address,
+                                originator_port,
+                                host_to_connect,
+                                port_to_connect
+                            )
+                            .into_bytes(),
+                        );
+                    });
+                    match self.auth_data {
+                        // Serve TCP for unauthed user, then add disconnection timeout if this is the last proxy connection
+                        AuthenticatedData::None { ref proxy_count } => {
+                            self.timeout_handle.lock().await.take();
+                            proxy_count.fetch_add(1, Ordering::Release);
+                            let proxy_count = Arc::clone(proxy_count);
+                            let timeout_handle = Arc::clone(&self.timeout_handle);
+                            let unproxied_connection_timeout =
+                                self.server.unproxied_connection_timeout;
+                            let cancelation_tx = self.cancelation_tx.clone();
+                            let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                            tokio::spawn(async move {
+                                let mut stream = channel.into_stream();
+                                match tcp_connection_timeout {
+                                    Some(duration) => {
+                                        let _ = timeout(duration, async {
+                                            copy_bidirectional(&mut stream, &mut io).await
+                                        })
+                                        .await;
+                                    }
+                                    None => {
+                                        let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                    }
+                                }
+                                if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
+                                    *timeout_handle.lock().await =
+                                        Some(DroppableHandle(tokio::spawn(async move {
+                                            sleep(unproxied_connection_timeout).await;
+                                            let _ = cancelation_tx.send(());
+                                        })));
+                                }
+                            });
+                        }
+                        // Serve TCP normally for authed user
+                        _ => {
+                            let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                            tokio::spawn(async move {
+                                let mut stream = channel.into_stream();
+                                match tcp_connection_timeout {
+                                    Some(duration) => {
+                                        let _ = timeout(duration, async {
+                                            copy_bidirectional(&mut stream, &mut io).await
+                                        })
+                                        .await;
+                                    }
+                                    None => {
+                                        let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    info!(
+                        "Accepted connection from {} => {} ({})",
+                        self.peer, host_to_connect, handler.peer,
+                    );
+                    self.tx
+                        .send(format!("Forwarding TCP from {}\r\n", host_to_connect).into_bytes());
+                    return Ok(true);
+                }
+            } else {
+                self.tx
+                    .send(format!("Unknown TCP port {}\r\n", port_to_connect).into_bytes());
+            }
+        // Handle local forwarding for alias
         } else if let Some(handler) = self
             .server
-            .tcp
+            .alias
             .get(&BorrowedTcpAlias(host_to_connect, &port_to_connect) as &dyn TcpAliasKey)
         {
             if let Ok(mut io) = handler
@@ -1489,6 +1643,10 @@ impl Handler for ServerHandler {
                     .send(format!("Forwarding TCP from {}\r\n", host_to_connect).into_bytes());
                 return Ok(true);
             }
+        } else {
+            self.tx.send(
+                format!("Unknown alias {}:{}\r\n", host_to_connect, port_to_connect).into_bytes(),
+            );
         }
         if let AuthenticatedData::None { ref proxy_count } = self.auth_data {
             if proxy_count.load(Ordering::Acquire) == 0 {
@@ -1514,6 +1672,7 @@ impl Drop for ServerHandler {
                     server.http.remove_by_address(&peer);
                     server.ssh.remove_by_address(&peer);
                     server.tcp.remove_by_address(&peer);
+                    server.alias.remove_by_address(&peer);
                     // Remove any references to this session
                     server
                         .sessions_password

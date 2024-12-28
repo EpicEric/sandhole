@@ -88,6 +88,10 @@ async fn admin_interface() {
         .tcpip_forward("proxy.ccc", 12345)
         .await
         .expect("tcpip_forward failed");
+    session
+        .tcpip_forward("", 23456)
+        .await
+        .expect("tcpip_forward failed");
     // Required for updating the admin interface data
     sleep(Duration::from_secs(3)).await;
 
@@ -207,7 +211,7 @@ async fn admin_interface() {
             r"   TX   ",
             r"   RX   ",
             r"TCP services",
-            r"proxy\.ccc",
+            r"23456",
             r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
             r"127.0.0.1:\d{4,5}",
         ]
@@ -220,7 +224,33 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4d. Go back one tab
+        // 4d. Switch tabs again and validate alias tab data
+        writer
+            .write(&b"\t"[..])
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"System information",
+            r"  CPU%  ",
+            r" Memory ",
+            r"   TX   ",
+            r"   RX   ",
+            r"Alias services",
+            r"proxy\.ccc:12345",
+            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"127.0.0.1:\d{4,5}",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 4e. Go back one tab
         writer
             .write(&b"\x1b[Z"[..])
             .await
@@ -232,8 +262,8 @@ async fn admin_interface() {
             r" Memory ",
             r"   TX   ",
             r"   RX   ",
-            r"SSH services",
-            r"ssh\.bbb",
+            r"TCP services",
+            r"23456",
             r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
             r"127.0.0.1:\d{4,5}",
         ]
@@ -246,7 +276,7 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4e. Quit the admin interface with Ctrl-C (ETX)
+        // 4f. Quit the admin interface with Ctrl-C (ETX)
         writer
             .write(&b"\x03"[..])
             .await

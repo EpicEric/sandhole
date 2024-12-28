@@ -122,14 +122,18 @@ pub(crate) struct SandholeServer {
     pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
     // The map for forwarded SSH connections.
     pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>>>,
-    // The map for forwarded TCP + alias connections.
-    pub(crate) tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
+    // The map for forwarded TCP connections.
+    pub(crate) tcp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
+    // The map for forwarded aliased connections.
+    pub(crate) alias: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>>>,
     // Data related to the HTTP forwardings for the admin interface.
     pub(crate) http_data: DataTable<String, (BTreeMap<SocketAddr, String>, f64)>,
     // Data related to the SSH forwardings for the admin interface.
     pub(crate) ssh_data: DataTable<String, BTreeMap<SocketAddr, String>>,
-    // Data related to the TCP/alias forwardings for the admin interface.
-    pub(crate) tcp_data: DataTable<TcpAlias, BTreeMap<SocketAddr, String>>,
+    // Data related to the TCP forwardings for the admin interface.
+    pub(crate) tcp_data: DataTable<u16, BTreeMap<SocketAddr, String>>,
+    // Data related to the alias forwardings for the admin interface.
+    pub(crate) alias_data: DataTable<TcpAlias, BTreeMap<SocketAddr, String>>,
     // System data for the admin interface.
     pub(crate) system_data: Arc<RwLock<SystemData>>,
     // HTTP proxy data used by the local forwarding aliasing connections.
@@ -162,6 +166,13 @@ pub(crate) struct SandholeServer {
     pub(crate) unproxied_connection_timeout: Duration,
     // How long until TCP, WebSocket, and local forwarding connections are closed.
     pub(crate) tcp_connection_timeout: Option<Duration>,
+}
+
+impl SandholeServer {
+    // Returns true if the address is an alias and not localhost/empty/*
+    pub(crate) fn is_alias(&self, address: &str) -> bool {
+        address != "localhost" && !address.is_empty() && address != "*" && address != self.domain
+    }
 }
 
 #[doc(hidden)]
@@ -281,6 +292,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         Arc::clone(&quota_handler),
         None,
     ));
+    let alias_connections = Arc::new(ConnectionMap::new(
+        config.load_balancing,
+        Arc::clone(&quota_handler),
+        None,
+    ));
     let tcp_handler: Arc<TcpHandler> = Arc::new(TcpHandler::new(
         config.listen_address,
         Arc::clone(&tcp_connections),
@@ -339,7 +355,18 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let tcp_data = Arc::new(RwLock::default());
     let data_clone = Arc::clone(&tcp_data);
     let connections_clone = Arc::clone(&tcp_connections);
-    // Periodically update TCP/alias data, based on the connection map.
+    // Periodically update TCP data, based on the connection map.
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_millis(3_000)).await;
+            let data = connections_clone.data();
+            *data_clone.write().unwrap() = data;
+        }
+    });
+    let alias_data = Arc::new(RwLock::default());
+    let data_clone = Arc::clone(&alias_data);
+    let connections_clone = Arc::clone(&alias_connections);
+    // Periodically update alias data, based on the connection map.
     tokio::spawn(async move {
         loop {
             sleep(Duration::from_millis(3_000)).await;
@@ -391,7 +418,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let aliasing_proxy_data = Arc::new(ProxyData {
         conn_manager: Arc::new(HttpAliasingConnection::new(
             Arc::clone(&http_connections),
-            Arc::clone(&tcp_connections),
+            Arc::clone(&alias_connections),
         )),
         telemetry: Arc::clone(&telemetry),
         domain_redirect: Arc::clone(&domain_redirect),
@@ -413,9 +440,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         http: Arc::clone(&http_connections),
         ssh: ssh_connections,
         tcp: tcp_connections,
+        alias: alias_connections,
         http_data,
         ssh_data,
         tcp_data,
+        alias_data,
         system_data,
         aliasing_proxy_data,
         fingerprints_validator: fingerprints,

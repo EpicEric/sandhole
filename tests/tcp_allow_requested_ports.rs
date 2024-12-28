@@ -75,7 +75,7 @@ async fn tcp_allow_requested_ports() {
         "authentication didn't succeed"
     );
     session
-        .tcpip_forward("localhost", 12345)
+        .tcpip_forward("foobar.tld", 12345)
         .await
         .expect("tcpip_forward failed");
 

@@ -257,7 +257,7 @@ async fn admin_remove_user() {
         // Required for updating the admin interface data
         sleep(Duration::from_secs(3)).await;
         assert!(session_2.is_closed(), "user session wasn't terminated");
-        // 4e. Close prompt and ensure that window still displays the first service under TCP
+        // 4e. Close prompt, head to the TCP tab, and ensure that the window still displays the first service there
         assert!(
             !session_1.is_closed(),
             "proxy session shouldn't have been terminated"
@@ -270,10 +270,13 @@ async fn admin_remove_user() {
             .write(&b"\x1b[Z"[..])
             .await
             .expect("channel write failed");
+        writer
+            .write(&b"\x1b[Z"[..])
+            .await
+            .expect("channel write failed");
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",
             r"TCP services",
-            r"localhost",
             r"38080",
             r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
             r"127.0.0.1:\d{4,5}",
@@ -287,7 +290,7 @@ async fn admin_remove_user() {
                 break;
             }
         }
-        // 4f. Check details for the remaining service
+        // 4f. Select user and open details
         writer
             .write(&b"\x1b[B"[..])
             .await

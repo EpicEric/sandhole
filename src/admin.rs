@@ -59,35 +59,95 @@ enum Tab {
     Http,
     Ssh,
     Tcp,
+    Alias,
 }
 
 impl Tab {
+    fn color(&self) -> Color {
+        match self {
+            Tab::Http => Color::Blue,
+            Tab::Ssh => Color::Yellow,
+            Tab::Tcp => Color::Green,
+            Tab::Alias => Color::Red,
+        }
+    }
+}
+
+struct TabData {
+    is_aliasing_disabled: bool,
+    current_tab: Tab,
+}
+
+impl TabData {
     // Render the tabs at the top of the table
-    fn render(area: Rect, buf: &mut Buffer, selected: usize) {
-        Tabs::new(vec![
-            Line::from("  HTTP  ".black().bg(Tab::Http.color())),
-            Line::from("  SSH  ".black().bg(Tab::Ssh.color())),
-            Line::from("  TCP  ".black().bg(Tab::Tcp.color())),
-        ])
-        .select(selected)
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        Tabs::new(if self.is_aliasing_disabled {
+            vec![
+                Line::from("  HTTP  ".black().bg(Tab::Http.color())),
+                Line::from("  TCP  ".black().bg(Tab::Tcp.color())),
+            ]
+        } else {
+            vec![
+                Line::from("  HTTP  ".black().bg(Tab::Http.color())),
+                Line::from("  SSH  ".black().bg(Tab::Ssh.color())),
+                Line::from("  TCP  ".black().bg(Tab::Tcp.color())),
+                Line::from("  Alias  ".black().bg(Tab::Alias.color())),
+            ]
+        })
+        .select(self.index())
         .highlight_style(Style::new().bold())
         .divider(" ")
         .render(area, buf);
     }
 
     fn index(&self) -> usize {
-        match self {
-            Tab::Http => 0,
-            Tab::Ssh => 1,
-            Tab::Tcp => 2,
+        if self.is_aliasing_disabled {
+            match self.current_tab {
+                Tab::Http => 0,
+                Tab::Tcp => 1,
+                Tab::Ssh | Tab::Alias => unreachable!(),
+            }
+        } else {
+            match self.current_tab {
+                Tab::Http => 0,
+                Tab::Ssh => 1,
+                Tab::Tcp => 2,
+                Tab::Alias => 3,
+            }
         }
     }
 
-    fn color(&self) -> Color {
-        match self {
-            Tab::Http => Color::Blue,
-            Tab::Ssh => Color::Yellow,
-            Tab::Tcp => Color::Green,
+    fn previous(&mut self) {
+        if self.is_aliasing_disabled {
+            self.current_tab = match self.current_tab {
+                Tab::Http => Tab::Tcp,
+                Tab::Tcp => Tab::Http,
+                Tab::Ssh | Tab::Alias => unreachable!(),
+            }
+        } else {
+            self.current_tab = match self.current_tab {
+                Tab::Http => Tab::Alias,
+                Tab::Ssh => Tab::Http,
+                Tab::Tcp => Tab::Ssh,
+                Tab::Alias => Tab::Tcp,
+            };
+        }
+    }
+
+    fn next(&mut self) {
+        if self.is_aliasing_disabled {
+            self.current_tab = match self.current_tab {
+                Tab::Http => Tab::Tcp,
+                Tab::Tcp => Tab::Http,
+                Tab::Ssh | Tab::Alias => unreachable!(),
+            }
+        } else {
+            self.current_tab = match self.current_tab {
+                Tab::Http => Tab::Ssh,
+                Tab::Ssh => Tab::Tcp,
+                Tab::Tcp => Tab::Alias,
+                Tab::Alias => Tab::Http,
+            };
         }
     }
 }
@@ -111,7 +171,7 @@ struct AdminState {
     // Whether this is rendered in a pseudo-terminal or not.
     is_pty: bool,
     // Currently selected tab.
-    tab: Tab,
+    tab: TabData,
     // State of the selected tab's table.
     table_state: TableState,
     // State of the scrollbar for the selected tab's table.
@@ -159,10 +219,10 @@ impl AdminState {
                 Constraint::Min(0),
             ])
             .areas(area.inner(Margin::new(2, 2)));
-            Tab::render(tabs_area, buf, self.tab.index());
+            self.tab.render(tabs_area, buf);
             self.render_system_data(system_data_area, buf);
             Block::bordered()
-                .border_style(Style::new().fg(self.tab.color()))
+                .border_style(Style::new().fg(self.tab.current_tab.color()))
                 .border_set(border::PROPORTIONAL_TALL)
                 .render(inner_area, buf);
             self.render_tab(inner_area.inner(Margin::new(2, 1)), buf);
@@ -287,8 +347,8 @@ impl AdminState {
 
     // Render the selected tab's contents
     fn render_tab(&mut self, area: Rect, buf: &mut Buffer) {
-        let color = self.tab.color();
-        let table = match self.tab {
+        let color = self.tab.current_tab.color();
+        let table = match self.tab.current_tab {
             Tab::Http => {
                 // Get data for HTTP
                 let data = self.server.http_data.read().unwrap().clone();
@@ -348,7 +408,7 @@ impl AdminState {
                     Constraint::Length(47),
                 ];
                 let header =
-                    Row::new(["Host", "User(s)", "Peer(s)"]).add_modifier(Modifier::UNDERLINED);
+                    Row::new(["Alias", "User(s)", "Peer(s)"]).add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("SSH services".fg(color).bold()).centered());
                 Table::new(rows, constraints)
@@ -364,11 +424,10 @@ impl AdminState {
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
                     .iter()
-                    .map(|(TcpAlias(alias, port), connections)| {
+                    .map(|(port, connections)| {
                         let len = connections.len() as u16;
                         let (peers, users): (Vec<_>, Vec<_>) = connections.iter().unzip();
                         Row::new(vec![
-                            alias.clone(),
                             port.to_string(),
                             users.iter().join("\n"),
                             peers.iter().map(to_socket_addr_string).join("\n"),
@@ -377,15 +436,47 @@ impl AdminState {
                     })
                     .collect();
                 let constraints = [
-                    Constraint::Min(25),
                     Constraint::Length(5),
                     Constraint::Length(50),
                     Constraint::Length(47),
                 ];
-                let header = Row::new(["Alias", "Port", "User(s)", "Peer(s)"])
-                    .add_modifier(Modifier::UNDERLINED);
+                let header =
+                    Row::new(["Port", "User(s)", "Peer(s)"]).add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("TCP services".fg(color).bold()).centered());
+                Table::new(rows, constraints)
+                    .header(header)
+                    .column_spacing(1)
+                    .block(title)
+                    .row_highlight_style(Style::new().fg(color).reversed())
+            }
+            Tab::Alias => {
+                // Get data for aliases
+                let data = self.server.alias_data.read().unwrap().clone();
+                self.vertical_scroll = self.vertical_scroll.content_length(data.len());
+                // Create rows for each socket or alias
+                let rows: Vec<Row<'_>> = data
+                    .iter()
+                    .map(|(TcpAlias(alias, port), connections)| {
+                        let len = connections.len() as u16;
+                        let (peers, users): (Vec<_>, Vec<_>) = connections.iter().unzip();
+                        Row::new(vec![
+                            format!("{}:{}", alias, port),
+                            users.iter().join("\n"),
+                            peers.iter().map(to_socket_addr_string).join("\n"),
+                        ])
+                        .height(len)
+                    })
+                    .collect();
+                let constraints = [
+                    Constraint::Min(25),
+                    Constraint::Length(50),
+                    Constraint::Length(47),
+                ];
+                let header =
+                    Row::new(["Alias", "User(s)", "Peer(s)"]).add_modifier(Modifier::UNDERLINED);
+                let title =
+                    Block::new().title(Line::from("Alias services".fg(color).bold()).centered());
                 Table::new(rows, constraints)
                     .header(header)
                     .column_spacing(1)
@@ -479,11 +570,15 @@ impl AdminInterface {
         };
         // Create a channel to listen for user-generated events
         let (change_notifier, mut subscriber) = watch::channel(());
+        let is_aliasing_disabled = server.disable_aliasing;
         let interface = Arc::new(Mutex::new(AdminTerminal {
             terminal: Terminal::with_options(backend, options).unwrap(),
             state: AdminState {
                 server,
-                tab: Tab::Http,
+                tab: TabData {
+                    is_aliasing_disabled,
+                    current_tab: Tab::Http,
+                },
                 is_pty: false,
                 table_state: Default::default(),
                 vertical_scroll: Default::default(),
@@ -544,17 +639,7 @@ impl AdminInterface {
     pub(crate) fn next_tab(&mut self) {
         {
             let mut interface = self.interface.lock().unwrap();
-            match interface.state.tab {
-                Tab::Http => {
-                    interface.state.tab = Tab::Ssh;
-                }
-                Tab::Ssh => {
-                    interface.state.tab = Tab::Tcp;
-                }
-                Tab::Tcp => {
-                    interface.state.tab = Tab::Http;
-                }
-            }
+            interface.state.tab.next();
             interface.state.table_state = Default::default();
             interface.state.vertical_scroll = Default::default();
         }
@@ -565,17 +650,7 @@ impl AdminInterface {
     pub(crate) fn previous_tab(&mut self) {
         {
             let mut interface = self.interface.lock().unwrap();
-            match interface.state.tab {
-                Tab::Http => {
-                    interface.state.tab = Tab::Tcp;
-                }
-                Tab::Ssh => {
-                    interface.state.tab = Tab::Http;
-                }
-                Tab::Tcp => {
-                    interface.state.tab = Tab::Ssh;
-                }
-            }
+            interface.state.tab.previous();
             interface.state.table_state = Default::default();
             interface.state.vertical_scroll = Default::default();
         }
@@ -736,7 +811,7 @@ impl AdminInterface {
                 // No prompt, select from table
                 None => {
                     if let Some(row) = interface.state.table_state.selected() {
-                        let users: Option<Vec<String>> = match interface.state.tab {
+                        let users: Option<Vec<String>> = match interface.state.tab.current_tab {
                             Tab::Http => interface
                                 .state
                                 .server
@@ -759,6 +834,15 @@ impl AdminInterface {
                                 .state
                                 .server
                                 .tcp_data
+                                .read()
+                                .unwrap()
+                                .values()
+                                .nth(row)
+                                .map(|value| value.values().cloned().collect()),
+                            Tab::Alias => interface
+                                .state
+                                .server
+                                .alias_data
                                 .read()
                                 .unwrap()
                                 .values()

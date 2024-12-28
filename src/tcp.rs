@@ -5,21 +5,12 @@ use crate::{
     connections::{ConnectionMap, ConnectionMapReactor},
     droppable_handle::DroppableHandle,
     ssh::SshTunnelHandler,
-    tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
 };
 use anyhow::Context;
 use async_trait::async_trait;
 use dashmap::DashMap;
 use log::error;
 use tokio::{io::copy_bidirectional, net::TcpListener, time::timeout};
-
-// Default address assigned to non-alias TCP connections.
-pub(crate) static NO_ALIAS_HOST: &str = "localhost";
-
-// Returns true if the address is an alias and not localhost/empty/*
-pub(crate) fn is_alias(address: &str) -> bool {
-    address != "localhost" && !address.is_empty() && address != "*"
-}
 
 // Service that handles creating TCP sockets for reverse forwarding connections.
 pub(crate) struct TcpHandler {
@@ -28,7 +19,7 @@ pub(crate) struct TcpHandler {
     // Map containing spawned tasks of connections for each socket.
     sockets: DashMap<u16, DroppableHandle<()>>,
     // Connection map to assign a tunneling service for each incoming connection.
-    conn_manager: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<Self>>>,
+    conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<Self>>>,
     // Optional duration to time out TCP connections.
     tcp_connection_timeout: Option<Duration>,
     // Whether to send TCP logs to the SSH handles behind the forwarded connections.
@@ -38,7 +29,7 @@ pub(crate) struct TcpHandler {
 impl TcpHandler {
     pub(crate) fn new(
         listen_address: String,
-        conn_manager: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<Self>>>,
+        conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<Self>>>,
         tcp_connection_timeout: Option<Duration>,
         disable_tcp_logs: bool,
     ) -> Self {
@@ -79,9 +70,8 @@ impl PortHandler for Arc<TcpHandler> {
             loop {
                 match listener.accept().await {
                     Ok((mut stream, address)) => {
-                        let key: &dyn TcpAliasKey = &BorrowedTcpAlias(NO_ALIAS_HOST, &port);
                         // Get the handler for this port
-                        if let Some(handler) = clone.conn_manager.get(key) {
+                        if let Some(handler) = clone.conn_manager.get(&port) {
                             if let Ok(mut channel) = handler
                                 .tunneling_channel(
                                     &address.ip().to_canonical().to_string(),
@@ -133,20 +123,11 @@ impl PortHandler for Arc<TcpHandler> {
     }
 }
 
-impl ConnectionMapReactor<TcpAlias> for Arc<TcpHandler> {
+impl ConnectionMapReactor<u16> for Arc<TcpHandler> {
     // Handle changes to the proxy ports, creating/deleting listeners as needed.
-    fn call(&self, ports: Vec<TcpAlias>) {
+    fn call(&self, ports: Vec<u16>) {
         // Find the ports listening to the localhost address
-        let mut ports: HashSet<u16> = ports
-            .into_iter()
-            .filter_map(|TcpAlias(address, port)| {
-                if address == NO_ALIAS_HOST {
-                    Some(port)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let mut ports: HashSet<u16> = ports.into_iter().collect();
         // Remove any socket tasks not in the list of localhost port
         self.sockets.retain(|port, _| ports.contains(port));
         // Find the list of new ports

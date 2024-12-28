@@ -16,7 +16,6 @@ use crate::{
     error::ServerError,
     quota::{QuotaHandler, QuotaToken, TokenHolder},
     ssh::SshTunnelHandler,
-    tcp::TcpHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
     HttpReactor,
 };
@@ -257,22 +256,22 @@ where
 // Struct that can select HTTP hosts from HTTP forwardings or TCP alias forwardings under port 80.
 pub(crate) struct HttpAliasingConnection {
     http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
-    tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
+    alias: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>>>,
 }
 
 impl HttpAliasingConnection {
     pub(crate) fn new(
         http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
-        tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
+        tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>>>,
     ) -> Self {
-        HttpAliasingConnection { http, tcp }
+        HttpAliasingConnection { http, alias: tcp }
     }
 }
 
 impl ConnectionGetByHttpHost<Arc<SshTunnelHandler>> for Arc<HttpAliasingConnection> {
     fn get_by_http_host(&self, host: &str) -> Option<Arc<SshTunnelHandler>> {
         self.http.get(host).or_else(|| {
-            self.tcp
+            self.alias
                 .get(&BorrowedTcpAlias(host, &80) as &dyn TcpAliasKey)
         })
     }
