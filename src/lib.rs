@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+use addressing::AddressDelegatorData;
 use anyhow::Context;
 use connections::{ConnectionMapReactor, HttpAliasingConnection};
 use http::{DomainRedirect, ProxyData, ProxyType};
@@ -288,14 +289,15 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     ));
     // Add TCP handler service as a listener for TCP port updates.
     tcp_connections.update_reactor(Some(Arc::clone(&tcp_handler)));
-    let addressing = Arc::new(AddressDelegator::new(
-        DnsResolver::new(),
-        config.txt_record_prefix.trim_matches('.').to_string(),
-        config.domain.trim_matches('.').to_string(),
-        config.bind_hostnames,
-        !config.allow_requested_subdomains,
-        config.random_subdomain_seed,
-    ));
+    let addressing = Arc::new(AddressDelegator::new(AddressDelegatorData {
+        resolver: DnsResolver::new(),
+        txt_record_prefix: config.txt_record_prefix.trim_matches('.').to_string(),
+        root_domain: config.domain.trim_matches('.').to_string(),
+        bind_hostnames: config.bind_hostnames,
+        force_random_subdomains: !config.allow_requested_subdomains,
+        random_subdomain_seed: config.random_subdomain_seed,
+        random_subdomain_length: config.random_subdomain_length,
+    }));
     // Configure the default domain redirect for Sandhole.
     let domain_redirect = Arc::new(DomainRedirect {
         from: config.domain.clone(),

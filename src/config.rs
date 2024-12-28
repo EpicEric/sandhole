@@ -253,6 +253,14 @@ pub struct ApplicationConfig {
     #[arg(long, value_enum, value_name = "SEED")]
     pub random_subdomain_seed: Option<RandomSubdomainSeed>,
 
+    /// The length of the string appended to the start of random subdomains.
+    #[arg(
+        long,
+        value_name = "LENGTH",
+        default_value_t = NonZero::new(6).unwrap()
+    )]
+    pub random_subdomain_length: NonZero<u8>,
+
     /// Grace period for dangling/unauthenticated SSH connections before they are forcefully disconnected.
     ///
     /// A low value may cause valid proxy/tunnel connections to be erroneously removed.

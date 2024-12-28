@@ -1,4 +1,4 @@
-use std::{hash::Hash, net::SocketAddr, sync::Mutex};
+use std::{hash::Hash, net::SocketAddr, num::NonZero, sync::Mutex};
 
 use async_trait::async_trait;
 use block_id::{Alphabet, BlockId};
@@ -124,18 +124,32 @@ pub(crate) struct AddressDelegator<R> {
     bind_hostnames: BindHostnames,
     // Whether subdomains should be random or not.
     force_random_subdomains: bool,
+    // The length of the string appended to the start of random subdomains.
+    random_subdomain_length: NonZero<u8>,
+}
+
+pub(crate) struct AddressDelegatorData<R> {
+    pub(crate) resolver: R,
+    pub(crate) txt_record_prefix: String,
+    pub(crate) root_domain: String,
+    pub(crate) bind_hostnames: BindHostnames,
+    pub(crate) force_random_subdomains: bool,
+    pub(crate) random_subdomain_seed: Option<RandomSubdomainSeed>,
+    pub(crate) random_subdomain_length: NonZero<u8>,
 }
 
 impl<R: Resolver> AddressDelegator<R> {
     // Create the address delegator service.
-    pub(crate) fn new(
-        resolver: R,
-        txt_record_prefix: String,
-        root_domain: String,
-        bind_hostnames: BindHostnames,
-        force_random_subdomains: bool,
-        random_subdomain_seed: Option<RandomSubdomainSeed>,
-    ) -> Self {
+    pub(crate) fn new(data: AddressDelegatorData<R>) -> Self {
+        let AddressDelegatorData {
+            resolver,
+            txt_record_prefix,
+            root_domain,
+            random_subdomain_seed,
+            bind_hostnames,
+            force_random_subdomains,
+            random_subdomain_length,
+        } = data;
         debug_assert!(!txt_record_prefix.is_empty());
         debug_assert!(!root_domain.is_empty());
         let mut rng = thread_rng();
@@ -146,8 +160,13 @@ impl<R: Resolver> AddressDelegator<R> {
             bind_hostnames,
             force_random_subdomains,
             random_subdomain_seed,
+            random_subdomain_length,
             seed: rng.gen(),
-            block_id: BlockId::new(Alphabet::lowercase_alphanumeric(), rng.gen(), 6),
+            block_id: BlockId::new(
+                Alphabet::lowercase_alphanumeric(),
+                rng.gen(),
+                random_subdomain_length.into(),
+            ),
             block_rng: Mutex::new(0),
         }
     }
@@ -293,7 +312,7 @@ impl<R: Resolver> AddressDelegator<R> {
             hasher.into_rng().fill(&mut seed);
             let mut rng = ChaCha20Rng::from_seed(seed);
             String::from_utf8(
-                (0..6)
+                (0..self.random_subdomain_length.into())
                     .flat_map(|_| {
                         b"0123456789abcdefghijklmnopqrstuvwxyz"
                             .choose(&mut rng)
@@ -306,8 +325,9 @@ impl<R: Resolver> AddressDelegator<R> {
             // Hash hasn't been initialized properly, use block ID to generate a random string
             let mut block_rng = self.block_rng.lock().unwrap();
             let mut string = self.block_id.encode_string(*block_rng).unwrap();
-            string.drain(6..);
             *block_rng = block_rng.wrapping_add(1);
+            drop(block_rng);
+            string.drain(<usize>::from(<u8>::from(self.random_subdomain_length))..);
             string
         }
     }
@@ -324,20 +344,21 @@ mod address_delegator_tests {
 
     use crate::{config::BindHostnames, RandomSubdomainSeed};
 
-    use super::{AddressDelegator, MockResolver};
+    use super::{AddressDelegator, AddressDelegatorData, MockResolver};
 
     #[tokio::test]
     async fn returns_provided_address_when_binding_any_host() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::All,
-            false,
-            None,
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::All,
+            force_random_subdomains: false,
+            random_subdomain_seed: None,
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address = delegator
             .get_address(
                 "some.address",
@@ -358,14 +379,15 @@ mod address_delegator_tests {
     async fn returns_root_domain_when_binding_any_host() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::All,
-            false,
-            None,
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::All,
+            force_random_subdomains: false,
+            random_subdomain_seed: None,
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address = delegator
             .get_address(
                 "root.tld",
@@ -389,14 +411,15 @@ mod address_delegator_tests {
         mock.expect_has_cname_record_for_domain()
             .once()
             .return_const(true);
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::Cname,
-            false,
-            None,
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::Cname,
+            force_random_subdomains: false,
+            random_subdomain_seed: None,
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address = delegator
             .get_address(
                 "some.address",
@@ -430,14 +453,15 @@ mod address_delegator_tests {
         mock.expect_has_cname_record_for_domain()
             .once()
             .return_const(false);
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::Cname,
-            false,
-            None,
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::Cname,
+            force_random_subdomains: false,
+            random_subdomain_seed: None,
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address = delegator
             .get_address(
                 "some.address",
@@ -468,14 +492,15 @@ mod address_delegator_tests {
                 eq(fingerprint.clone()),
             )
             .return_const(true);
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::Txt,
-            false,
-            None,
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::Txt,
+            force_random_subdomains: false,
+            random_subdomain_seed: None,
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address = delegator
             .get_address(
                 "some.address",
@@ -498,14 +523,15 @@ mod address_delegator_tests {
         mock.expect_has_txt_record_for_fingerprint()
             .never()
             .return_const(true);
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::Txt,
-            false,
-            None,
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::Txt,
+            force_random_subdomains: false,
+            random_subdomain_seed: None,
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address = delegator
             .get_address(
                 "subdomain",
@@ -532,14 +558,15 @@ mod address_delegator_tests {
         mock.expect_has_txt_record_for_fingerprint()
             .with(eq("_some_prefix"), eq("something"), eq(fingerprint.clone()))
             .return_const(false);
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::Txt,
-            false,
-            None,
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::Txt,
+            force_random_subdomains: false,
+            random_subdomain_seed: None,
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address = delegator
             .get_address(
                 "something",
@@ -560,14 +587,15 @@ mod address_delegator_tests {
     async fn returns_subdomain_if_requested_subdomain_of_host_domain() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::None,
-            false,
-            None,
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::None,
+            force_random_subdomains: false,
+            random_subdomain_seed: None,
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address = delegator
             .get_address(
                 "prefix.root.tld",
@@ -594,14 +622,15 @@ mod address_delegator_tests {
         mock.expect_has_txt_record_for_fingerprint()
             .once()
             .return_const(true);
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::Txt,
-            false,
-            None,
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::Txt,
+            force_random_subdomains: false,
+            random_subdomain_seed: None,
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address = delegator
             .get_address(
                 "root.tld",
@@ -628,14 +657,15 @@ mod address_delegator_tests {
         mock.expect_has_txt_record_for_fingerprint()
             .once()
             .return_const(false);
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::Txt,
-            false,
-            None,
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::Txt,
+            force_random_subdomains: false,
+            random_subdomain_seed: None,
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address = delegator
             .get_address(
                 "root.tld",
@@ -668,14 +698,15 @@ mod address_delegator_tests {
         mock.expect_has_txt_record_for_fingerprint()
             .once()
             .return_const(false);
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::Txt,
-            false,
-            None,
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::Txt,
+            force_random_subdomains: false,
+            random_subdomain_seed: None,
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address = delegator
             .get_address(
                 "we.are.root.tld",
@@ -706,14 +737,15 @@ mod address_delegator_tests {
                 .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::Cname,
-            false,
-            None,
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::Cname,
+            force_random_subdomains: false,
+            random_subdomain_seed: None,
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address = delegator
             .get_address(
                 ".",
@@ -744,14 +776,15 @@ mod address_delegator_tests {
                 .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::None,
-            true,
-            None,
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::None,
+            force_random_subdomains: true,
+            random_subdomain_seed: None,
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let mut set = std::collections::HashSet::new();
         let regex = Regex::new(r"^[0-9a-z]{6}\.root\.tld$").unwrap();
         // 99.99% chance of collision with naïve implementation
@@ -780,17 +813,54 @@ mod address_delegator_tests {
     }
 
     #[tokio::test]
+    async fn returns_unique_random_subdomains_with_different_size() {
+        let fingerprint =
+            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519)
+                .unwrap()
+                .fingerprint(HashAlg::Sha256);
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::None,
+            force_random_subdomains: true,
+            random_subdomain_seed: None,
+            random_subdomain_length: 4.try_into().unwrap(),
+        });
+        let regex = Regex::new(r"^[0-9a-z]{4}\.root\.tld$").unwrap();
+        for _ in 0..10_000 {
+            let address = delegator
+                .get_address(
+                    "some.address",
+                    &None,
+                    &Some(fingerprint),
+                    &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+                )
+                .await;
+            assert!(regex.is_match(&address), "invalid address {}", address);
+            assert!(
+                DnsName::try_from(address.clone()).is_ok(),
+                "non DNS-compatible address {}",
+                address
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn returns_unique_random_subdomains_per_user_and_address_if_forced() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::None,
-            true,
-            Some(RandomSubdomainSeed::User),
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::None,
+            force_random_subdomains: true,
+            random_subdomain_seed: Some(RandomSubdomainSeed::User),
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address1_u1_a1 = delegator
             .get_address(
                 "a1",
@@ -859,14 +929,15 @@ mod address_delegator_tests {
             .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::None,
-            true,
-            Some(RandomSubdomainSeed::Fingerprint),
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::None,
+            force_random_subdomains: true,
+            random_subdomain_seed: Some(RandomSubdomainSeed::Fingerprint),
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address1_f1_a1_u0 = delegator
             .get_address(
                 "a1",
@@ -1049,14 +1120,15 @@ mod address_delegator_tests {
     async fn returns_unique_random_subdomains_per_ip_and_user_if_forced() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::None,
-            true,
-            Some(RandomSubdomainSeed::IpAndUser),
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::None,
+            force_random_subdomains: true,
+            random_subdomain_seed: Some(RandomSubdomainSeed::IpAndUser),
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address1_u1_i1 = delegator
             .get_address(
                 "a1",
@@ -1119,14 +1191,15 @@ mod address_delegator_tests {
     async fn returns_unique_random_subdomains_per_socket_and_address_if_forced() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
-        let delegator = AddressDelegator::new(
-            mock,
-            "_some_prefix".into(),
-            "root.tld".into(),
-            BindHostnames::None,
-            true,
-            Some(RandomSubdomainSeed::Address),
-        );
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::None,
+            force_random_subdomains: true,
+            random_subdomain_seed: Some(RandomSubdomainSeed::Address),
+            random_subdomain_length: 6.try_into().unwrap(),
+        });
         let address1_s1_a1 = delegator
             .get_address(
                 "a1",

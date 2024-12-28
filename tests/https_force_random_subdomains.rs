@@ -50,7 +50,7 @@ async fn https_force_random_subdomains() {
         "--https-port=18443",
         "--acme-use-staging",
         "--bind-hostnames=none",
-        "--allow-requested-ports",
+        "--random-subdomain-length=4",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
@@ -125,7 +125,7 @@ async fn https_force_random_subdomains() {
         panic!("Timed out waiting for subdomain allocation.");
     };
     assert!(
-        Regex::new(r"^[0-9a-z]{6}\.foobar\.tld$")
+        Regex::new(r"^[0-9a-z]{4}\.foobar\.tld$")
             .expect("Invalid regex")
             .is_match(&hostname),
         "should create hostname with random subdomain"

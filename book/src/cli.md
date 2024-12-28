@@ -190,6 +190,11 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           - <b>address</b>:     From SSH connection socket (address + port) and
                          requested address
 
+      <b>--random-subdomain-length</b> &lt;LENGTH&gt;
+          The length of the string appended to the start of random subdomains
+
+          [default: 6]
+
       <b>--idle-connection-timeout</b> &lt;DURATION&gt;
           Grace period for dangling/unauthenticated SSH connections before they
           are forcefully disconnected.

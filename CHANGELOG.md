@@ -11,6 +11,7 @@
 - Add `tcp-alias` option for remote forwarding connections.
 - Add `--disable-aliasing` CLI flag.
 - Add `--unproxied-connection-timeout` CLI flag.
+- Add `--random-subdomain-length` CLI flag.
 
 ### Fixed
 
