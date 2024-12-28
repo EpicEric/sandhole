@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2024-12-28)
 
 ### Added
 
@@ -15,18 +15,18 @@
 
 ### Fixed
 
+- **BREAKING:** Panic if required directories are missing.
 - Prevent memory leak if a session hasn't been opened.
+- Improve support for HTTP aliases.
+- Use `proxy_handler` for HTTP local forwardings.
+- Better handling of `exec_request` commands.
 
 ### Changed
 
 - **BREAKING**: Downgrade HTTP hosts to aliases when passing `allowed-fingerprints`.
 - Bump MSRV to 1.82.0.
 - Consolidate configurations.
-- Use `proxy_handler` for HTTP local forwardings.
-- Improve support for HTTP aliases.
-- Better handling of `exec_request` commands.
 - Warn when one of multiple parsings fail.
-- Panic if required directories are missing.
 
 ## 0.2.1 (2024-12-22)
 

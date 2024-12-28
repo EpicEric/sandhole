@@ -785,7 +785,7 @@ mod address_delegator_tests {
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
         });
-        let mut set = std::collections::HashSet::new();
+        let mut set = std::collections::HashSet::with_capacity(200_000);
         let regex = Regex::new(r"^[0-9a-z]{6}\.root\.tld$").unwrap();
         // 99.99% chance of collision with naïve implementation
         for _ in 0..200_000 {
