@@ -46,6 +46,7 @@ rustls = "0.23.16"
 rustls-acme = "0.12.1"
 rustls-platform-verifier = "0.4.0"
 rustls-webpki = "0.102.8"
+rustrict = { version = "0.7.33", features = ["customize"] }
 serde = "1.0.215"
 serde_json = "1.0.133"
 ssh-key = "0.6.7"

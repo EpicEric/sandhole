@@ -31,6 +31,7 @@ use russh::{
 use russh_keys::decode_secret_key;
 use rustls::ServerConfig;
 use rustls_acme::is_tls_alpn_challenge;
+use rustrict::CensorStr;
 use ssh_key::Fingerprint;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
 use tcp::TcpHandler;
@@ -183,6 +184,8 @@ impl SandholeServer {
 #[doc(hidden)]
 // Main entrypoint of the application.
 pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
+    info!("Starting Sandhole...");
+    // Check configuration flags for issues or other operations
     if config.disable_http && config.disable_tcp && config.disable_aliasing {
         return Err(ServerError::InvalidConfig(
             "One of HTTP, TCP, or aliasing must be enabled".into(),
@@ -316,6 +319,21 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     ));
     // Add TCP handler service as a listener for TCP port updates.
     tcp_connections.update_reactor(Some(Arc::clone(&tcp_handler)));
+    // Add addressing service with optional profanity filtering
+    let requested_domain_filter: Option<&'static rustrict::Trie> =
+        if config.requested_domain_filter_profanities {
+            let mut trie = rustrict::Trie::default();
+            if config.domain.is_inappropriate() {
+                warn!(
+                    "Domain \"{}\" is considered a profanity; adding to safe word list",
+                    config.domain
+                );
+                trie.set(&config.domain, rustrict::Type::SAFE);
+            }
+            Some(Box::leak(Box::new(trie)))
+        } else {
+            None
+        };
     let addressing = Arc::new(AddressDelegator::new(AddressDelegatorData {
         resolver: DnsResolver::new(),
         txt_record_prefix: config.txt_record_prefix.trim_matches('.').to_string(),
@@ -324,6 +342,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         force_random_subdomains: !config.allow_requested_subdomains,
         random_subdomain_seed: config.random_subdomain_seed,
         random_subdomain_length: config.random_subdomain_length,
+        random_subdomain_filter_profanities: config.random_subdomain_filter_profanities,
+        requested_domain_filter,
     }));
     // Configure the default domain redirect for Sandhole.
     let domain_redirect = Arc::new(DomainRedirect {
@@ -653,7 +673,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .await
         .with_context(|| "Error listening to SSH port")?;
     info!("Listening for SSH connections on port {}.", config.ssh_port);
-    info!("sandhole is now running.");
+    info!("Sandhole is now running.");
     // Add OS signal handlers for termination.
     let signal_handler = wait_for_signal();
     pin!(signal_handler);
@@ -680,7 +700,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             }
         }
     }
-    info!("sandhole is shutting down.");
+    info!("Sandhole is shutting down.");
     join_handle_http.abort();
     join_handle_https.abort();
     Ok(())

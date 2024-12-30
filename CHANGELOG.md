@@ -6,6 +6,8 @@
 
 - Add `--disable-http` CLI flag.
 - Add `--disable-tcp` CLI flag.
+- Add `--random-subdomain-filter-profanities` CLI flag.
+- Add `--requested-domain-filter-profanities` CLI flag.
 
 ### Changed
 

@@ -202,6 +202,14 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           [default: 6]
 
+      <b>--random-subdomain-filter-profanities</b>
+          Prevents random subdomains from containing profanities
+
+      <b>--requested-domain-filter-profanities</b>
+          Prevents user-requested domains/subdomains from containing profanities.
+
+          Beware that this can lead to false positives being blocked!
+
       <b>--idle-connection-timeout</b> &lt;DURATION&gt;
           Grace period for dangling/unauthenticated SSH connections before they
           are forcefully disconnected.

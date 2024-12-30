@@ -955,7 +955,7 @@ impl Handler for ServerHandler {
                     let assigned_host = self
                         .server
                         .address_delegator
-                        .get_address(address, &self.user, &self.key_fingerprint, &self.peer)
+                        .get_http_address(address, &self.user, &self.key_fingerprint, &self.peer)
                         .await;
                     // Add handler to HTTP connection map
                     if let Err(err) = self.server.http.insert(

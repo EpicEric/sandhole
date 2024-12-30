@@ -10,6 +10,7 @@ use mockall::automock;
 use rand::{seq::SliceRandom, thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rand_seeder::SipHasher;
+use rustrict::{Censor, CensorStr, Type};
 use ssh_key::Fingerprint;
 use webpki::types::DnsName;
 
@@ -109,20 +110,24 @@ pub(crate) struct AddressDelegator<R> {
     txt_record_prefix: String,
     // Root domain for Sandhole.
     root_domain: String,
+    // Policy on how to allow binding hostnames.
+    bind_hostnames: BindHostnames,
+    // Whether subdomains should be random or not.
+    force_random_subdomains: bool,
+    // Policy for generating random subdomains.
+    random_subdomain_seed: Option<RandomSubdomainSeed>,
+    // The length of the string appended to the start of random subdomains.
+    random_subdomain_length: usize,
+    // Whether profanities should be filtered out from random subdomain addressing.
+    random_subdomain_filter_profanities: bool,
+    // Trie to optionally verify for profanities in requested domains/subdomains.
+    requested_domain_filter: Option<&'static rustrict::Trie>,
     // Random seed for generating consistent yet secure random values.
     seed: u64,
     // Mapping between numbers and IDs.
     block_id: BlockId<char>,
     // Counter to generate random IDs with the block ID.
     block_rng: Mutex<u64>,
-    // Policy for generating random subdomains.
-    random_subdomain_seed: Option<RandomSubdomainSeed>,
-    // Policy on how to allow binding hostnames.
-    bind_hostnames: BindHostnames,
-    // Whether subdomains should be random or not.
-    force_random_subdomains: bool,
-    // The length of the string appended to the start of random subdomains.
-    random_subdomain_length: NonZero<u8>,
 }
 
 pub(crate) struct AddressDelegatorData<R> {
@@ -133,6 +138,8 @@ pub(crate) struct AddressDelegatorData<R> {
     pub(crate) force_random_subdomains: bool,
     pub(crate) random_subdomain_seed: Option<RandomSubdomainSeed>,
     pub(crate) random_subdomain_length: NonZero<u8>,
+    pub(crate) random_subdomain_filter_profanities: bool,
+    pub(crate) requested_domain_filter: Option<&'static rustrict::Trie>,
 }
 
 impl<R: Resolver> AddressDelegator<R> {
@@ -142,10 +149,12 @@ impl<R: Resolver> AddressDelegator<R> {
             resolver,
             txt_record_prefix,
             root_domain,
-            random_subdomain_seed,
             bind_hostnames,
             force_random_subdomains,
+            random_subdomain_seed,
             random_subdomain_length,
+            random_subdomain_filter_profanities,
+            requested_domain_filter,
         } = data;
         debug_assert!(!txt_record_prefix.is_empty());
         debug_assert!(!root_domain.is_empty());
@@ -157,7 +166,9 @@ impl<R: Resolver> AddressDelegator<R> {
             bind_hostnames,
             force_random_subdomains,
             random_subdomain_seed,
-            random_subdomain_length,
+            random_subdomain_length: <usize>::from(<u8>::from(random_subdomain_length)),
+            random_subdomain_filter_profanities,
+            requested_domain_filter,
             seed: rng.gen(),
             block_id: BlockId::new(
                 Alphabet::lowercase_alphanumeric(),
@@ -168,8 +179,8 @@ impl<R: Resolver> AddressDelegator<R> {
         }
     }
 
-    // Assign an address given the current configuration
-    pub(crate) async fn get_address(
+    // Assign an HTTP address given the current configuration
+    pub(crate) async fn get_http_address(
         &self,
         requested_address: &str,
         user: &Option<String>,
@@ -178,50 +189,63 @@ impl<R: Resolver> AddressDelegator<R> {
     ) -> String {
         // Only consider valid DNS addresses
         if DnsName::try_from(requested_address).is_ok() {
-            // If we bind all hostnames, return the provided address
-            if matches!(self.bind_hostnames, BindHostnames::All) {
-                return requested_address.to_string();
-            }
-            // If we bind by CNAME records, check that this address points to Sandhole's root domain
-            if matches!(self.bind_hostnames, BindHostnames::Cname)
-                && requested_address != self.root_domain
-                && self
-                    .resolver
-                    .has_cname_record_for_domain(requested_address, &self.root_domain)
-                    .await
-            {
-                return requested_address.to_string();
-            }
-            // If we bind by TXT or CNAME records, check that the public key's fingerprint is among the TXT records.
-            if matches!(
-                self.bind_hostnames,
-                BindHostnames::Cname | BindHostnames::Txt
-            ) {
-                if let Some(fingerprint) = fingerprint {
-                    if self
+            if self.requested_domain_filter.as_ref().is_some_and(|trie| {
+                Censor::from_str(requested_address)
+                    .with_trie(trie)
+                    .analyze()
+                    .is(Type::INAPPROPRIATE)
+            }) {
+                warn!(
+                    "Profane address requested ({}), defaulting to random",
+                    requested_address
+                );
+            } else {
+                // If we bind all hostnames, return the provided address
+                if matches!(self.bind_hostnames, BindHostnames::All) {
+                    return requested_address.to_string();
+                }
+                // If we bind by CNAME records, check that this address points to Sandhole's root domain
+                if matches!(self.bind_hostnames, BindHostnames::Cname)
+                    && requested_address != self.root_domain
+                    && self
                         .resolver
-                        .has_txt_record_for_fingerprint(
-                            &self.txt_record_prefix,
-                            requested_address,
-                            fingerprint,
-                        )
+                        .has_cname_record_for_domain(requested_address, &self.root_domain)
                         .await
-                    {
-                        return requested_address.to_string();
+                {
+                    return requested_address.to_string();
+                }
+                // If we bind by TXT or CNAME records, check that the public key's fingerprint is among the TXT records.
+                if matches!(
+                    self.bind_hostnames,
+                    BindHostnames::Cname | BindHostnames::Txt
+                ) {
+                    if let Some(fingerprint) = fingerprint {
+                        if self
+                            .resolver
+                            .has_txt_record_for_fingerprint(
+                                &self.txt_record_prefix,
+                                requested_address,
+                                fingerprint,
+                            )
+                            .await
+                        {
+                            return requested_address.to_string();
+                        }
                     }
                 }
-            }
-            // If subdomains aren't random, check if user provided a valid one
-            if !self.force_random_subdomains {
-                // Assign specified subdomain under the root domain
-                let address = requested_address.trim_end_matches(&format!(".{}", self.root_domain));
-                if !address.is_empty() && !address.contains('.') {
-                    return format!("{}.{}", address, self.root_domain);
-                } else {
-                    warn!(
-                        "Invalid address requested ({}), defaulting to random",
-                        requested_address
-                    );
+                // If subdomains aren't random, check if user provided a valid one
+                if !self.force_random_subdomains {
+                    // Assign specified subdomain under the root domain
+                    let address =
+                        requested_address.trim_end_matches(&format!(".{}", self.root_domain));
+                    if !address.is_empty() && !address.contains('.') {
+                        return format!("{}.{}", address, self.root_domain);
+                    } else {
+                        warn!(
+                            "Invalid address requested ({}), defaulting to random",
+                            requested_address
+                        );
+                    }
                 }
             }
         } else {
@@ -303,27 +327,38 @@ impl<R: Resolver> AddressDelegator<R> {
         }
         if hash_initialized {
             // Generate random subdomain from hashed state
-            let mut seed: <ChaCha20Rng as SeedableRng>::Seed = Default::default();
-            hasher.into_rng().fill(&mut seed);
-            let mut rng = ChaCha20Rng::from_seed(seed);
-            String::from_utf8(
-                (0..self.random_subdomain_length.into())
-                    .flat_map(|_| {
-                        b"0123456789abcdefghijklmnopqrstuvwxyz"
-                            .choose(&mut rng)
-                            .copied()
-                    })
-                    .collect(),
-            )
-            .unwrap()
+            let mut hasher_rng = hasher.into_rng();
+            loop {
+                let mut seed: <ChaCha20Rng as SeedableRng>::Seed = Default::default();
+                hasher_rng.fill(&mut seed);
+                let mut rng = ChaCha20Rng::from_seed(seed);
+                let result = String::from_utf8(
+                    (0..self.random_subdomain_length)
+                        .flat_map(|_| {
+                            b"0123456789abcdefghijklmnopqrstuvwxyz"
+                                .choose(&mut rng)
+                                .copied()
+                        })
+                        .collect(),
+                )
+                .unwrap();
+                if !self.random_subdomain_filter_profanities || !result.is_inappropriate() {
+                    break result;
+                }
+            }
         } else {
             // Hash hasn't been initialized properly, use block ID to generate a random string
             let mut block_rng = self.block_rng.lock().unwrap();
-            let mut string = self.block_id.encode_string(*block_rng).unwrap();
-            *block_rng = block_rng.wrapping_add(1);
+            let mut result = loop {
+                let result = self.block_id.encode_string(*block_rng).unwrap();
+                *block_rng = block_rng.wrapping_add(1);
+                if !self.random_subdomain_filter_profanities || !result.is_inappropriate() {
+                    break result;
+                }
+            };
             drop(block_rng);
-            string.drain(<usize>::from(<u8>::from(self.random_subdomain_length))..);
-            string
+            result.drain(self.random_subdomain_length..);
+            result
         }
     }
 }
@@ -353,9 +388,11 @@ mod address_delegator_tests {
             force_random_subdomains: false,
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address = delegator
-            .get_address(
+            .get_http_address(
                 "some.address",
                 &None,
                 &None,
@@ -382,9 +419,11 @@ mod address_delegator_tests {
             force_random_subdomains: false,
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address = delegator
-            .get_address(
+            .get_http_address(
                 "root.tld",
                 &None,
                 &None,
@@ -414,9 +453,11 @@ mod address_delegator_tests {
             force_random_subdomains: false,
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address = delegator
-            .get_address(
+            .get_http_address(
                 "some.address",
                 &None,
                 &None,
@@ -456,9 +497,11 @@ mod address_delegator_tests {
             force_random_subdomains: false,
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address = delegator
-            .get_address(
+            .get_http_address(
                 "some.address",
                 &None,
                 &Some(fingerprint),
@@ -495,9 +538,11 @@ mod address_delegator_tests {
             force_random_subdomains: false,
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address = delegator
-            .get_address(
+            .get_http_address(
                 "some.address",
                 &None,
                 &Some(fingerprint),
@@ -526,9 +571,11 @@ mod address_delegator_tests {
             force_random_subdomains: false,
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address = delegator
-            .get_address(
+            .get_http_address(
                 "subdomain",
                 &None,
                 &None,
@@ -561,9 +608,11 @@ mod address_delegator_tests {
             force_random_subdomains: false,
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address = delegator
-            .get_address(
+            .get_http_address(
                 "something",
                 &None,
                 &Some(fingerprint),
@@ -590,9 +639,11 @@ mod address_delegator_tests {
             force_random_subdomains: false,
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address = delegator
-            .get_address(
+            .get_http_address(
                 "prefix.root.tld",
                 &None,
                 &None,
@@ -625,9 +676,11 @@ mod address_delegator_tests {
             force_random_subdomains: false,
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address = delegator
-            .get_address(
+            .get_http_address(
                 "root.tld",
                 &None,
                 &Some(fingerprint),
@@ -660,9 +713,11 @@ mod address_delegator_tests {
             force_random_subdomains: false,
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address = delegator
-            .get_address(
+            .get_http_address(
                 "root.tld",
                 &None,
                 &Some(fingerprint),
@@ -701,9 +756,11 @@ mod address_delegator_tests {
             force_random_subdomains: false,
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address = delegator
-            .get_address(
+            .get_http_address(
                 "we.are.root.tld",
                 &None,
                 &Some(fingerprint),
@@ -740,9 +797,11 @@ mod address_delegator_tests {
             force_random_subdomains: false,
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address = delegator
-            .get_address(
+            .get_http_address(
                 ".",
                 &None,
                 &Some(fingerprint),
@@ -779,13 +838,15 @@ mod address_delegator_tests {
             force_random_subdomains: true,
             random_subdomain_seed: None,
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let mut set = std::collections::HashSet::with_capacity(200_000);
         let regex = Regex::new(r"^[0-9a-z]{6}\.root\.tld$").unwrap();
         // 99.99% chance of collision with naïve implementation
         for _ in 0..200_000 {
             let address = delegator
-                .get_address(
+                .get_http_address(
                     "some.address",
                     &None,
                     &Some(fingerprint),
@@ -808,7 +869,7 @@ mod address_delegator_tests {
     }
 
     #[tokio::test]
-    async fn returns_unique_random_subdomains_with_different_size() {
+    async fn returns_unique_random_subdomains_with_different_size_and_no_profanities() {
         let fingerprint =
             russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519)
                 .unwrap()
@@ -823,11 +884,15 @@ mod address_delegator_tests {
             force_random_subdomains: true,
             random_subdomain_seed: None,
             random_subdomain_length: 4.try_into().unwrap(),
+            random_subdomain_filter_profanities: true,
+            requested_domain_filter: None,
         });
+        let mut set = std::collections::HashSet::with_capacity(5_600);
         let regex = Regex::new(r"^[0-9a-z]{4}\.root\.tld$").unwrap();
-        for _ in 0..10_000 {
+        // 99.99% chance of collision with naïve implementation
+        for _ in 0..5_600 {
             let address = delegator
-                .get_address(
+                .get_http_address(
                     "some.address",
                     &None,
                     &Some(fingerprint),
@@ -840,7 +905,54 @@ mod address_delegator_tests {
                 "non DNS-compatible address {}",
                 address
             );
+            assert!(
+                !set.contains(&address),
+                "generated non-unique address: {}",
+                address
+            );
+            set.insert(address);
         }
+    }
+
+    #[tokio::test]
+    async fn returns_random_subdomain_if_requested_subdomain_contains_profanity() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::new(AddressDelegatorData {
+            resolver: mock,
+            txt_record_prefix: "_some_prefix".into(),
+            root_domain: "root.tld".into(),
+            bind_hostnames: BindHostnames::All,
+            force_random_subdomains: false,
+            random_subdomain_seed: None,
+            random_subdomain_length: 8.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: Some(Box::leak(Box::new(rustrict::Trie::default()))),
+        });
+        let address = delegator
+            .get_http_address(
+                "fuck.root.tld",
+                &None,
+                &None,
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert!(
+            Regex::new(r"^[0-9a-z]{8}\.root\.tld$")
+                .unwrap()
+                .is_match(&address),
+            "invalid address {}",
+            address
+        );
+        assert!(
+            !address.contains("fuck"),
+            "address contains user-provided profanity"
+        );
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {}",
+            address
+        );
     }
 
     #[tokio::test]
@@ -855,9 +967,11 @@ mod address_delegator_tests {
             force_random_subdomains: true,
             random_subdomain_seed: Some(RandomSubdomainSeed::User),
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address1_u1_a1 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &Some("u1".into()),
                 &None,
@@ -865,7 +979,7 @@ mod address_delegator_tests {
             )
             .await;
         let address2_u1_a1 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &Some("u1".into()),
                 &None,
@@ -873,7 +987,7 @@ mod address_delegator_tests {
             )
             .await;
         let address3_u2_a1 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &Some("u2".into()),
                 &None,
@@ -881,7 +995,7 @@ mod address_delegator_tests {
             )
             .await;
         let address4_u1_a2 = delegator
-            .get_address(
+            .get_http_address(
                 "a2",
                 &Some("u1".into()),
                 &None,
@@ -932,9 +1046,11 @@ mod address_delegator_tests {
             force_random_subdomains: true,
             random_subdomain_seed: Some(RandomSubdomainSeed::Fingerprint),
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address1_f1_a1_u0 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &None,
                 &Some(f1.clone()),
@@ -942,7 +1058,7 @@ mod address_delegator_tests {
             )
             .await;
         let address2_f1_a1_u0 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &None,
                 &Some(f1.clone()),
@@ -950,7 +1066,7 @@ mod address_delegator_tests {
             )
             .await;
         let address3_f2_a1_u0 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &None,
                 &Some(f2.clone()),
@@ -958,7 +1074,7 @@ mod address_delegator_tests {
             )
             .await;
         let address4_f1_a2_u0 = delegator
-            .get_address(
+            .get_http_address(
                 "a2",
                 &None,
                 &Some(f1.clone()),
@@ -966,7 +1082,7 @@ mod address_delegator_tests {
             )
             .await;
         let address5_f1_a1_u1 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &Some("u1".into()),
                 &Some(f1.clone()),
@@ -974,7 +1090,7 @@ mod address_delegator_tests {
             )
             .await;
         let address6_f1_a1_u1 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &Some("u1".into()),
                 &Some(f1.clone()),
@@ -982,7 +1098,7 @@ mod address_delegator_tests {
             )
             .await;
         let address7_f2_a1_u1 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &Some("u1".into()),
                 &Some(f2.clone()),
@@ -990,7 +1106,7 @@ mod address_delegator_tests {
             )
             .await;
         let address8_f1_a2_u1 = delegator
-            .get_address(
+            .get_http_address(
                 "a2",
                 &Some("u1".into()),
                 &Some(f1.clone()),
@@ -998,7 +1114,7 @@ mod address_delegator_tests {
             )
             .await;
         let address9_f1_a1_u2 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &Some("u2".into()),
                 &Some(f1.clone()),
@@ -1006,7 +1122,7 @@ mod address_delegator_tests {
             )
             .await;
         let address10_f1_a1_u2 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &Some("u2".into()),
                 &Some(f1.clone()),
@@ -1014,7 +1130,7 @@ mod address_delegator_tests {
             )
             .await;
         let address11_f2_a1_u2 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &Some("u2".into()),
                 &Some(f2.clone()),
@@ -1022,7 +1138,7 @@ mod address_delegator_tests {
             )
             .await;
         let address12_f1_a2_u2 = delegator
-            .get_address(
+            .get_http_address(
                 "a2",
                 &Some("u2".into()),
                 &Some(f1.clone()),
@@ -1123,9 +1239,11 @@ mod address_delegator_tests {
             force_random_subdomains: true,
             random_subdomain_seed: Some(RandomSubdomainSeed::IpAndUser),
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address1_u1_i1 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &Some("user1".into()),
                 &None,
@@ -1133,7 +1251,7 @@ mod address_delegator_tests {
             )
             .await;
         let address2_u1_i1 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &Some("user1".into()),
                 &None,
@@ -1141,7 +1259,7 @@ mod address_delegator_tests {
             )
             .await;
         let address3_u2_i1 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &Some("user2".into()),
                 &None,
@@ -1149,7 +1267,7 @@ mod address_delegator_tests {
             )
             .await;
         let address4_u1_i2 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &Some("user1".into()),
                 &None,
@@ -1194,9 +1312,11 @@ mod address_delegator_tests {
             force_random_subdomains: true,
             random_subdomain_seed: Some(RandomSubdomainSeed::Address),
             random_subdomain_length: 6.try_into().unwrap(),
+            random_subdomain_filter_profanities: false,
+            requested_domain_filter: None,
         });
         let address1_s1_a1 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &None,
                 &None,
@@ -1204,7 +1324,7 @@ mod address_delegator_tests {
             )
             .await;
         let address2_s1_a1 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &None,
                 &None,
@@ -1212,7 +1332,7 @@ mod address_delegator_tests {
             )
             .await;
         let address3_s2_a1 = delegator
-            .get_address(
+            .get_http_address(
                 "a1",
                 &None,
                 &None,
@@ -1220,7 +1340,7 @@ mod address_delegator_tests {
             )
             .await;
         let address4_s1_a2 = delegator
-            .get_address(
+            .get_http_address(
                 "a2",
                 &None,
                 &None,

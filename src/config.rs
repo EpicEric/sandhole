@@ -269,6 +269,16 @@ pub struct ApplicationConfig {
     )]
     pub random_subdomain_length: NonZero<u8>,
 
+    /// Prevents random subdomains from containing profanities.
+    #[arg(long, default_value_t = false)]
+    pub random_subdomain_filter_profanities: bool,
+
+    /// Prevents user-requested domains/subdomains from containing profanities.
+    ///
+    /// Beware that this can lead to false positives being blocked!
+    #[arg(long, default_value_t = false)]
+    pub requested_domain_filter_profanities: bool,
+
     /// Grace period for dangling/unauthenticated SSH connections before they are forcefully disconnected.
     ///
     /// A low value may cause valid proxy/tunnel connections to be erroneously removed.
