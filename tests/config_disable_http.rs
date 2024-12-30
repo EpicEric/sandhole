@@ -107,6 +107,10 @@ async fn config_disable_http() {
         session_one.tcpip_forward("some.address", 80).await.is_ok(),
         "shouldn't have failed to create HTTP alias"
     );
+    assert!(
+        session_one.tcpip_forward("some.proxy", 90).await.is_ok(),
+        "shouldn't have failed to bind alias"
+    );
 }
 
 struct SshClient;

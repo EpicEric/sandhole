@@ -365,14 +365,15 @@ impl<R: Resolver> AddressDelegator<R> {
 
 #[cfg(test)]
 mod address_delegator_tests {
+    use std::{collections::HashSet, net::SocketAddr};
+
     use mockall::predicate::*;
     use rand::rngs::OsRng;
     use regex::Regex;
     use ssh_key::HashAlg;
-    use std::net::SocketAddr;
     use webpki::types::DnsName;
 
-    use crate::{config::BindHostnames, RandomSubdomainSeed};
+    use crate::config::{BindHostnames, RandomSubdomainSeed};
 
     use super::{AddressDelegator, AddressDelegatorData, MockResolver};
 
@@ -841,10 +842,12 @@ mod address_delegator_tests {
             random_subdomain_filter_profanities: false,
             requested_domain_filter: None,
         });
-        let mut set = std::collections::HashSet::with_capacity(200_000);
-        let regex = Regex::new(r"^[0-9a-z]{6}\.root\.tld$").unwrap();
         // 99.99% chance of collision with naïve implementation
-        for _ in 0..200_000 {
+        static SIZE: usize = 200_000;
+        let mut set = HashSet::with_capacity(SIZE);
+        let regex = Regex::new(r"^[0-9a-z]{6}\.root\.tld$").unwrap();
+        let initial_block_rng = *delegator.block_rng.lock().unwrap();
+        for _ in 0..SIZE {
             let address = delegator
                 .get_http_address(
                     "some.address",
@@ -866,6 +869,8 @@ mod address_delegator_tests {
             );
             set.insert(address);
         }
+        let final_block_rng = *delegator.block_rng.lock().unwrap();
+        assert_eq!((final_block_rng - initial_block_rng) as usize, SIZE);
     }
 
     #[tokio::test]
@@ -887,10 +892,12 @@ mod address_delegator_tests {
             random_subdomain_filter_profanities: true,
             requested_domain_filter: None,
         });
-        let mut set = std::collections::HashSet::with_capacity(5_600);
+        // 99.99999...% chance of collision with naïve implementation
+        static SIZE: usize = 10_000;
+        let mut set = HashSet::with_capacity(SIZE);
         let regex = Regex::new(r"^[0-9a-z]{4}\.root\.tld$").unwrap();
-        // 99.99% chance of collision with naïve implementation
-        for _ in 0..5_600 {
+        let initial_block_rng = *delegator.block_rng.lock().unwrap();
+        for _ in 0..SIZE {
             let address = delegator
                 .get_http_address(
                     "some.address",
@@ -912,6 +919,11 @@ mod address_delegator_tests {
             );
             set.insert(address);
         }
+        let final_block_rng = *delegator.block_rng.lock().unwrap();
+        assert!(
+            (final_block_rng - initial_block_rng) as usize > SIZE,
+            "expected at least one word to get filtered"
+        );
     }
 
     #[tokio::test]

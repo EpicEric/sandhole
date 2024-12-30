@@ -8,6 +8,8 @@
 - Add `--disable-tcp` CLI flag.
 - Add `--random-subdomain-filter-profanities` CLI flag.
 - Add `--requested-domain-filter-profanities` CLI flag.
+- Add `--ip-allowlist` CLI flag.
+- Add `--ip-blocklist` CLI flag.
 
 ### Changed
 

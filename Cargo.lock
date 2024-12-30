@@ -2053,6 +2053,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddc24109865250148c2e0f3d25d4f0f479571723792d3802153c60922a4fb708"
 
 [[package]]
+name = "ipnet-trie"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fd839300aeeb010677522802bd17878847da94e4871ebe2653aa8087c5385af"
+dependencies = [
+ "ipnet",
+ "prefix-trie",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2817,6 +2827,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prefix-trie"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85fe48f29e6e6fcf123d0d03d63028dbe4c4a738023d35d525df4882f4929418"
+dependencies = [
+ "ipnet",
+ "num-traits",
+]
+
+[[package]]
 name = "pretty-duration"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3438,6 +3458,8 @@ dependencies = [
  "hyper",
  "hyper-util",
  "insta",
+ "ipnet",
+ "ipnet-trie",
  "itertools 0.13.0",
  "log",
  "mockall",

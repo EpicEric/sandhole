@@ -210,6 +210,14 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           Beware that this can lead to false positives being blocked!
 
+      <b>--ip-allowlist</b> &lt;CIDR&gt;
+          Comma-separated list of IP networks to allow. Setting this will block
+          unknown IPs from connecting
+
+      <b>--ip-blocklist</b> &lt;CIDR&gt;
+          Comma-separated list of IP networks to block. Setting this will allow
+          unknown IPs to connect, unless --ip-allowlist is set
+
       <b>--idle-connection-timeout</b> &lt;DURATION&gt;
           Grace period for dangling/unauthenticated SSH connections before they
           are forcefully disconnected.

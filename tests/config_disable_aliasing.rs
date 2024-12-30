@@ -112,7 +112,11 @@ async fn config_disable_aliasing() {
             .tcpip_forward("test.foobar.tld", 80)
             .await
             .is_ok(),
-        "shouldn't have failed to bind regular HTTP"
+        "shouldn't have failed to bind HTTP"
+    );
+    assert!(
+        session_one.tcpip_forward("localhost", 12345).await.is_ok(),
+        "shouldn't have failed to bind TCP"
     );
 
     // 3. Start SSH proxy that will fail to local forward

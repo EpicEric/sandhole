@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use ipnet::IpNet;
+
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ServerError {
     #[error("Invalid config: {0}")]
@@ -26,4 +28,6 @@ pub(crate) enum ServerError {
     UnknownHttpScheme,
     #[error("Missing directory {0}")]
     MissingDirectory(PathBuf),
+    #[error("Duplicate network CIDR {0}")]
+    DuplicateNetworkCidr(IpNet),
 }

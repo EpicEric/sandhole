@@ -7,6 +7,7 @@ use std::{
     future,
     marker::PhantomData,
     net::{IpAddr, SocketAddr},
+    num::NonZero,
     sync::{atomic::AtomicUsize, Arc, Mutex, RwLock},
     time::Duration,
 };
@@ -20,6 +21,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
 };
+use ip::{IpFilter, IpFilterConfig};
 use log::{debug, error, info, warn};
 use login::ApiLogin;
 use quota::{DummyQuotaHandler, QuotaHandler, QuotaMap};
@@ -73,6 +75,7 @@ mod droppable_handle;
 mod error;
 mod fingerprints;
 mod http;
+mod ip;
 mod login;
 mod quota;
 mod ssh;
@@ -255,11 +258,13 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .with_context(|| "Error intializing login API")?;
     // Initialize the ACME ALPN service if a contact email has been provided.
     let alpn_resolver: Box<dyn AlpnChallengeResolver> = match config.acme_contact_email {
-        Some(contact) if config.https_port == 443 => Box::new(AcmeResolver::new(
-            config.acme_cache_directory,
-            contact,
-            config.acme_use_staging,
-        )),
+        Some(contact) if config.https_port == NonZero::new(443).unwrap() => {
+            Box::new(AcmeResolver::new(
+                config.acme_cache_directory,
+                contact,
+                config.acme_use_staging,
+            ))
+        }
         Some(_) => {
             warn!(
                 "ACME challenges are only supported on HTTPS port 443 (currently {}). Disabling.",
@@ -283,6 +288,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .await
         .with_context(|| "Error setting up certificates watcher")?,
     );
+    // Initialize the IP address allowlist/blocklist service.
+    let ip_filter = Arc::new(IpFilter::new(IpFilterConfig {
+        allowlist: config.ip_allowlist,
+        blocklist: config.ip_blocklist,
+    })?);
     let telemetry = Arc::new(Telemetry::new());
     let quota_handler: Arc<Box<dyn QuotaHandler + Send + Sync>> = match config.quota_per_user {
         Some(max_quota) => Arc::new(Box::new(Arc::new(QuotaMap::new(max_quota.into())))),
@@ -314,6 +324,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let tcp_handler: Arc<TcpHandler> = Arc::new(TcpHandler::new(
         config.listen_address,
         Arc::clone(&tcp_connections),
+        Arc::clone(&ip_filter),
         config.tcp_connection_timeout.map(Into::into),
         config.disable_tcp_logs,
     ));
@@ -353,58 +364,66 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
 
     // Telemetry tasks
     let http_data = Arc::new(RwLock::default());
-    let data_clone = Arc::clone(&http_data);
-    let connections_clone = Arc::clone(&http_connections);
-    let telemetry_clone = Arc::clone(&telemetry);
-    // Periodically update HTTP data, based on the connection map and the telemetry counters.
-    tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_millis(3_000)).await;
-            let data = connections_clone.data();
-            let telemetry = telemetry_clone.get_http_requests_per_minute();
-            let data = data
-                .into_iter()
-                .map(|(hostname, addresses)| {
-                    let requests_per_minute = *telemetry.get(&hostname).unwrap_or(&0f64);
-                    (hostname, (addresses, requests_per_minute))
-                })
-                .collect();
-            *data_clone.write().unwrap() = data;
-        }
-    });
+    if !config.disable_http {
+        let data_clone = Arc::clone(&http_data);
+        let connections_clone = Arc::clone(&http_connections);
+        let telemetry_clone = Arc::clone(&telemetry);
+        // Periodically update HTTP data, based on the connection map and the telemetry counters.
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_millis(3_000)).await;
+                let data = connections_clone.data();
+                let telemetry = telemetry_clone.get_http_requests_per_minute();
+                let data = data
+                    .into_iter()
+                    .map(|(hostname, addresses)| {
+                        let requests_per_minute = *telemetry.get(&hostname).unwrap_or(&0f64);
+                        (hostname, (addresses, requests_per_minute))
+                    })
+                    .collect();
+                *data_clone.write().unwrap() = data;
+            }
+        });
+    }
     let ssh_data = Arc::new(RwLock::default());
-    let data_clone = Arc::clone(&ssh_data);
-    let connections_clone = Arc::clone(&ssh_connections);
-    // Periodically update SSH data, based on the connection map.
-    tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_millis(3_000)).await;
-            let data = connections_clone.data();
-            *data_clone.write().unwrap() = data;
-        }
-    });
+    if !config.disable_aliasing {
+        let data_clone = Arc::clone(&ssh_data);
+        let connections_clone = Arc::clone(&ssh_connections);
+        // Periodically update SSH data, based on the connection map.
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_millis(3_000)).await;
+                let data = connections_clone.data();
+                *data_clone.write().unwrap() = data;
+            }
+        });
+    }
     let tcp_data = Arc::new(RwLock::default());
-    let data_clone = Arc::clone(&tcp_data);
-    let connections_clone = Arc::clone(&tcp_connections);
-    // Periodically update TCP data, based on the connection map.
-    tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_millis(3_000)).await;
-            let data = connections_clone.data();
-            *data_clone.write().unwrap() = data;
-        }
-    });
+    if !config.disable_tcp {
+        let data_clone = Arc::clone(&tcp_data);
+        let connections_clone = Arc::clone(&tcp_connections);
+        // Periodically update TCP data, based on the connection map.
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_millis(3_000)).await;
+                let data = connections_clone.data();
+                *data_clone.write().unwrap() = data;
+            }
+        });
+    }
     let alias_data = Arc::new(RwLock::default());
-    let data_clone = Arc::clone(&alias_data);
-    let connections_clone = Arc::clone(&alias_connections);
-    // Periodically update alias data, based on the connection map.
-    tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_millis(3_000)).await;
-            let data = connections_clone.data();
-            *data_clone.write().unwrap() = data;
-        }
-    });
+    if !config.disable_aliasing {
+        let data_clone = Arc::clone(&alias_data);
+        let connections_clone = Arc::clone(&alias_connections);
+        // Periodically update alias data, based on the connection map.
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_millis(3_000)).await;
+                let data = connections_clone.data();
+                *data_clone.write().unwrap() = data;
+            }
+        });
+    }
     let system_data = Arc::new(RwLock::default());
     let data_clone = Arc::clone(&system_data);
     // Periodically update system data (every second, as to keep network TX/RX rates accurate).
@@ -455,7 +474,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         domain_redirect: Arc::clone(&domain_redirect),
         // HTTP only.
         protocol: Protocol::Http {
-            port: config.http_port,
+            port: config.http_port.into(),
         },
         // Always use aliasing channels instead of tunneling channels.
         proxy_type: ProxyType::Aliasing,
@@ -483,9 +502,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         address_delegator: addressing,
         tcp_handler,
         domain: config.domain,
-        http_port: config.http_port,
-        https_port: config.https_port,
-        ssh_port: config.ssh_port,
+        http_port: config.http_port.into(),
+        https_port: config.https_port.into(),
+        ssh_port: config.ssh_port.into(),
         force_random_ports: !config.allow_requested_ports,
         disable_http: config.disable_http,
         disable_tcp: config.disable_tcp,
@@ -503,13 +522,14 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let mut join_handle_http = if config.disable_http {
         tokio::spawn(future::pending())
     } else {
-        let http_listener = TcpListener::bind((listen_address, config.http_port))
+        let http_listener = TcpListener::bind((listen_address, config.http_port.into()))
             .await
             .with_context(|| "Error listening to HTTP port")?;
         info!(
             "Listening for HTTP connections on port {}.",
             config.http_port
         );
+        let ip_filter_clone = Arc::clone(&ip_filter);
         let http_proxy_data = Arc::new(ProxyData {
             conn_manager: Arc::clone(&http_connections),
             telemetry: Arc::clone(&telemetry),
@@ -517,12 +537,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             // Use TLS redirect if --force-https is set, otherwise allow HTTP.
             protocol: if config.force_https {
                 Protocol::TlsRedirect {
-                    from: config.http_port,
-                    to: config.https_port,
+                    from: config.http_port.into(),
+                    to: config.https_port.into(),
                 }
             } else {
                 Protocol::Http {
-                    port: config.http_port,
+                    port: config.http_port.into(),
                 }
             },
             // Always use tunneling channels.
@@ -542,6 +562,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                         break;
                     }
                 };
+                let ip = address.ip();
+                if !ip_filter_clone.is_allowed(ip) {
+                    info!("Rejecting HTTP connection for {}: not allowed", ip);
+                    continue;
+                }
                 // Create a Hyper service and serve over the accepted TCP connection.
                 let service = service_fn(move |req: Request<Incoming>| {
                     proxy_handler(req, address, None, Arc::clone(&proxy_data))
@@ -560,7 +585,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let mut join_handle_https = if config.disable_http {
         tokio::spawn(future::pending())
     } else {
-        let https_listener = TcpListener::bind((listen_address, config.https_port))
+        let https_listener = TcpListener::bind((listen_address, config.https_port.into()))
             .await
             .with_context(|| "Error listening to HTTPS port")?;
         info!(
@@ -573,12 +598,13 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 .with_no_client_auth()
                 .with_cert_resolver(certificates),
         );
+        let ip_filter_clone = Arc::clone(&ip_filter);
         let https_proxy_data = Arc::new(ProxyData {
             conn_manager: http_connections,
             telemetry: Arc::clone(&telemetry),
             domain_redirect: Arc::clone(&domain_redirect),
             protocol: Protocol::Https {
-                port: config.https_port,
+                port: config.https_port.into(),
             },
             // Always use tunneling channels.
             proxy_type: ProxyType::Tunneling,
@@ -598,6 +624,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                         break;
                     }
                 };
+                let ip = address.ip();
+                if !ip_filter_clone.is_allowed(ip) {
+                    info!("Rejecting HTTPS connection for {}: not allowed", ip);
+                    continue;
+                }
                 if config.connect_ssh_on_https_port {
                     // Check if this is an SSH-2.0 handshake.
                     let mut buf = [0u8; 8];
@@ -669,7 +700,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     };
 
     // Start Sandhole on SSH port
-    let ssh_listener = TcpListener::bind((listen_address, config.ssh_port))
+    let ssh_listener = TcpListener::bind((listen_address, config.ssh_port.into()))
         .await
         .with_context(|| "Error listening to SSH port")?;
     info!("Listening for SSH connections on port {}.", config.ssh_port);
@@ -687,6 +718,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                         break;
                     },
                 };
+                let ip = address.ip();
+                if !ip_filter.is_allowed(ip) {
+                    info!("Rejecting SSH connection for {}: not allowed", ip);
+                    continue;
+                }
                 handle_ssh_connection(stream, address, &ssh_config, &mut sandhole).await;
             }
             _ = &mut signal_handler => {

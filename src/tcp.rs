@@ -4,12 +4,13 @@ use crate::{
     connection_handler::ConnectionHandler,
     connections::{ConnectionMap, ConnectionMapReactor},
     droppable_handle::DroppableHandle,
+    ip::IpFilter,
     ssh::SshTunnelHandler,
 };
 use anyhow::Context;
 use async_trait::async_trait;
 use dashmap::DashMap;
-use log::error;
+use log::{error, info};
 use tokio::{io::copy_bidirectional, net::TcpListener, time::timeout};
 
 // Service that handles creating TCP sockets for reverse forwarding connections.
@@ -20,6 +21,8 @@ pub(crate) struct TcpHandler {
     sockets: DashMap<u16, DroppableHandle<()>>,
     // Connection map to assign a tunneling service for each incoming connection.
     conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<Self>>>,
+    // Service that identifies whether to allow or block a given IP address.
+    ip_filter: Arc<IpFilter>,
     // Optional duration to time out TCP connections.
     tcp_connection_timeout: Option<Duration>,
     // Whether to send TCP logs to the SSH handles behind the forwarded connections.
@@ -30,6 +33,7 @@ impl TcpHandler {
     pub(crate) fn new(
         listen_address: String,
         conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<Self>>>,
+        ip_filter: Arc<IpFilter>,
         tcp_connection_timeout: Option<Duration>,
         disable_tcp_logs: bool,
     ) -> Self {
@@ -37,6 +41,7 @@ impl TcpHandler {
             listen_address,
             sockets: DashMap::new(),
             conn_manager,
+            ip_filter,
             tcp_connection_timeout,
             disable_tcp_logs,
         }
@@ -65,11 +70,17 @@ impl PortHandler for Arc<TcpHandler> {
         let clone = Arc::clone(self);
         let tcp_connection_timeout = self.tcp_connection_timeout;
         let disable_tcp_logs = self.disable_tcp_logs;
+        let ip_filter_clone = Arc::clone(&self.ip_filter);
         // Start task that will listen to incoming connections.
         let join_handle = DroppableHandle(tokio::spawn(async move {
             loop {
                 match listener.accept().await {
                     Ok((mut stream, address)) => {
+                        let ip = address.ip();
+                        if !ip_filter_clone.is_allowed(ip) {
+                            info!("Rejecting TCP connection for {}: not allowed", ip);
+                            continue;
+                        }
                         // Get the handler for this port
                         if let Some(handler) = clone.conn_manager.get(&port) {
                             if let Ok(mut channel) = handler
@@ -137,7 +148,9 @@ impl ConnectionMapReactor<u16> for Arc<TcpHandler> {
             // Create port listeners for the new ports
             tokio::spawn(async move {
                 for port in ports.into_iter() {
-                    let _ = clone.create_port_listener(port).await;
+                    if let Err(err) = clone.create_port_listener(port).await {
+                        error!("Failed to create listener for port {}: {}", port, err);
+                    }
                 }
             });
         }

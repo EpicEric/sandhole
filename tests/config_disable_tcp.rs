@@ -90,6 +90,17 @@ async fn config_disable_tcp() {
         TcpStream::connect("127.0.0.1:12345").await.is_err(),
         "shouldn't listen on TCP port"
     );
+    assert!(
+        session_one
+            .tcpip_forward("test.foobar.tld", 80)
+            .await
+            .is_ok(),
+        "shouldn't have failed to bind HTTP"
+    );
+    assert!(
+        session_one.tcpip_forward("some.alias", 12345).await.is_ok(),
+        "shouldn't have failed to bind alias"
+    );
 }
 
 struct SshClient;

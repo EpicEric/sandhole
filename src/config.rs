@@ -2,6 +2,7 @@ use std::{num::NonZero, path::PathBuf};
 
 use clap::{command, Parser, ValueEnum};
 use humantime::Duration;
+use ipnet::IpNet;
 use webpki::types::DnsName;
 
 // Which value to seed with when generating random subdomains, for determinism.
@@ -126,31 +127,16 @@ pub struct ApplicationConfig {
     pub listen_address: String,
 
     /// Port to listen for SSH connections.
-    #[arg(
-        long,
-        default_value_t = 2222,
-        value_parser = validate_port,
-        value_name = "PORT"
-    )]
-    pub ssh_port: u16,
+    #[arg(long, default_value_t = NonZero::new(2222).unwrap(), value_name = "PORT")]
+    pub ssh_port: NonZero<u16>,
 
     /// Port to listen for HTTP connections.
-    #[arg(
-        long,
-        default_value_t = 80,
-        value_parser = validate_port,
-        value_name = "PORT"
-    )]
-    pub http_port: u16,
+    #[arg(long, default_value_t = NonZero::new(80).unwrap(), value_name = "PORT")]
+    pub http_port: NonZero<u16>,
 
     /// Port to listen for HTTPS connections.
-    #[arg(
-        long,
-        default_value_t = 443,
-        value_parser = validate_port,
-        value_name = "PORT"
-    )]
-    pub https_port: u16,
+    #[arg(long, default_value_t = NonZero::new(443).unwrap(), value_name = "PORT")]
+    pub https_port: NonZero<u16>,
 
     /// Allow connecting to SSH via the HTTPS port as well.
     /// This can be useful in networks that block binding to other ports.
@@ -279,6 +265,16 @@ pub struct ApplicationConfig {
     #[arg(long, default_value_t = false)]
     pub requested_domain_filter_profanities: bool,
 
+    /// Comma-separated list of IP networks to allow.
+    /// Setting this will block unknown IPs from connecting.
+    #[arg(long, value_delimiter = ',', value_name = "CIDR")]
+    pub ip_allowlist: Option<Vec<IpNet>>,
+
+    /// Comma-separated list of IP networks to block.
+    /// Setting this will allow unknown IPs to connect, unless --ip-allowlist is set.
+    #[arg(long, value_delimiter = ',', value_name = "CIDR")]
+    pub ip_blocklist: Option<Vec<IpNet>>,
+
     /// Grace period for dangling/unauthenticated SSH connections before they are forcefully disconnected.
     ///
     /// A low value may cause valid proxy/tunnel connections to be erroneously removed.
@@ -320,13 +316,5 @@ fn validate_txt_record_prefix(value: &str) -> Result<String, String> {
         Err("prefix cannot contain period".into())
     } else {
         Ok(value.to_string())
-    }
-}
-
-fn validate_port(value: &str) -> Result<u16, String> {
-    match value.parse::<u16>() {
-        Err(err) => Err(err.to_string()),
-        Ok(0) => Err("port cannot be zero".into()),
-        Ok(port) => Ok(port),
     }
 }
