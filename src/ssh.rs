@@ -879,12 +879,8 @@ impl Handler for ServerHandler {
             }
             // Assign HTTP host through config (specified by the usual HTTP/HTTPS ports)
             80 | 443 => {
-                // Handle TCP alias-only mode
+                // Handle alias-only mode
                 if user_data.tcp_alias_only {
-                    if self.server.disable_aliasing {
-                        self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
-                        return Ok(false);
-                    }
                     // HTTP host must be alias (to be accessed via local forwarding)
                     if !self.server.is_alias(address) {
                         self.tx.send(
@@ -939,6 +935,20 @@ impl Handler for ServerHandler {
                             .insert(TcpAlias(address.into(), 80), TcpAlias(address.into(), 80));
                         Ok(true)
                     }
+                // Reject when HTTP is disabled
+                } else if self.server.disable_http {
+                    info!(
+                        "Failed to bind HTTP host {} ({}): HTTP is disabled",
+                        address, self.peer
+                    );
+                    self.tx.send(
+                        format!(
+                            "Cannot listen to HTTP host {} (HTTP is disabled)\r\n",
+                            address,
+                        )
+                        .into_bytes(),
+                    );
+                    Ok(false)
                 // Handle regular tunneling for HTTP services
                 } else {
                     // Assign an HTTP address according to server policies
@@ -1013,8 +1023,22 @@ impl Handler for ServerHandler {
             }
             // Assign TCP port through config (specified by non-trivial ports)
             _ if !self.server.is_alias(address) => {
+                // Forbid binding TCP if disabled
+                if self.server.disable_tcp {
+                    info!(
+                        "Failed to bind TCP port {} ({}): TCP is disabled",
+                        port, self.peer
+                    );
+                    self.tx.send(
+                        format!(
+                            "Cannot listen to TCP on port {}:{} (TCP is disabled)\r\n",
+                            &self.server.domain, port,
+                        )
+                        .into_bytes(),
+                    );
+                    Ok(false)
                 // Forbid binding TCP on alias-only mode
-                if user_data.tcp_alias_only {
+                } else if user_data.tcp_alias_only {
                     info!(
                         "Failed to bind TCP port {} ({}): session is in alias-only mode",
                         port, self.peer

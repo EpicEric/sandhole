@@ -232,6 +232,14 @@ pub struct ApplicationConfig {
     #[arg(long, default_value_t = false)]
     pub allow_requested_ports: bool,
 
+    /// Disable all HTTP tunneling. By default, this is enabled globally.
+    #[arg(long, default_value_t = false)]
+    pub disable_http: bool,
+
+    /// Disable all TCP port tunneling except HTTP. By default, this is enabled globally.
+    #[arg(long, default_value_t = false)]
+    pub disable_tcp: bool,
+
     /// Disable all aliasing (i.e. local forwarding). By default, this is enabled globally.
     #[arg(long, default_value_t = false)]
     pub disable_aliasing: bool,

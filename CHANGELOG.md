@@ -2,10 +2,15 @@
 
 ## Unreleased
 
+### Added
+
+- Add `--disable-http` CLI flag.
+- Add `--disable-tcp` CLI flag.
+
 ### Changed
 
 - Separate TCP and alias logic.
-- Remove aliasing tabs from admin interface when using `--disable-aliasing`.
+- Remove inaccesible tabs from admin interface when using one or more of the `--disable-*` flags.
 
 ## 0.3.0 (2024-12-28)
 

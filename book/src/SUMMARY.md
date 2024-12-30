@@ -17,5 +17,5 @@
 
 # Reference
 
-- [Frequently Asked Questions](./faq.md)
+- [Frequently asked questions](./faq.md)
 - [CLI](./cli.md)

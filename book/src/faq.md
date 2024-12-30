@@ -1,4 +1,4 @@
-# Frequently Asked Questions
+# Frequently asked questions
 
 ## How do I expose my service on multiple URLs (for example, `website.com` and `www.website.com`)?
 
@@ -12,7 +12,7 @@ See ["Advanced Uses"](./advanced_uses.md#custom-domains) on how to add custom do
 
 Use `ssh -J sandhole.com:2222 mysshserver.com -p 2222` (replace the ports with Sandhole's SSH port if not using the default `2222`).
 
-If you'd like to avoid typing out the proxy jump command every time, make sure to edit your SSH config file (usually `~/.ssh/config`) and add the following entry:
+If you'd like to avoid typing out the proxy jump command every time, make sure to edit your SSH config file (usually `~/.ssh/config`) and add the following entry (changing the port where appropriate):
 
 ```ssh-config
 Host mysshserver.com
@@ -31,3 +31,7 @@ With the `--force-https` [CLI flag](./cli.md). This is currently a global settin
 ## How do I enable Websockets?
 
 Websockets are always enabled for HTTP services.
+
+## How do I disable HTTP/TCP/aliasing?
+
+With the `--disable--http`, `--disable-tcp`, and `--disable-aliasing` [CLI flags](./cli.md) respectively. Note that you cannot disable all three at once.

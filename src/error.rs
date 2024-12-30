@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ServerError {
+    #[error("Invalid config: {0}")]
+    InvalidConfig(String),
     #[error("Missing Host header")]
     MissingHostHeader,
     #[error("Invalid Host header")]

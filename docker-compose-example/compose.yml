@@ -15,7 +15,7 @@ services:
       - ./letsencrypt:/letsencrypt:ro
       # Change this to where the CA certificates are on the host
       - /etc/ssl/certs:/etc/ssl/certs:ro
-    # See also: https://epiceric.github.io/sandhole/cli.html
+    # See also: https://sandhole.eric.dev.br/cli.html
     # Make sure to change at least --domain and --acme-contact-email below
     command: |
       --domain=server.com

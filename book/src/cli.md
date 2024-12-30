@@ -159,6 +159,13 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
       <b>--allow-requested-ports</b>
           Allow user-requested ports. By default, ports are always random
 
+      <b>--disable-http</b>
+          Disable all HTTP tunneling. By default, this is enabled globally
+
+      <b>--disable-tcp</b>
+          Disable all TCP port tunneling except HTTP. By default, this is
+          enabled globally
+
       <b>--disable-aliasing</b>
           Disable all aliasing (i.e. local forwarding). By default, this is
           enabled globally

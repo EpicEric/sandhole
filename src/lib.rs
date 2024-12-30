@@ -4,6 +4,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
+    future,
     marker::PhantomData,
     net::{IpAddr, SocketAddr},
     sync::{atomic::AtomicUsize, Arc, Mutex, RwLock},
@@ -156,7 +157,11 @@ pub(crate) struct SandholeServer {
     pub(crate) ssh_port: u16,
     // If true, allows users to select the TCP ports assigned by tcp_handler.
     pub(crate) force_random_ports: bool,
-    // If true, TCP aliasing is disabled, including SSH and all local forwarding connections.
+    // If true, HTTP is disabled.
+    pub(crate) disable_http: bool,
+    // If true, TCP is disabled for all ports except for HTTP.
+    pub(crate) disable_tcp: bool,
+    // If true, aliasing is disabled, including SSH and all local forwarding connections.
     pub(crate) disable_aliasing: bool,
     // How long until a login API request is timed out.
     pub(crate) authentication_request_timeout: Duration,
@@ -178,6 +183,12 @@ impl SandholeServer {
 #[doc(hidden)]
 // Main entrypoint of the application.
 pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
+    if config.disable_http && config.disable_tcp && config.disable_aliasing {
+        return Err(ServerError::InvalidConfig(
+            "One of HTTP, TCP, or aliasing must be enabled".into(),
+        )
+        .into());
+    }
     // Initialize crypto and credentials
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
@@ -456,6 +467,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         https_port: config.https_port,
         ssh_port: config.ssh_port,
         force_random_ports: !config.allow_requested_ports,
+        disable_http: config.disable_http,
+        disable_tcp: config.disable_tcp,
         disable_aliasing: config.disable_aliasing,
         authentication_request_timeout: config.authentication_request_timeout.into(),
         idle_connection_timeout: config.idle_connection_timeout.into(),
@@ -467,164 +480,173 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     });
 
     // HTTP handler
-    let http_listener = TcpListener::bind((listen_address, config.http_port))
-        .await
-        .with_context(|| "Error listening to HTTP port")?;
-    info!(
-        "Listening for HTTP connections on port {}.",
-        config.http_port
-    );
-    let http_proxy_data = Arc::new(ProxyData {
-        conn_manager: Arc::clone(&http_connections),
-        telemetry: Arc::clone(&telemetry),
-        domain_redirect: Arc::clone(&domain_redirect),
-        // Use TLS redirect if --force-https is set, otherwise allow HTTP.
-        protocol: if config.force_https {
-            Protocol::TlsRedirect {
-                from: config.http_port,
-                to: config.https_port,
-            }
-        } else {
-            Protocol::Http {
-                port: config.http_port,
-            }
-        },
-        // Always use tunneling channels.
-        proxy_type: ProxyType::Tunneling,
-        http_request_timeout: config.http_request_timeout.into(),
-        websocket_timeout: config.tcp_connection_timeout.map(Into::into),
-        disable_http_logs: config.disable_http_logs,
-        _phantom_data: PhantomData,
-    });
-    let mut join_handle_http = tokio::spawn(async move {
-        loop {
-            let proxy_data = Arc::clone(&http_proxy_data);
-            let (stream, address) = match http_listener.accept().await {
-                Ok((stream, address)) => (stream, address),
-                Err(err) => {
-                    error!("Unable to accept HTTP connection: {}", err);
-                    break;
+    let mut join_handle_http = if config.disable_http {
+        tokio::spawn(future::pending())
+    } else {
+        let http_listener = TcpListener::bind((listen_address, config.http_port))
+            .await
+            .with_context(|| "Error listening to HTTP port")?;
+        info!(
+            "Listening for HTTP connections on port {}.",
+            config.http_port
+        );
+        let http_proxy_data = Arc::new(ProxyData {
+            conn_manager: Arc::clone(&http_connections),
+            telemetry: Arc::clone(&telemetry),
+            domain_redirect: Arc::clone(&domain_redirect),
+            // Use TLS redirect if --force-https is set, otherwise allow HTTP.
+            protocol: if config.force_https {
+                Protocol::TlsRedirect {
+                    from: config.http_port,
+                    to: config.https_port,
                 }
-            };
-            // Create a Hyper service and serve over the accepted TCP connection.
-            let service = service_fn(move |req: Request<Incoming>| {
-                proxy_handler(req, address, None, Arc::clone(&proxy_data))
-            });
-            let io = TokioIo::new(stream);
-            tokio::spawn(async move {
-                let server = auto::Builder::new(TokioExecutor::new());
-                let conn = server.serve_connection_with_upgrades(io, service);
-                let _ = conn.await;
-            });
-        }
-    });
+            } else {
+                Protocol::Http {
+                    port: config.http_port,
+                }
+            },
+            // Always use tunneling channels.
+            proxy_type: ProxyType::Tunneling,
+            http_request_timeout: config.http_request_timeout.into(),
+            websocket_timeout: config.tcp_connection_timeout.map(Into::into),
+            disable_http_logs: config.disable_http_logs,
+            _phantom_data: PhantomData,
+        });
+        tokio::spawn(async move {
+            loop {
+                let proxy_data = Arc::clone(&http_proxy_data);
+                let (stream, address) = match http_listener.accept().await {
+                    Ok((stream, address)) => (stream, address),
+                    Err(err) => {
+                        error!("Unable to accept HTTP connection: {}", err);
+                        break;
+                    }
+                };
+                // Create a Hyper service and serve over the accepted TCP connection.
+                let service = service_fn(move |req: Request<Incoming>| {
+                    proxy_handler(req, address, None, Arc::clone(&proxy_data))
+                });
+                let io = TokioIo::new(stream);
+                tokio::spawn(async move {
+                    let server = auto::Builder::new(TokioExecutor::new());
+                    let conn = server.serve_connection_with_upgrades(io, service);
+                    let _ = conn.await;
+                });
+            }
+        })
+    };
 
     // HTTPS handler (with optional SSH handling)
-    let https_listener = TcpListener::bind((listen_address, config.https_port))
-        .await
-        .with_context(|| "Error listening to HTTPS port")?;
-    info!(
-        "Listening for HTTPS connections on port {}.",
-        config.https_port
-    );
-    let certificates_clone = Arc::clone(&certificates);
-    let tls_server_config = Arc::new(
-        ServerConfig::builder()
-            .with_no_client_auth()
-            .with_cert_resolver(certificates),
-    );
-    let https_proxy_data = Arc::new(ProxyData {
-        conn_manager: http_connections,
-        telemetry: Arc::clone(&telemetry),
-        domain_redirect: Arc::clone(&domain_redirect),
-        protocol: Protocol::Https {
-            port: config.https_port,
-        },
-        // Always use tunneling channels.
-        proxy_type: ProxyType::Tunneling,
-        http_request_timeout: config.http_request_timeout.into(),
-        websocket_timeout: config.tcp_connection_timeout.map(Into::into),
-        disable_http_logs: config.disable_http_logs,
-        _phantom_data: PhantomData,
-    });
-    let mut sandhole_clone = Arc::clone(&sandhole);
-    let ssh_config_clone = Arc::clone(&ssh_config);
-    let mut join_handle_https = tokio::spawn(async move {
-        loop {
-            let (stream, address) = match https_listener.accept().await {
-                Ok((stream, address)) => (stream, address),
-                Err(err) => {
-                    error!("Unable to accept HTTPS connection: {}", err);
-                    break;
+    let mut join_handle_https = if config.disable_http {
+        tokio::spawn(future::pending())
+    } else {
+        let https_listener = TcpListener::bind((listen_address, config.https_port))
+            .await
+            .with_context(|| "Error listening to HTTPS port")?;
+        info!(
+            "Listening for HTTPS connections on port {}.",
+            config.https_port
+        );
+        let certificates_clone = Arc::clone(&certificates);
+        let tls_server_config = Arc::new(
+            ServerConfig::builder()
+                .with_no_client_auth()
+                .with_cert_resolver(certificates),
+        );
+        let https_proxy_data = Arc::new(ProxyData {
+            conn_manager: http_connections,
+            telemetry: Arc::clone(&telemetry),
+            domain_redirect: Arc::clone(&domain_redirect),
+            protocol: Protocol::Https {
+                port: config.https_port,
+            },
+            // Always use tunneling channels.
+            proxy_type: ProxyType::Tunneling,
+            http_request_timeout: config.http_request_timeout.into(),
+            websocket_timeout: config.tcp_connection_timeout.map(Into::into),
+            disable_http_logs: config.disable_http_logs,
+            _phantom_data: PhantomData,
+        });
+        let mut sandhole_clone = Arc::clone(&sandhole);
+        let ssh_config_clone = Arc::clone(&ssh_config);
+        tokio::spawn(async move {
+            loop {
+                let (stream, address) = match https_listener.accept().await {
+                    Ok((stream, address)) => (stream, address),
+                    Err(err) => {
+                        error!("Unable to accept HTTPS connection: {}", err);
+                        break;
+                    }
+                };
+                if config.connect_ssh_on_https_port {
+                    // Check if this is an SSH-2.0 handshake.
+                    let mut buf = [0u8; 8];
+                    if let Ok(n) = stream.peek(&mut buf).await {
+                        if buf[..n].starts_with(b"SSH-2.0-") {
+                            // Handle as an SSH connection instead of HTTPS.
+                            handle_ssh_connection(
+                                stream,
+                                address,
+                                &ssh_config_clone,
+                                &mut sandhole_clone,
+                            )
+                            .await;
+                            continue;
+                        }
+                    }
                 }
-            };
-            if config.connect_ssh_on_https_port {
-                // Check if this is an SSH-2.0 handshake.
-                let mut buf = [0u8; 8];
-                if let Ok(n) = stream.peek(&mut buf).await {
-                    if buf[..n].starts_with(b"SSH-2.0-") {
-                        // Handle as an SSH connection instead of HTTPS.
-                        handle_ssh_connection(
-                            stream,
-                            address,
-                            &ssh_config_clone,
-                            &mut sandhole_clone,
-                        )
-                        .await;
+                let proxy_data = Arc::clone(&https_proxy_data);
+                let server_config = Arc::clone(&tls_server_config);
+                // Create a Hyper service and serve over the accepted TLS connection.
+                let service = service_fn(move |req: Request<Incoming>| {
+                    proxy_handler(req, address, None, Arc::clone(&proxy_data))
+                });
+                // Create a ClientHello TLS stream from the TCP stream.
+                match LazyConfigAcceptor::new(Default::default(), stream).await {
+                    Ok(handshake) => {
+                        // Handle ALPN challenges with the ACME resolver.
+                        if is_tls_alpn_challenge(&handshake.client_hello()) {
+                            if let Some(challenge_config) =
+                                certificates_clone.challenge_rustls_config()
+                            {
+                                tokio::spawn(async move {
+                                    let mut tls =
+                                        handshake.into_stream(challenge_config).await.unwrap();
+                                    tls.shutdown().await.unwrap();
+                                });
+                            }
+                        } else {
+                            tokio::spawn(async move {
+                                match handshake.into_stream(server_config).await {
+                                    Ok(stream) => {
+                                        let server = auto::Builder::new(TokioExecutor::new());
+                                        let conn = server.serve_connection_with_upgrades(
+                                            TokioIo::new(stream),
+                                            service,
+                                        );
+                                        let _ = conn.await;
+                                    }
+                                    Err(err) => {
+                                        warn!(
+                                            "Error establishing TLS connection with {}: {}",
+                                            address, err
+                                        );
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Failed to establish TLS handshake with {}: {}",
+                            address, err
+                        );
                         continue;
                     }
                 }
             }
-            let proxy_data = Arc::clone(&https_proxy_data);
-            let server_config = Arc::clone(&tls_server_config);
-            // Create a Hyper service and serve over the accepted TLS connection.
-            let service = service_fn(move |req: Request<Incoming>| {
-                proxy_handler(req, address, None, Arc::clone(&proxy_data))
-            });
-            // Create a ClientHello TLS stream from the TCP stream.
-            match LazyConfigAcceptor::new(Default::default(), stream).await {
-                Ok(handshake) => {
-                    // Handle ALPN challenges with the ACME resolver.
-                    if is_tls_alpn_challenge(&handshake.client_hello()) {
-                        if let Some(challenge_config) = certificates_clone.challenge_rustls_config()
-                        {
-                            tokio::spawn(async move {
-                                let mut tls =
-                                    handshake.into_stream(challenge_config).await.unwrap();
-                                tls.shutdown().await.unwrap();
-                            });
-                        }
-                    } else {
-                        tokio::spawn(async move {
-                            match handshake.into_stream(server_config).await {
-                                Ok(stream) => {
-                                    let server = auto::Builder::new(TokioExecutor::new());
-                                    let conn = server.serve_connection_with_upgrades(
-                                        TokioIo::new(stream),
-                                        service,
-                                    );
-                                    let _ = conn.await;
-                                }
-                                Err(err) => {
-                                    warn!(
-                                        "Error establishing TLS connection with {}: {}",
-                                        address, err
-                                    );
-                                }
-                            }
-                        });
-                    }
-                }
-                Err(err) => {
-                    warn!(
-                        "Failed to establish TLS handshake with {}: {}",
-                        address, err
-                    );
-                    continue;
-                }
-            }
-        }
-    });
+        })
+    };
 
     // Start Sandhole on SSH port
     let ssh_listener = TcpListener::bind((listen_address, config.ssh_port))

@@ -11,19 +11,18 @@ use hyper_util::{
 };
 use russh::{
     client::{Msg, Session},
-    Channel, ChannelId,
+    Channel,
 };
 use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
-    sync::oneshot,
     time::{sleep, timeout},
 };
 use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn alias_disable_aliasing() {
+async fn config_disable_http() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -44,8 +43,8 @@ async fn alias_disable_aliasing() {
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
-        "--bind-hostnames=all",
-        "--disable-aliasing",
+        "--bind-hostnames=none",
+        "--disable-http",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
@@ -61,15 +60,22 @@ async fn alias_disable_aliasing() {
     {
         panic!("Timeout waiting for Sandhole to start.")
     };
+    assert!(
+        TcpStream::connect("127.0.0.1:18080").await.is_err(),
+        "shouldn't listen on HTTP port"
+    );
+    assert!(
+        TcpStream::connect("127.0.0.1:18443").await.is_err(),
+        "shouldn't listen on HTTPS port"
+    );
 
-    // 2. Start SSH client that will fail to alias
+    // 2. Start SSH client that will fail to bind HTTP
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
-    let (tx, rx) = oneshot::channel();
-    let ssh_client = SshClientOne(Some(tx));
+    let ssh_client = SshClient;
     let mut session_one = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
@@ -84,13 +90,8 @@ async fn alias_disable_aliasing() {
         "authentication didn't succeed"
     );
     assert!(
-        session_one.tcpip_forward("tcp.tunnel", 42).await.is_err(),
-        "should've failed to alias TCP"
-    );
-    assert!(!session_one.is_closed(), "shouldn't have closed connection");
-    assert!(
-        session_one.tcpip_forward("ssh.tunnel", 22).await.is_err(),
-        "should've failed to alias SSH"
+        session_one.tcpip_forward("some.address", 80).await.is_err(),
+        "should've failed to bind HTTP"
     );
     assert!(!session_one.is_closed(), "shouldn't have closed connection");
     let channel = session_one
@@ -100,54 +101,18 @@ async fn alias_disable_aliasing() {
     channel
         .exec(true, "tcp-alias")
         .await
-        .expect("shouldn't error synchronously for invalid tcp-alias option");
-    assert!(!session_one.is_closed(), "shouldn't have closed connection");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.await.unwrap() }).await else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
+        .expect("shouldn't error synchronously for exec");
     assert!(!session_one.is_closed(), "shouldn't have closed connection");
     assert!(
-        session_one
-            .tcpip_forward("test.foobar.tld", 80)
-            .await
-            .is_ok(),
-        "shouldn't have failed to bind HTTP"
-    );
-
-    // 3. Start SSH proxy that will fail to local forward
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
-        None,
-    )
-    .expect("Missing file key1");
-    let ssh_client = SshClientTwo;
-    let mut session_two = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
-    assert!(
-        session_two
-            .authenticate_publickey(
-                "user2",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-            )
-            .await
-            .expect("SSH authentication failed"),
-        "authentication didn't succeed"
-    );
-    assert!(
-        session_two
-            .channel_open_direct_tcpip("test.foobar.tld", 80, "127.0.0.1", 12345)
-            .await
-            .is_err(),
-        "shouldn't be allowed to alias HTTP"
+        session_one.tcpip_forward("some.address", 80).await.is_ok(),
+        "shouldn't have failed to create HTTP alias"
     );
 }
 
-struct SshClientOne(Option<oneshot::Sender<ChannelId>>);
+struct SshClient;
 
 #[async_trait]
-impl russh::client::Handler for SshClientOne {
+impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
     async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
@@ -174,27 +139,5 @@ impl russh::client::Handler for SshClientOne {
                 .expect("Invalid request");
         });
         Ok(())
-    }
-
-    async fn channel_failure(
-        &mut self,
-        channel: ChannelId,
-        _session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        if let Some(tx) = self.0.take() {
-            tx.send(channel).unwrap();
-        }
-        Ok(())
-    }
-}
-
-struct SshClientTwo;
-
-#[async_trait]
-impl russh::client::Handler for SshClientTwo {
-    type Error = anyhow::Error;
-
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
-        Ok(true)
     }
 }

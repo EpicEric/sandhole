@@ -55,6 +55,7 @@ impl io::Write for BufferedSender {
     }
 }
 
+#[derive(Clone, Copy)]
 enum Tab {
     Http,
     Ssh,
@@ -74,26 +75,24 @@ impl Tab {
 }
 
 struct TabData {
-    is_aliasing_disabled: bool,
-    current_tab: Tab,
+    tabs: Vec<Tab>,
+    current: usize,
 }
 
 impl TabData {
     // Render the tabs at the top of the table
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        Tabs::new(if self.is_aliasing_disabled {
-            vec![
-                Line::from("  HTTP  ".black().bg(Tab::Http.color())),
-                Line::from("  TCP  ".black().bg(Tab::Tcp.color())),
-            ]
-        } else {
-            vec![
-                Line::from("  HTTP  ".black().bg(Tab::Http.color())),
-                Line::from("  SSH  ".black().bg(Tab::Ssh.color())),
-                Line::from("  TCP  ".black().bg(Tab::Tcp.color())),
-                Line::from("  Alias  ".black().bg(Tab::Alias.color())),
-            ]
-        })
+        Tabs::new(
+            self.tabs
+                .iter()
+                .map(|tab| match tab {
+                    Tab::Http => Line::from("  HTTP  ".black().bg(Tab::Http.color())),
+                    Tab::Ssh => Line::from("  SSH  ".black().bg(Tab::Ssh.color())),
+                    Tab::Tcp => Line::from("  TCP  ".black().bg(Tab::Tcp.color())),
+                    Tab::Alias => Line::from("  Alias  ".black().bg(Tab::Alias.color())),
+                })
+                .collect::<Vec<_>>(),
+        )
         .select(self.index())
         .highlight_style(Style::new().bold())
         .divider(" ")
@@ -101,53 +100,26 @@ impl TabData {
     }
 
     fn index(&self) -> usize {
-        if self.is_aliasing_disabled {
-            match self.current_tab {
-                Tab::Http => 0,
-                Tab::Tcp => 1,
-                Tab::Ssh | Tab::Alias => unreachable!(),
-            }
-        } else {
-            match self.current_tab {
-                Tab::Http => 0,
-                Tab::Ssh => 1,
-                Tab::Tcp => 2,
-                Tab::Alias => 3,
-            }
-        }
+        self.current
+    }
+
+    fn current_tab(&self) -> Tab {
+        self.tabs[self.current]
     }
 
     fn previous(&mut self) {
-        if self.is_aliasing_disabled {
-            self.current_tab = match self.current_tab {
-                Tab::Http => Tab::Tcp,
-                Tab::Tcp => Tab::Http,
-                Tab::Ssh | Tab::Alias => unreachable!(),
-            }
+        if self.current == 0 {
+            self.current = self.tabs.len() - 1;
         } else {
-            self.current_tab = match self.current_tab {
-                Tab::Http => Tab::Alias,
-                Tab::Ssh => Tab::Http,
-                Tab::Tcp => Tab::Ssh,
-                Tab::Alias => Tab::Tcp,
-            };
+            self.current -= 1;
         }
     }
 
     fn next(&mut self) {
-        if self.is_aliasing_disabled {
-            self.current_tab = match self.current_tab {
-                Tab::Http => Tab::Tcp,
-                Tab::Tcp => Tab::Http,
-                Tab::Ssh | Tab::Alias => unreachable!(),
-            }
+        if self.current == self.tabs.len() - 1 {
+            self.current = 0;
         } else {
-            self.current_tab = match self.current_tab {
-                Tab::Http => Tab::Ssh,
-                Tab::Ssh => Tab::Tcp,
-                Tab::Tcp => Tab::Alias,
-                Tab::Alias => Tab::Http,
-            };
+            self.current += 1;
         }
     }
 }
@@ -222,7 +194,7 @@ impl AdminState {
             self.tab.render(tabs_area, buf);
             self.render_system_data(system_data_area, buf);
             Block::bordered()
-                .border_style(Style::new().fg(self.tab.current_tab.color()))
+                .border_style(Style::new().fg(self.tab.current_tab().color()))
                 .border_set(border::PROPORTIONAL_TALL)
                 .render(inner_area, buf);
             self.render_tab(inner_area.inner(Margin::new(2, 1)), buf);
@@ -347,8 +319,8 @@ impl AdminState {
 
     // Render the selected tab's contents
     fn render_tab(&mut self, area: Rect, buf: &mut Buffer) {
-        let color = self.tab.current_tab.color();
-        let table = match self.tab.current_tab {
+        let color = self.tab.current_tab().color();
+        let table = match self.tab.current_tab() {
             Tab::Http => {
                 // Get data for HTTP
                 let data = self.server.http_data.read().unwrap().clone();
@@ -570,15 +542,24 @@ impl AdminInterface {
         };
         // Create a channel to listen for user-generated events
         let (change_notifier, mut subscriber) = watch::channel(());
-        let is_aliasing_disabled = server.disable_aliasing;
+        let mut tabs = Vec::new();
+        if !server.disable_http {
+            tabs.push(Tab::Http);
+        }
+        if !server.disable_aliasing {
+            tabs.push(Tab::Ssh);
+        }
+        if !server.disable_tcp {
+            tabs.push(Tab::Tcp);
+        }
+        if !server.disable_aliasing {
+            tabs.push(Tab::Alias);
+        }
         let interface = Arc::new(Mutex::new(AdminTerminal {
             terminal: Terminal::with_options(backend, options).unwrap(),
             state: AdminState {
                 server,
-                tab: TabData {
-                    is_aliasing_disabled,
-                    current_tab: Tab::Http,
-                },
+                tab: TabData { tabs, current: 0 },
                 is_pty: false,
                 table_state: Default::default(),
                 vertical_scroll: Default::default(),
@@ -811,7 +792,7 @@ impl AdminInterface {
                 // No prompt, select from table
                 None => {
                     if let Some(row) = interface.state.table_state.selected() {
-                        let users: Option<Vec<String>> = match interface.state.tab.current_tab {
+                        let users: Option<Vec<String>> = match interface.state.tab.current_tab() {
                             Tab::Http => interface
                                 .state
                                 .server
