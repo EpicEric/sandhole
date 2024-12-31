@@ -4,6 +4,7 @@
 
 ### Added
 
+- Add key algorithm to user details in the admin interface.
 - Add `--disable-http` CLI flag.
 - Add `--disable-tcp` CLI flag.
 - Add `--random-subdomain-filter-profanities` CLI flag.
@@ -15,6 +16,8 @@
 
 - Separate TCP and alias logic.
 - Remove inaccesible tabs from admin interface when using one or more of the `--disable-*` flags.
+- Set nodelay for TCP streams.
+- Don't duplicate fingerprints logic.
 
 ## 0.3.0 (2024-12-28)
 

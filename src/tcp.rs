@@ -10,7 +10,7 @@ use crate::{
 use anyhow::Context;
 use async_trait::async_trait;
 use dashmap::DashMap;
-use log::{error, info};
+use log::{error, info, warn};
 use tokio::{io::copy_bidirectional, net::TcpListener, time::timeout};
 
 // Service that handles creating TCP sockets for reverse forwarding connections.
@@ -80,6 +80,9 @@ impl PortHandler for Arc<TcpHandler> {
                         if !ip_filter_clone.is_allowed(ip) {
                             info!("Rejecting TCP connection for {}: not allowed", ip);
                             continue;
+                        }
+                        if let Err(err) = stream.set_nodelay(true) {
+                            warn!("Error setting nodelay for {}: {}", address, err);
                         }
                         // Get the handler for this port
                         if let Some(handler) = clone.conn_manager.get(&port) {

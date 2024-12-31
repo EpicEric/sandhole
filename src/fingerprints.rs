@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     fs::remove_file,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, RwLock},
     time::Duration,
 };
@@ -9,7 +9,7 @@ use std::{
 use crate::{directory::watch_directory, droppable_handle::DroppableHandle, error::ServerError};
 use log::{error, warn};
 use notify::RecommendedWatcher;
-use ssh_key::{Fingerprint, HashAlg, PublicKey};
+use ssh_key::{Algorithm, Fingerprint, HashAlg, PublicKey};
 use tokio::{
     fs::{read_dir, read_to_string},
     sync::oneshot,
@@ -43,6 +43,8 @@ pub(crate) struct KeyData {
     pub(crate) file: PathBuf,
     // The key's comment.
     pub(crate) comment: String,
+    // The key's algorithm.
+    pub(crate) algorithm: Algorithm,
     // Authentication type associated with the key.
     pub(crate) auth: AuthenticationType,
 }
@@ -60,6 +62,57 @@ pub(crate) struct FingerprintsValidator {
     _admin_join_handle: DroppableHandle<()>,
     // Filesystem change watchers.
     _watchers: [RecommendedWatcher; 2],
+}
+
+// Helper function with duplicated functionality for user and admin keys
+async fn load_fingerprints_data(
+    directory: &Path,
+    fingerprints_data: &RwLock<BTreeMap<Fingerprint, KeyData>>,
+    auth: AuthenticationType,
+) {
+    let mut fingerprints_map = BTreeMap::new();
+    match read_dir(directory).await {
+        Ok(mut read_dir) => {
+            // For each file in the admin keys directory
+            while let Ok(Some(entry)) = read_dir.next_entry().await {
+                match read_to_string(entry.path()).await {
+                    Ok(data) => {
+                        fingerprints_map.extend(
+                            // Try to find a key for each line
+                            data.lines()
+                                .filter(|line| !line.trim().is_empty())
+                                .flat_map(|line| match PublicKey::from_openssh(line) {
+                                    Ok(key) => Some(key),
+                                    Err(err) => {
+                                        warn!("Unable to parse key in {:?}: {}", entry, err);
+                                        None
+                                    }
+                                })
+                                // Generate the SHA256 fingerprint and metadata for the given key
+                                .map(|key| {
+                                    (
+                                        key.fingerprint(HashAlg::Sha256),
+                                        KeyData {
+                                            file: entry.path(),
+                                            comment: key.comment().into(),
+                                            algorithm: key.algorithm(),
+                                            auth,
+                                        },
+                                    )
+                                }),
+                        );
+                    }
+                    Err(err) => {
+                        warn!("Unable to load key in {:?}: {}", entry.file_name(), err);
+                    }
+                }
+            }
+            *fingerprints_data.write().unwrap() = fingerprints_map;
+        }
+        Err(err) => {
+            error!("Unable to read keys directory {:?}: {}", &directory, err);
+        }
+    }
 }
 
 impl FingerprintsValidator {
@@ -91,57 +144,12 @@ impl FingerprintsValidator {
                 if user_rx.changed().await.is_err() {
                     break;
                 }
-                let mut user_set = BTreeMap::new();
-                match read_dir(user_keys_directory.as_path()).await {
-                    Ok(mut read_dir) => {
-                        // For each file in the user keys directory
-                        while let Ok(Some(entry)) = read_dir.next_entry().await {
-                            match read_to_string(entry.path()).await {
-                                Ok(data) => {
-                                    user_set.extend(
-                                        // Try to find a key for each line
-                                        data.lines()
-                                            .flat_map(|line| match PublicKey::from_openssh(line) {
-                                                Ok(key) => Some(key),
-                                                Err(err) => {
-                                                    warn!(
-                                                        "Unable to parse key in {:?} - {}",
-                                                        entry, err
-                                                    );
-                                                    None
-                                                }
-                                            })
-                                            // Generate the SHA256 fingerprint and metadata for the given key
-                                            .map(|key| {
-                                                (
-                                                    key.fingerprint(HashAlg::Sha256),
-                                                    KeyData {
-                                                        file: entry.path(),
-                                                        comment: key.comment().into(),
-                                                        auth: AuthenticationType::User,
-                                                    },
-                                                )
-                                            }),
-                                    );
-                                }
-                                Err(err) => {
-                                    warn!(
-                                        "Unable to load user key in {:?}: {}",
-                                        entry.file_name(),
-                                        err
-                                    );
-                                }
-                            }
-                        }
-                        *user_fingerprints_clone.write().unwrap() = user_set;
-                    }
-                    Err(err) => {
-                        error!(
-                            "Unable to read user keys directory {:?}: {}",
-                            &user_keys_directory, err
-                        );
-                    }
-                }
+                load_fingerprints_data(
+                    user_keys_directory.as_path(),
+                    &user_fingerprints_clone,
+                    AuthenticationType::User,
+                )
+                .await;
                 // Notify about initial keys population
                 if let Some(tx) = user_init_tx.take() {
                     let _ = tx.send(());
@@ -158,57 +166,12 @@ impl FingerprintsValidator {
                 if admin_rx.changed().await.is_err() {
                     break;
                 }
-                let mut admin_set = BTreeMap::new();
-                match read_dir(admin_keys_directory.as_path()).await {
-                    Ok(mut read_dir) => {
-                        // For each file in the admin keys directory
-                        while let Ok(Some(entry)) = read_dir.next_entry().await {
-                            match read_to_string(entry.path()).await {
-                                Ok(data) => {
-                                    admin_set.extend(
-                                        // Try to find a key for each line
-                                        data.lines()
-                                            .flat_map(|line| match PublicKey::from_openssh(line) {
-                                                Ok(key) => Some(key),
-                                                Err(err) => {
-                                                    warn!(
-                                                        "Unable to parse key in {:?} - {}",
-                                                        entry, err
-                                                    );
-                                                    None
-                                                }
-                                            })
-                                            // Generate the SHA256 fingerprint and metadata for the given key
-                                            .map(|key| {
-                                                (
-                                                    key.fingerprint(HashAlg::Sha256),
-                                                    KeyData {
-                                                        file: entry.path(),
-                                                        comment: key.comment().into(),
-                                                        auth: AuthenticationType::Admin,
-                                                    },
-                                                )
-                                            }),
-                                    );
-                                }
-                                Err(err) => {
-                                    warn!(
-                                        "Unable to load admin key in {:?}: {}",
-                                        entry.file_name(),
-                                        err
-                                    );
-                                }
-                            }
-                        }
-                        *admin_fingerprints_clone.write().unwrap() = admin_set;
-                    }
-                    Err(err) => {
-                        error!(
-                            "Unable to read admin keys directory {:?}: {}",
-                            &admin_keys_directory, err
-                        );
-                    }
-                }
+                load_fingerprints_data(
+                    admin_keys_directory.as_path(),
+                    &admin_fingerprints_clone,
+                    AuthenticationType::Admin,
+                )
+                .await;
                 // Notify about initial keys population
                 if let Some(tx) = admin_init_tx.take() {
                     let _ = tx.send(());
@@ -330,6 +293,82 @@ mod fingerprints_validator_tests {
         assert_eq!(
             validator.authenticate_fingerprint(&unknown_key.fingerprint(HashAlg::Sha256)),
             AuthenticationType::None
+        );
+    }
+
+    #[tokio::test]
+    async fn gets_data_for_fingerprints() {
+        let validator = FingerprintsValidator::watch(
+            USER_KEYS_DIRECTORY.parse().unwrap(),
+            ADMIN_KEYS_DIRECTORY.parse().unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let admin_key = parse_public_key_base64(
+            "AAAAC3NzaC1lZDI1NTE5AAAAIDpmDGLbC68yM87r+fD/aoEimDdnzZtmnZXCnxkIGHMq",
+        )
+        .unwrap();
+        let key_one = parse_public_key_base64(
+            "AAAAC3NzaC1lZDI1NTE5AAAAIMYVfXHTqf3/0W8ZQ/I8zmMirvmosV78n1qtYgVQX58W",
+        )
+        .unwrap();
+        let key_two =
+            parse_public_key_base64(
+                "AAAAB3NzaC1yc2EAAAADAQABAAABgQCUdw1f/va/ax8L/5qoZw37+76psjybsY7qNJMxOhwqKQ6fKiLu2xv+uFQxdEbNitXbcC8zZ2m98XzEPlNoY3DTqw5RAt2qZQMMXFLzDNHCpY6xT1DxLFTYxczXj9Xk4Ms7/RQP6pxLV5PIVc06HXBThCzcLMDdnl9n0jEWu1CwSGtsc87/Gvbnr3QrfrnK40IS7c5SIfbI5yN7pfnCEkRf637EGzc11Tq4e2/ujweETZ1C+KcJZapVVHTvFfITyOqLeqrgXgsMQUML48SfDUl/RsY4nk6aFKwK7f0oGzykqLTX0YHS1wxLOnPSkK33ohvtjvcUzA/eAmjUiQquJQ7DW6RPvW57lozzIxwFvO4O/j398r3W1de3R7Q3rmAwKbujFSJlZb4OvS1ZLS8md8TwCO1xwE+4aY3xvsmeHpfBcEjhTmEYEEY630hbiMgHsbH1M7uAZkbXUgw7R6cLPCndc4GiDOLN/bkKwa55evbOS1J1cD4pi5lUSnzZzk9lYrU="
+            ).unwrap();
+        let unknown_key = parse_public_key_base64(
+            "AAAAC3NzaC1lZDI1NTE5AAAAIFlIvi8Fw1QvxpkRuAMiBKGL84r2wlgxTj7iOzXWBeU4",
+        )
+        .unwrap();
+
+        let admin_key_data = validator
+            .get_data_for_fingerprint(&admin_key.fingerprint(HashAlg::Sha256))
+            .unwrap();
+        assert_eq!(admin_key_data.auth, AuthenticationType::Admin);
+        assert_eq!(admin_key_data.comment, "admin");
+        assert_eq!(admin_key_data.algorithm.as_str(), "ssh-ed25519");
+        assert_eq!(
+            admin_key_data.file.to_string_lossy(),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/data/admin_keys/admin.pub"
+            )
+        );
+
+        let user_one_key_data = validator
+            .get_data_for_fingerprint(&key_one.fingerprint(HashAlg::Sha256))
+            .unwrap();
+        assert_eq!(user_one_key_data.auth, AuthenticationType::User);
+        assert_eq!(user_one_key_data.comment, "key1");
+        assert_eq!(user_one_key_data.algorithm.as_str(), "ssh-ed25519");
+        assert_eq!(
+            user_one_key_data.file.to_string_lossy(),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/data/user_keys/keys_1_2.pub"
+            )
+        );
+
+        let user_two_key_data = validator
+            .get_data_for_fingerprint(&key_two.fingerprint(HashAlg::Sha256))
+            .unwrap();
+        assert_eq!(user_two_key_data.auth, AuthenticationType::User);
+        assert_eq!(user_two_key_data.comment, "key2");
+        assert_eq!(user_two_key_data.algorithm.as_str(), "ssh-rsa");
+        assert_eq!(
+            user_two_key_data.file.to_string_lossy(),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/data/user_keys/keys_1_2.pub"
+            )
+        );
+
+        assert!(
+            validator
+                .get_data_for_fingerprint(&unknown_key.fingerprint(HashAlg::Sha256))
+                .is_none(),
+            "shouldn't have data for unknown key"
         );
     }
 }

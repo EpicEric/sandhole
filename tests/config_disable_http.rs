@@ -111,6 +111,31 @@ async fn config_disable_http() {
         session_one.tcpip_forward("some.proxy", 90).await.is_ok(),
         "shouldn't have failed to bind alias"
     );
+
+    // 2. Start SSH client that manages to bind TCP
+    let key = load_secret_key(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        None,
+    )
+    .expect("Missing file key1");
+    let ssh_client = SshClient;
+    let mut session_two = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
+    assert!(
+        session_two
+            .authenticate_publickey(
+                "user1",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
+    assert!(
+        session_two.tcpip_forward("localhost", 12345).await.is_ok(),
+        "shouldn't have failed to bind TCP"
+    );
 }
 
 struct SshClient;

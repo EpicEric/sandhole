@@ -243,12 +243,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             .with_context(|| "Error creating admin keys directory")?;
     }
     // Listen on the user_keys and admin_keys directories for new SSH public keys.
-    let fingerprints = FingerprintsValidator::watch(
-        config.user_keys_directory.clone(),
-        config.admin_keys_directory.clone(),
-    )
-    .await
-    .with_context(|| "Error setting up public keys watcher")?;
+    let fingerprints =
+        FingerprintsValidator::watch(config.user_keys_directory, config.admin_keys_directory)
+            .await
+            .with_context(|| "Error setting up public keys watcher")?;
     // Initialize the login API service if a URL has been set.
     let api_login = config
         .password_authentication_url
@@ -281,12 +279,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     }
     // Listen on the certificates sub-directories for updates to Let's Encrypt certificates.
     let certificates = Arc::new(
-        CertificateResolver::watch(
-            config.certificates_directory.clone(),
-            RwLock::new(alpn_resolver),
-        )
-        .await
-        .with_context(|| "Error setting up certificates watcher")?,
+        CertificateResolver::watch(config.certificates_directory, RwLock::new(alpn_resolver))
+            .await
+            .with_context(|| "Error setting up certificates watcher")?,
     );
     // Initialize the IP address allowlist/blocklist service.
     let ip_filter = Arc::new(IpFilter::new(IpFilterConfig {
@@ -347,8 +342,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         };
     let addressing = Arc::new(AddressDelegator::new(AddressDelegatorData {
         resolver: DnsResolver::new(),
-        txt_record_prefix: config.txt_record_prefix.trim_matches('.').to_string(),
-        root_domain: config.domain.trim_matches('.').to_string(),
+        txt_record_prefix: config.txt_record_prefix,
+        root_domain: config.domain.clone(),
         bind_hostnames: config.bind_hostnames,
         force_random_subdomains: !config.allow_requested_subdomains,
         random_subdomain_seed: config.random_subdomain_seed,
@@ -567,6 +562,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     info!("Rejecting HTTP connection for {}: not allowed", ip);
                     continue;
                 }
+                if let Err(err) = stream.set_nodelay(true) {
+                    warn!("Error setting nodelay for {}: {}", address, err);
+                }
                 // Create a Hyper service and serve over the accepted TCP connection.
                 let service = service_fn(move |req: Request<Incoming>| {
                     proxy_handler(req, address, None, Arc::clone(&proxy_data))
@@ -628,6 +626,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 if !ip_filter_clone.is_allowed(ip) {
                     info!("Rejecting HTTPS connection for {}: not allowed", ip);
                     continue;
+                }
+                if let Err(err) = stream.set_nodelay(true) {
+                    warn!("Error setting nodelay for {}: {}", address, err);
                 }
                 if config.connect_ssh_on_https_port {
                     // Check if this is an SSH-2.0 handshake.
@@ -722,6 +723,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 if !ip_filter.is_allowed(ip) {
                     info!("Rejecting SSH connection for {}: not allowed", ip);
                     continue;
+                }
+                if let Err(err) = stream.set_nodelay(true) {
+                    warn!("Error setting nodelay for {}: {}", address, err);
                 }
                 handle_ssh_connection(stream, address, &ssh_config, &mut sandhole).await;
             }

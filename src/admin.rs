@@ -267,23 +267,27 @@ impl AdminState {
                             Line::from(vec![" <Esc> ".bold(), "Close ".into()]).centered()
                         },
                     );
-                    let (user_type, comment) = data
+                    let user_data = data
                         .as_ref()
                         // If fingerprint, get key data
                         .map(|(_, data)| {
-                            (
-                                format!("Type: {}", data.auth),
-                                format!("Key comment: {}", data.comment),
-                            )
+                            vec![
+                                Line::from(user.as_str()).centered(),
+                                Line::from(format!("Type: {}", data.auth)).centered(),
+                                Line::from(format!("Key comment: {}", data.comment)).centered(),
+                                Line::from(format!("Algorithm: {}", data.algorithm.as_str()))
+                                    .centered(),
+                            ]
                         })
                         // If not, get generic user data
-                        .unwrap_or(("Type: User".into(), "(authenticated with password)".into()));
-                    let text = Paragraph::new(vec![
-                        Line::from(user.as_str()).centered(),
-                        Line::from(user_type).centered(),
-                        Line::from(comment).centered(),
-                    ])
-                    .wrap(Wrap { trim: true });
+                        .unwrap_or_else(|| {
+                            vec![
+                                Line::from(user.as_str()).centered(),
+                                Line::from("Type: User").centered(),
+                                Line::from("(authenticated with password)").centered(),
+                            ]
+                        });
+                    let text = Paragraph::new(user_data).wrap(Wrap { trim: true });
                     Widget::render(block, area, buf);
                     Widget::render(text, inner, buf);
                 }

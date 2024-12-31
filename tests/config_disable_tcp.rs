@@ -68,11 +68,11 @@ async fn config_disable_tcp() {
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session_one = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(
-        session_one
+        session
             .authenticate_publickey(
                 "user1",
                 PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
@@ -82,23 +82,20 @@ async fn config_disable_tcp() {
         "authentication didn't succeed"
     );
     assert!(
-        session_one.tcpip_forward("localhost", 12345).await.is_err(),
+        session.tcpip_forward("localhost", 12345).await.is_err(),
         "should've failed to bind TCP"
     );
-    assert!(!session_one.is_closed(), "shouldn't have closed connection");
+    assert!(!session.is_closed(), "shouldn't have closed connection");
     assert!(
         TcpStream::connect("127.0.0.1:12345").await.is_err(),
         "shouldn't listen on TCP port"
     );
     assert!(
-        session_one
-            .tcpip_forward("test.foobar.tld", 80)
-            .await
-            .is_ok(),
+        session.tcpip_forward("test.foobar.tld", 80).await.is_ok(),
         "shouldn't have failed to bind HTTP"
     );
     assert!(
-        session_one.tcpip_forward("some.alias", 12345).await.is_ok(),
+        session.tcpip_forward("some.alias", 12345).await.is_ok(),
         "shouldn't have failed to bind alias"
     );
 }

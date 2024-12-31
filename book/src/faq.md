@@ -20,6 +20,14 @@ Host mysshserver.com
 	Port 2222
 ```
 
+## How do I enable Websockets?
+
+Websockets are always enabled for HTTP services.
+
+## How do I disable HTTP/TCP/aliasing?
+
+With the `--disable--http`, `--disable-tcp`, and `--disable-aliasing` [CLI flags](./cli.md) respectively. Note that you cannot disable all three at once.
+
 ## How do I prevent multiple services from load-balancing?
 
 With the `--load-balancing=deny` or `--load-balancing=replace` [CLI flag](./cli.md). This is currently a global setting.
@@ -28,10 +36,6 @@ With the `--load-balancing=deny` or `--load-balancing=replace` [CLI flag](./cli.
 
 With the `--force-https` [CLI flag](./cli.md). This is currently a global setting.
 
-## How do I enable Websockets?
+## How do I allow/block certain IP ranges?
 
-Websockets are always enabled for HTTP services.
-
-## How do I disable HTTP/TCP/aliasing?
-
-With the `--disable--http`, `--disable-tcp`, and `--disable-aliasing` [CLI flags](./cli.md) respectively. Note that you cannot disable all three at once.
+With the `--ip-allowlist` and `--ip-blocklist` [CLI flags](./cli.md) respectively. These are currently a global setting.
