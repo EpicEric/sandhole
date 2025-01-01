@@ -12,4 +12,4 @@ Then, simply run:
 docker compose up -d
 ```
 
-You should also re-run this command whenever you make changes to your configuration. See the [official Docker Compose documentation](https://docs.docker.com/compose/) for more information.
+You should also re-run this command whenever you make changes to your configuration and/or after you update to the latest image (`docker compose pull`). See the [official Docker Compose documentation](https://docs.docker.com/compose/) for more information.
