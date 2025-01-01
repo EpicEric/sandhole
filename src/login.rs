@@ -2,7 +2,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Context;
 use http::{
-    header::{CONTENT_TYPE, HOST},
+    header::{CONTENT_TYPE, HOST, USER_AGENT},
     uri::Scheme,
     Request,
 };
@@ -103,6 +103,10 @@ impl ApiLogin {
             .method("POST")
             .uri(&self.url)
             .header(HOST, &self.host)
+            .header(
+                USER_AGENT,
+                concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")),
+            )
             .header(CONTENT_TYPE, "application/json; charset=UTF-8")
             .body(serde_json::to_string(data).unwrap())
             .expect("Invalid request");
