@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Run rustfmt
         run: |
           rustup component add rustfmt
@@ -26,6 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Run Clippy
         run: |
           rustup component add clippy
@@ -35,6 +39,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Run tests
         run: |
           rustup toolchain install ${RUST_MSRV}-x86_64-unknown-linux-gnu
@@ -45,6 +51,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Run tests
         run: |
           cargo test --verbose
+  build:
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    needs:
+      - rustfmt
+      - clippy
+      - build-msrv
+      - tests
+    uses: ./.github/workflows/build.yml
+    secrets: inherit

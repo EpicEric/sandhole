@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add User-Agent to login API requests
+
 ## 0.3.1 (2024-12-31)
 
 ### Added

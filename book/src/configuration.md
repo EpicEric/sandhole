@@ -38,7 +38,7 @@ Otherwise, if you wish the subdomains to still be random, but persist between re
 
 In some scenarios, it makes more sense to authenticate users dynamically with a password, rather than manually adding public keys to a directory.
 
-For such use cases, you can provide a URL to `--password-authentication-url`. This should be running an HTTP service which accepts a POST request with a JSON body containing the user's credentials, and returns 2xx on successful authentication. This is what the JSON payload looks like:
+For such use cases, you can provide a URL to `--password-authentication-url`. This should be running an HTTP or HTTPS service which accepts a POST request with a JSON body containing the user's credentials, and returns 2xx on successful authentication. This is what the JSON payload looks like:
 
 ```json
 {
