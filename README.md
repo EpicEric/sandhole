@@ -1,6 +1,7 @@
 # sandhole
 
 [![GitHub Actions workflow status](https://img.shields.io/github/actions/workflow/status/EpicEric/sandhole/validate.yml?label=tests)](https://github.com/EpicEric/sandhole/actions/workflows/validate.yml)
+[![Codecov](https://img.shields.io/codecov/c/github/EpicEric/sandhole)](https://app.codecov.io/github/EpicEric/sandhole)
 [![crates.io version](https://img.shields.io/crates/v/sandhole)](https://crates.io/crates/sandhole)
 [![GitHub license](https://img.shields.io/github/license/EpicEric/sandhole)](https://github.com/EpicEric/sandhole/blob/main/LICENSE)
 
