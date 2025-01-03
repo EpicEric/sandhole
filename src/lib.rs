@@ -44,10 +44,10 @@ use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
     pin,
-    sync::watch,
     time::sleep,
 };
 use tokio_rustls::LazyConfigAcceptor;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     acme::AcmeResolver,
@@ -109,7 +109,7 @@ struct SystemData {
 }
 
 // A list of sessions and their cancelation channels.
-type SessionMap = HashMap<usize, watch::Sender<()>>;
+type SessionMap = HashMap<usize, CancellationToken>;
 // A generic table with data for the admin interface.
 type DataTable<K, V> = Arc<RwLock<BTreeMap<K, V>>>;
 // HTTP proxy data used by the local forwarding aliasing connections.
@@ -753,9 +753,9 @@ async fn handle_ssh_connection(
     server: &mut Arc<SandholeServer>,
 ) {
     let config = Arc::clone(config);
-    let (tx, mut rx) = watch::channel(());
+    let cancellation_token = CancellationToken::new();
     // Create a new SSH handler.
-    let handler = server.new_client(address, tx);
+    let handler = server.new_client(address, cancellation_token.clone());
     tokio::spawn(async move {
         let mut session = match russh::server::run_stream(config, stream, handler).await {
             Ok(session) => session,
@@ -770,7 +770,7 @@ async fn handle_ssh_connection(
                     warn!("Connection with {} closed with error: {}", address, err);
                 }
             }
-            Ok(_) = rx.changed() => {
+            _ = cancellation_token.cancelled() => {
                 info!("Disconnecting client {}...", address);
                 let _ = session.handle().disconnect(russh::Disconnect::ByApplication, "".into(), "English".into()).await;
             },

@@ -149,6 +149,10 @@ async fn https_bind_all_hostnames() {
     )
     .expect("Invalid response body");
     assert_eq!(response_body, "Hello from test.foobar.tld!");
+    session
+        .cancel_tcpip_forward("foobar.tld", 80)
+        .await
+        .expect("cancel_tcpip_forward failed");
 }
 
 struct SshClient;

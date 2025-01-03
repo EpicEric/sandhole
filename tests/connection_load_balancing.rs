@@ -83,7 +83,7 @@ async fn connection_load_balancing() {
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
         None,
     )
-    .expect("Missing file key1");
+    .expect("Missing file key2");
     let ssh_client_b = SshClientB;
     let mut session_b = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client_b)
         .await

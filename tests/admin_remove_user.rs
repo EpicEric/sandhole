@@ -305,6 +305,7 @@ async fn admin_remove_user() {
             r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
             r"Type: User",
             r"Key comment: key1",
+            r"Algorithm: ssh-ed25519",
             r" <Esc> Close  <Delete> Remove ",
         ]
         .into_iter()

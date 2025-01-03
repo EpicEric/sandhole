@@ -276,7 +276,62 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4f. Quit the admin interface with Ctrl-C (ETX)
+        // 4f. View user details
+        writer
+            .write(&b"\x1b[A"[..])
+            .await
+            .expect("channel write failed");
+        // Wait for table state to update via render
+        sleep(Duration::from_millis(200)).await;
+        writer
+            .write(&b"\r"[..])
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"User details",
+            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"Type: User",
+            r"Key comment: key1",
+            r"Algorithm: ssh-ed25519",
+            r" <Esc> Close  <Delete> Remove ",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 4g. Close user details
+        writer
+            .write(&b"\x1b"[..])
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"System information",
+            r"  CPU%  ",
+            r" Memory ",
+            r"   TX   ",
+            r"   RX   ",
+            r"TCP services",
+            r"23456",
+            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"127.0.0.1:\d{4,5}",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 4g. Quit the admin interface with Ctrl-C (ETX)
         writer
             .write(&b"\x03"[..])
             .await

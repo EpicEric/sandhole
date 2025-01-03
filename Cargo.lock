@@ -3487,6 +3487,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-stream",
  "tokio-tungstenite 0.25.0",
+ "tokio-util",
  "tower",
  "trie-rs",
  "vt100-ctt",

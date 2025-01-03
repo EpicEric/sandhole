@@ -747,8 +747,8 @@ impl AdminInterface {
                             .unwrap()
                             .remove(&fingerprint)
                         {
-                            sessions.values().for_each(|tx| {
-                                let _ = tx.send(());
+                            sessions.values().for_each(|cancellation_token| {
+                                cancellation_token.cancel();
                             });
                         }
                     } else if let Some(sessions) = interface
@@ -759,8 +759,8 @@ impl AdminInterface {
                         .unwrap()
                         .remove(&user)
                     {
-                        sessions.values().for_each(|tx| {
-                            let _ = tx.send(());
+                        sessions.values().for_each(|cancellation_token| {
+                            cancellation_token.cancel();
                         });
                     }
                     interface.state.prompt = Some(AdminPrompt::Infobox(text));

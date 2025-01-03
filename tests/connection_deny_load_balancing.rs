@@ -2,21 +2,20 @@ use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use clap::Parser;
-use rand::rngs::OsRng;
 use russh::{
     client::{Msg, Session},
     Channel,
 };
 use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
+use ssh_key::HashAlg;
 use tokio::{
-    io::AsyncReadExt,
     net::TcpStream,
     time::{sleep, timeout},
 };
 
 #[tokio::test(flavor = "multi_thread")]
-async fn tcp_allow_requested_ports() {
+async fn connection_deny_load_balancing() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -37,7 +36,8 @@ async fn tcp_allow_requested_ports() {
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
-        "--bind-hostnames=none",
+        "--load-balancing=deny",
+        "--allow-requested-subdomains",
         "--allow-requested-ports",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
@@ -55,73 +55,85 @@ async fn tcp_allow_requested_ports() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied
-    let key = load_secret_key(
+    // 2. Start SSH client that will take resources
+    let key_1 = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
-    let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+    let ssh_client_a = SshClient;
+    let mut session_a = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client_a)
         .await
         .expect("Failed to connect to SSH server");
     assert!(
-        session
+        session_a
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(Arc::new(key_1), None).unwrap()
             )
             .await
             .expect("SSH authentication failed"),
         "authentication didn't succeed"
     );
-    session
-        .tcpip_forward("foobar.tld", 12345)
+    session_a
+        .tcpip_forward("http.foobar.tld", 80)
+        .await
+        .expect("tcpip_forward failed");
+    session_a
+        .tcpip_forward("ssh.foobar.tld", 22)
+        .await
+        .expect("tcpip_forward failed");
+    session_a
+        .tcpip_forward("localhost", 12345)
+        .await
+        .expect("tcpip_forward failed");
+    session_a
+        .tcpip_forward("alias.foobar.tld", 42)
         .await
         .expect("tcpip_forward failed");
 
-    // 3. Connect to the TCP port of our proxy
-    let mut tcp_stream = TcpStream::connect("127.0.0.1:12345")
+    // 3. Start SSH client that will be denied forwardings
+    let key_2 = load_secret_key(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
+        None,
+    )
+    .expect("Missing file key2");
+    let ssh_client_b = SshClient;
+    let mut session_b = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client_b)
         .await
-        .expect("TCP connection failed");
-    let mut buf = [0u8; 13];
-    tcp_stream.read(&mut buf).await.unwrap();
-    assert_eq!(&buf, b"Hello, world!");
-
-    // 4. Local-forward the TCP port
-    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
-    let ssh_client = SshClient;
-    let mut client_session =
-        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-            .await
-            .expect("Failed to connect to SSH server");
+        .expect("Failed to connect to SSH server");
     assert!(
-        client_session
+        session_b
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(Arc::new(key_2), Some(HashAlg::Sha512)).unwrap()
             )
             .await
             .expect("SSH authentication failed"),
         "authentication didn't succeed"
     );
-    let mut channel = client_session
-        .channel_open_direct_tcpip("", 12345, "::1", 23456)
-        .await
-        .expect("Local forwarding failed");
-    if timeout(Duration::from_secs(5), async {
-        match &mut channel.wait().await.unwrap() {
-            russh::ChannelMsg::Data { data } => {
-                assert_eq!(data.to_vec(), b"Hello, world!");
-            }
-            msg => panic!("Unexpected message {:?}", msg),
-        }
-    })
-    .await
-    .is_err()
-    {
-        panic!("Timeout waiting for proxy server to reply.")
-    };
+    assert!(
+        session_b
+            .tcpip_forward("http.foobar.tld", 80)
+            .await
+            .is_err(),
+        "tcpip_forward should've failed for HTTP"
+    );
+    assert!(
+        session_b.tcpip_forward("ssh.foobar.tld", 22).await.is_err(),
+        "tcpip_forward should've failed for SSH"
+    );
+    assert!(
+        session_b.tcpip_forward("localhost", 12345).await.is_err(),
+        "tcpip_forward should've failed for TCP"
+    );
+    assert!(
+        session_b
+            .tcpip_forward("alias.foobar.tld", 42)
+            .await
+            .is_err(),
+        "tcpip_forward should've failed for alias"
+    );
 }
 
 struct SshClient;
@@ -143,7 +155,7 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        channel.data(&b"Hello, world!"[..]).await.unwrap();
+        channel.data(&b"Data"[..]).await.unwrap();
         channel.eof().await.unwrap();
         Ok(())
     }

@@ -39,9 +39,10 @@ use russh_keys::PublicKey;
 use ssh_key::{Fingerprint, HashAlg};
 use tokio::{
     io::{copy_bidirectional, AsyncWriteExt},
-    sync::{mpsc, watch, Mutex, RwLock},
+    sync::{mpsc, Mutex, RwLock},
     time::{sleep, timeout},
 };
+use tokio_util::sync::CancellationToken;
 
 type FingerprintFn = dyn Fn(Option<&Fingerprint>) -> bool + Send + Sync;
 
@@ -244,7 +245,7 @@ pub(crate) struct ServerHandler {
     // The fingerprint of the public key from authentication (may be missing).
     key_fingerprint: Option<Fingerprint>,
     // Channel to communicate that this connection must be closed.
-    cancelation_tx: watch::Sender<()>,
+    cancellation_token: CancellationToken,
     // User-specific data, set after authentication.
     auth_data: AuthenticatedData,
     // Sender for data session messages, used for sending logs and TUI state to the client.
@@ -259,7 +260,7 @@ pub(crate) trait Server {
     fn new_client(
         &mut self,
         peer_address: SocketAddr,
-        cancelation_tx: watch::Sender<()>,
+        cancellation_token: CancellationToken,
     ) -> ServerHandler;
 }
 
@@ -268,7 +269,7 @@ impl Server for Arc<SandholeServer> {
     fn new_client(
         &mut self,
         peer_address: SocketAddr,
-        cancelation_tx: watch::Sender<()>,
+        cancellation_token: CancellationToken,
     ) -> ServerHandler {
         let id = self.session_id.fetch_add(1, Ordering::AcqRel);
         info!("{} connected", peer_address);
@@ -278,7 +279,7 @@ impl Server for Arc<SandholeServer> {
             peer: peer_address,
             user: None,
             key_fingerprint: None,
-            cancelation_tx,
+            cancellation_token,
             auth_data: AuthenticatedData::None {
                 proxy_count: Arc::new(AtomicUsize::new(0)),
             },
@@ -353,7 +354,7 @@ impl Handler for ServerHandler {
                         .unwrap()
                         .entry(user.into())
                         .or_default()
-                        .insert(self.id, self.cancelation_tx.clone());
+                        .insert(self.id, self.cancellation_token.clone());
                     self.user = Some(user.into());
                     // Add user data, identifying its tokens by the username.
                     self.auth_data = AuthenticatedData::User {
@@ -403,12 +404,12 @@ impl Handler for ServerHandler {
                 } else {
                     // Start timer for user to do local port forwarding.
                     // Otherwise, the connection will be canceled upon expiration
-                    let cancelation_tx = self.cancelation_tx.clone();
+                    let cancellation_token = self.cancellation_token.clone();
                     let timeout = self.server.idle_connection_timeout;
                     *self.timeout_handle.lock().await =
                         Some(DroppableHandle(tokio::spawn(async move {
                             sleep(timeout).await;
-                            let _ = cancelation_tx.send(());
+                            cancellation_token.cancel();
                         })));
                 }
             }
@@ -420,7 +421,7 @@ impl Handler for ServerHandler {
                     .unwrap()
                     .entry(fingerprint)
                     .or_default()
-                    .insert(self.id, self.cancelation_tx.clone());
+                    .insert(self.id, self.cancellation_token.clone());
                 // Add user data, identifying its tokens by the public key.
                 self.auth_data = AuthenticatedData::User {
                     user_data: Box::new(UserData::new(TokenHolder::User(
@@ -454,7 +455,7 @@ impl Handler for ServerHandler {
     ) -> Result<(), Self::Error> {
         // Ctrl+C (0x03) ends the session and disconnects the client
         if data == b"\x03" {
-            let _ = self.cancelation_tx.send(());
+            self.cancellation_token.cancel();
             return Ok(());
         }
         debug!("received data {:?}", data);
@@ -581,7 +582,7 @@ impl Handler for ServerHandler {
                         self.tx
                             .send(b"Cannot convert TCP port(s) into aliases\r\n".to_vec());
                         success = false;
-                        let _ = self.cancelation_tx.send(());
+                        self.cancellation_token.cancel();
                         break;
                     }
                     // Change any existing HTTP handlers into TCP alias handlers.
@@ -598,7 +599,7 @@ impl Handler for ServerHandler {
                                 .into_bytes(),
                             );
                             success = false;
-                            let _ = self.cancelation_tx.send(());
+                            self.cancellation_token.cancel();
                             break;
                         }
                         // Insert our handler into the TCP alias connections map.
@@ -620,7 +621,7 @@ impl Handler for ServerHandler {
                                 .into_bytes(),
                             );
                             success = false;
-                            let _ = self.cancelation_tx.send(());
+                            self.cancellation_token.cancel();
                             break;
                         }
                     }
@@ -651,7 +652,7 @@ impl Handler for ServerHandler {
                         self.tx
                             .send(b"Cannot convert TCP port(s) into aliases\r\n".to_vec());
                         success = false;
-                        let _ = self.cancelation_tx.send(());
+                        self.cancellation_token.cancel();
                         break;
                     }
                     // Change any existing HTTP handlers into TCP alias handlers.
@@ -668,7 +669,7 @@ impl Handler for ServerHandler {
                                 .into_bytes(),
                             );
                             success = false;
-                            let _ = self.cancelation_tx.send(());
+                            self.cancellation_token.cancel();
                             break;
                         }
                         // Insert our handler into the TCP alias connections map.
@@ -690,7 +691,7 @@ impl Handler for ServerHandler {
                                 .into_bytes(),
                             );
                             success = false;
-                            let _ = self.cancelation_tx.send(());
+                            self.cancellation_token.cancel();
                             break;
                         }
                     }
@@ -793,7 +794,7 @@ impl Handler for ServerHandler {
                 if admin_data.admin_interface.is_some() {
                     self.tx
                         .send(b"Cannot remote forward if admin interface is being used".to_vec());
-                    let _ = self.cancelation_tx.send(());
+                    self.cancellation_token.cancel();
                     return Ok(false);
                 } else {
                     admin_data.is_forwarding = true;
@@ -1359,7 +1360,7 @@ impl Handler for ServerHandler {
             if admin_data.admin_interface.is_some() {
                 self.tx
                     .send(b"Cannot local forward if admin interface is being used".to_vec());
-                let _ = self.cancelation_tx.send(());
+                self.cancellation_token.cancel();
                 return Ok(false);
             } else {
                 admin_data.is_forwarding = true;
@@ -1386,7 +1387,7 @@ impl Handler for ServerHandler {
                     let proxy_count = Arc::clone(proxy_count);
                     let timeout_handle = Arc::clone(&self.timeout_handle);
                     let unproxied_connection_timeout = self.server.unproxied_connection_timeout;
-                    let cancelation_tx = self.cancelation_tx.clone();
+                    let cancellation_token = self.cancellation_token.clone();
                     tokio::spawn(async move {
                         let server = auto::Builder::new(TokioExecutor::new());
                         let conn = server.serve_connection_with_upgrades(io, service);
@@ -1395,7 +1396,7 @@ impl Handler for ServerHandler {
                             *timeout_handle.lock().await =
                                 Some(DroppableHandle(tokio::spawn(async move {
                                     sleep(unproxied_connection_timeout).await;
-                                    let _ = cancelation_tx.send(());
+                                    cancellation_token.cancel();
                                 })));
                         }
                     });
@@ -1443,7 +1444,7 @@ impl Handler for ServerHandler {
                             let timeout_handle = Arc::clone(&self.timeout_handle);
                             let unproxied_connection_timeout =
                                 self.server.unproxied_connection_timeout;
-                            let cancelation_tx = self.cancelation_tx.clone();
+                            let cancellation_token = self.cancellation_token.clone();
                             let tcp_connection_timeout = self.server.tcp_connection_timeout;
                             tokio::spawn(async move {
                                 let mut stream = channel.into_stream();
@@ -1462,7 +1463,7 @@ impl Handler for ServerHandler {
                                     *timeout_handle.lock().await =
                                         Some(DroppableHandle(tokio::spawn(async move {
                                             sleep(unproxied_connection_timeout).await;
-                                            let _ = cancelation_tx.send(());
+                                            cancellation_token.cancel();
                                         })));
                                 }
                             });
@@ -1530,7 +1531,7 @@ impl Handler for ServerHandler {
                             let timeout_handle = Arc::clone(&self.timeout_handle);
                             let unproxied_connection_timeout =
                                 self.server.unproxied_connection_timeout;
-                            let cancelation_tx = self.cancelation_tx.clone();
+                            let cancellation_token = self.cancellation_token.clone();
                             let tcp_connection_timeout = self.server.tcp_connection_timeout;
                             tokio::spawn(async move {
                                 let mut stream = channel.into_stream();
@@ -1549,7 +1550,7 @@ impl Handler for ServerHandler {
                                     *timeout_handle.lock().await =
                                         Some(DroppableHandle(tokio::spawn(async move {
                                             sleep(unproxied_connection_timeout).await;
-                                            let _ = cancelation_tx.send(());
+                                            cancellation_token.cancel();
                                         })));
                                 }
                             });
@@ -1616,7 +1617,7 @@ impl Handler for ServerHandler {
                         let proxy_count = Arc::clone(proxy_count);
                         let timeout_handle = Arc::clone(&self.timeout_handle);
                         let unproxied_connection_timeout = self.server.unproxied_connection_timeout;
-                        let cancelation_tx = self.cancelation_tx.clone();
+                        let cancellation_token = self.cancellation_token.clone();
                         let tcp_connection_timeout = self.server.tcp_connection_timeout;
                         tokio::spawn(async move {
                             let mut stream = channel.into_stream();
@@ -1635,7 +1636,7 @@ impl Handler for ServerHandler {
                                 *timeout_handle.lock().await =
                                     Some(DroppableHandle(tokio::spawn(async move {
                                         sleep(unproxied_connection_timeout).await;
-                                        let _ = cancelation_tx.send(());
+                                        cancellation_token.cancel();
                                     })));
                             }
                         });

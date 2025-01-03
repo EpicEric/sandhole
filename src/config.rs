@@ -48,7 +48,7 @@ pub enum LoadBalancing {
 
 // CLI configuration for Sandhole.
 #[doc(hidden)]
-#[derive(Debug, Parser)]
+#[derive(Debug, Parser, PartialEq)]
 #[command(version, about, long_about = None)]
 pub struct ApplicationConfig {
     /// The root domain of the application.
@@ -100,7 +100,7 @@ pub struct ApplicationConfig {
     /// Note that this setting ignores the --disable-directory-creation flag.
     #[arg(
         long,
-        default_value_os = "./deploy/acme_cache",
+        default_value_os = "./deploy/acme_cache/",
         value_name = "DIRECTORY"
     )]
     pub acme_cache_directory: PathBuf,
@@ -316,5 +316,158 @@ fn validate_txt_record_prefix(value: &str) -> Result<String, String> {
         Err("prefix cannot contain period".into())
     } else {
         Ok(value.to_string())
+    }
+}
+
+#[cfg(test)]
+mod application_config_tests {
+    use std::str::FromStr;
+
+    use clap::Parser;
+    use humantime::Duration;
+    use ipnet::IpNet;
+
+    use super::{ApplicationConfig, BindHostnames, LoadBalancing, RandomSubdomainSeed};
+
+    #[test]
+    fn parses_minimal_args() {
+        let config = ApplicationConfig::parse_from(["sandhole", "--domain=foobar.tld"]);
+        assert_eq!(
+            config,
+            ApplicationConfig {
+                domain: "foobar.tld".into(),
+                domain_redirect: "https://github.com/EpicEric/sandhole".into(),
+                user_keys_directory: "./deploy/user_keys/".into(),
+                admin_keys_directory: "./deploy/admin_keys/".into(),
+                certificates_directory: "./deploy/certificates/".into(),
+                acme_cache_directory: "./deploy/acme_cache/".into(),
+                private_key_file: "./deploy/server_keys/ssh".into(),
+                disable_directory_creation: false,
+                listen_address: "::".into(),
+                ssh_port: 2222.try_into().unwrap(),
+                http_port: 80.try_into().unwrap(),
+                https_port: 443.try_into().unwrap(),
+                connect_ssh_on_https_port: false,
+                force_https: false,
+                disable_http_logs: false,
+                disable_tcp_logs: false,
+                acme_contact_email: None,
+                acme_use_staging: false,
+                password_authentication_url: None,
+                bind_hostnames: BindHostnames::Txt,
+                load_balancing: LoadBalancing::Allow,
+                txt_record_prefix: "_sandhole".into(),
+                allow_requested_subdomains: false,
+                allow_requested_ports: false,
+                disable_http: false,
+                disable_tcp: false,
+                disable_aliasing: false,
+                quota_per_user: None,
+                random_subdomain_seed: None,
+                random_subdomain_length: 6.try_into().unwrap(),
+                random_subdomain_filter_profanities: false,
+                requested_domain_filter_profanities: false,
+                ip_allowlist: None,
+                ip_blocklist: None,
+                idle_connection_timeout: Duration::from_str("2s").unwrap(),
+                unproxied_connection_timeout: None,
+                authentication_request_timeout: Duration::from_str("5s").unwrap(),
+                http_request_timeout: Duration::from_str("10s").unwrap(),
+                tcp_connection_timeout: None
+            }
+        )
+    }
+
+    #[test]
+    fn parses_full_args() {
+        let config = ApplicationConfig::parse_from([
+            "sandhole",
+            "--domain=server.com",
+            "--domain-redirect=https://sandhole.eric.dev.br",
+            "--user-keys-directory=/etc/user_keys/",
+            "--admin-keys-directory=/etc/admin_keys/",
+            "--certificates-directory=/etc/certificates/",
+            "--acme-cache-directory=/etc/acme_cache/",
+            "--private-key-file=/etc/private_key.pem",
+            "--disable-directory-creation",
+            "--listen-address=127.0.0.1",
+            "--ssh-port=18022",
+            "--http-port=18080",
+            "--https-port=18443",
+            "--connect-ssh-on-https-port",
+            "--force-https",
+            "--disable-http-logs",
+            "--disable-tcp-logs",
+            "--acme-contact-email=admin@server.com",
+            "--acme-use-staging",
+            "--password-authentication-url=https://auth.server.com/validate",
+            "--bind-hostnames=cname",
+            "--load-balancing=replace",
+            "--txt-record-prefix=_prefix",
+            "--allow-requested-subdomains",
+            "--allow-requested-ports",
+            "--disable-http",
+            "--disable-tcp",
+            "--disable-aliasing",
+            "--quota-per-user=10",
+            "--random-subdomain-seed=ip-and-user",
+            "--random-subdomain-length=8",
+            "--random-subdomain-filter-profanities",
+            "--requested-domain-filter-profanities",
+            "--ip-allowlist=10.0.0.0/8",
+            "--ip-blocklist=10.1.0.0/16,10.2.0.0/16",
+            "--idle-connection-timeout=3s",
+            "--unproxied-connection-timeout=4s",
+            "--authentication-request-timeout=6s",
+            "--http-request-timeout=11s",
+            "--tcp-connection-timeout=30s",
+        ]);
+        assert_eq!(
+            config,
+            ApplicationConfig {
+                domain: "server.com".into(),
+                domain_redirect: "https://sandhole.eric.dev.br".into(),
+                user_keys_directory: "/etc/user_keys/".into(),
+                admin_keys_directory: "/etc/admin_keys/".into(),
+                certificates_directory: "/etc/certificates/".into(),
+                acme_cache_directory: "/etc/acme_cache/".into(),
+                private_key_file: "/etc/private_key.pem".into(),
+                disable_directory_creation: true,
+                listen_address: "127.0.0.1".into(),
+                ssh_port: 18022.try_into().unwrap(),
+                http_port: 18080.try_into().unwrap(),
+                https_port: 18443.try_into().unwrap(),
+                connect_ssh_on_https_port: true,
+                force_https: true,
+                disable_http_logs: true,
+                disable_tcp_logs: true,
+                acme_contact_email: Some("admin@server.com".into()),
+                acme_use_staging: true,
+                password_authentication_url: Some("https://auth.server.com/validate".into()),
+                bind_hostnames: BindHostnames::Cname,
+                load_balancing: LoadBalancing::Replace,
+                txt_record_prefix: "_prefix".into(),
+                allow_requested_subdomains: true,
+                allow_requested_ports: true,
+                disable_http: true,
+                disable_tcp: true,
+                disable_aliasing: true,
+                quota_per_user: Some(10.try_into().unwrap()),
+                random_subdomain_seed: Some(RandomSubdomainSeed::IpAndUser),
+                random_subdomain_length: 8.try_into().unwrap(),
+                random_subdomain_filter_profanities: true,
+                requested_domain_filter_profanities: true,
+                ip_allowlist: Some(vec![IpNet::from_str("10.0.0.0/8").unwrap()]),
+                ip_blocklist: Some(vec![
+                    IpNet::from_str("10.1.0.0/16").unwrap(),
+                    IpNet::from_str("10.2.0.0/16").unwrap()
+                ]),
+                idle_connection_timeout: Duration::from_str("3s").unwrap(),
+                unproxied_connection_timeout: Some(Duration::from_str("4s").unwrap()),
+                authentication_request_timeout: Duration::from_str("6s").unwrap(),
+                http_request_timeout: Duration::from_str("11s").unwrap(),
+                tcp_connection_timeout: Some(Duration::from_str("30s").unwrap())
+            }
+        )
     }
 }

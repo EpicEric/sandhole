@@ -17,7 +17,7 @@ use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
-    sync::oneshot,
+    sync::mpsc,
     time::{sleep, timeout},
 };
 use tower::Service;
@@ -68,8 +68,8 @@ async fn config_disable_aliasing() {
         None,
     )
     .expect("Missing file key1");
-    let (tx, rx) = oneshot::channel();
-    let ssh_client = SshClientOne(Some(tx));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let ssh_client = SshClientOne(tx);
     let mut session_one = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
@@ -102,7 +102,24 @@ async fn config_disable_aliasing() {
         .await
         .expect("shouldn't error synchronously for invalid tcp-alias option");
     assert!(!session_one.is_closed(), "shouldn't have closed connection");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.await.unwrap() }).await else {
+    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+    else {
+        panic!("Timeout waiting for server to reply.");
+    };
+    assert_eq!(channel_id, channel.id());
+    assert!(!session_one.is_closed(), "shouldn't have closed connection");
+    channel
+        .exec(
+            true,
+            "allowed-fingerprints=\
+            SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ,\
+            SHA256:eDZoeAWBWd+SO64PPW1VBrdlBxYM4OEywSkGlIy0Kro",
+        )
+        .await
+        .expect("shouldn't error synchronously for invalid tcp-alias option");
+    assert!(!session_one.is_closed(), "shouldn't have closed connection");
+    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+    else {
         panic!("Timeout waiting for server to reply.");
     };
     assert_eq!(channel_id, channel.id());
@@ -148,7 +165,7 @@ async fn config_disable_aliasing() {
     );
 }
 
-struct SshClientOne(Option<oneshot::Sender<ChannelId>>);
+struct SshClientOne(mpsc::UnboundedSender<ChannelId>);
 
 #[async_trait]
 impl russh::client::Handler for SshClientOne {
@@ -185,9 +202,7 @@ impl russh::client::Handler for SshClientOne {
         channel: ChannelId,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        if let Some(tx) = self.0.take() {
-            tx.send(channel).unwrap();
-        }
+        self.0.send(channel).unwrap();
         Ok(())
     }
 }

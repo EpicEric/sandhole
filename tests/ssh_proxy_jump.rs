@@ -66,11 +66,11 @@ async fn ssh_proxy_jump() {
     )
     .expect("Missing file key1");
     let ssh_client = SshClient { server: Honeypot };
-    let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+    let mut session_one = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(
-        session
+        session_one
             .authenticate_publickey(
                 "user",
                 PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
@@ -79,7 +79,7 @@ async fn ssh_proxy_jump() {
             .expect("SSH authentication failed"),
         "authentication didn't succeed"
     );
-    session
+    session_one
         .tcpip_forward("test.foobar.tld", 22)
         .await
         .expect("tcpip_forward failed");
@@ -87,11 +87,11 @@ async fn ssh_proxy_jump() {
     // 3. Connect to the SSH port of our proxy
     let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = ProxyClient;
-    let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+    let mut session_two = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(
-        session
+        session_two
             .authenticate_publickey(
                 "user",
                 PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
@@ -100,7 +100,7 @@ async fn ssh_proxy_jump() {
             .expect("SSH authentication failed"),
         "authentication didn't succeed"
     );
-    let channel = session
+    let channel = session_two
         .channel_open_direct_tcpip("test.foobar.tld", 18022, "::1", 12345)
         .await
         .expect("Local forwarding failed");
@@ -133,6 +133,10 @@ async fn ssh_proxy_jump() {
     {
         panic!("Timeout waiting for proxy server to reply.")
     };
+    session_one
+        .cancel_tcpip_forward("test.foobar.tld", 22)
+        .await
+        .expect("cancel_tcpip_forward failed");
 }
 
 struct SshClient {

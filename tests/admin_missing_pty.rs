@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use clap::Parser;
-use rand::rngs::OsRng;
+use regex::Regex;
 use russh::{
     client::{self, Msg, Session},
     Channel,
@@ -10,17 +10,14 @@ use russh::{
 use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
+    io::AsyncWriteExt,
     net::TcpStream,
+    sync::mpsc,
     time::{sleep, timeout},
 };
 
-/// In order for tunneling to work, Sandhole must allow any public key to connect.
-/// However, unauthorized users should have much more restricted access, only being allowed
-/// to request local port forwarding (as of this version).
-///
-/// This test ensures that any other actions result in an error with a disconnect.
 #[tokio::test(flavor = "multi_thread")]
-async fn alias_require_allowed_fingerprints() {
+async fn admin_missing_pty() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -41,7 +38,7 @@ async fn alias_require_allowed_fingerprints() {
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
-        "--bind-hostnames=none",
+        "--bind-hostnames=all",
         "--allow-requested-ports",
         "--idle-connection-timeout=800ms",
         "--authentication-request-timeout=5s",
@@ -59,7 +56,7 @@ async fn alias_require_allowed_fingerprints() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied via alias for specific fingerprints
+    // 2. Start SSH client that will be proxied
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
@@ -80,31 +77,30 @@ async fn alias_require_allowed_fingerprints() {
         "authentication didn't succeed"
     );
     session
-        .tcpip_forward("proxy.hostname", 12345)
+        .tcpip_forward("http.aaa", 443)
         .await
         .expect("tcpip_forward failed");
-    let channel = session
-        .channel_open_session()
+    session
+        .tcpip_forward("ssh.bbb", 22)
         .await
-        .expect("channel_open_session_failed");
-    channel
-        .exec(
-            false,
-            // key1 and admin
-            "allowed-fingerprints=\
-            SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ,\
-            SHA256:eDZoeAWBWd+SO64PPW1VBrdlBxYM4OEywSkGlIy0Kro,\
-            invalid_is_ignored",
-        )
+        .expect("tcpip_forward failed");
+    session
+        .tcpip_forward("proxy.ccc", 12345)
         .await
-        .expect("exec failed");
+        .expect("tcpip_forward failed");
+    session
+        .tcpip_forward("", 23456)
+        .await
+        .expect("tcpip_forward failed");
+    // Required for updating the admin interface data
+    sleep(Duration::from_secs(3)).await;
 
-    // 3a. Local-forward with valid key
+    // 3. Request admin pty
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/admin"),
         None,
     )
-    .expect("Missing file key1");
+    .expect("Missing file admin");
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -120,50 +116,64 @@ async fn alias_require_allowed_fingerprints() {
         "authentication didn't succeed"
     );
     let mut channel = session
-        .channel_open_direct_tcpip("proxy.hostname", 12345, "my.hostname", 23456)
+        .channel_open_session()
         .await
-        .expect("channel_open_direct_tcpip failed");
-    if timeout(Duration::from_secs(5), async {
-        match channel.wait().await.unwrap() {
-            russh::ChannelMsg::Data { data } => {
-                assert_eq!(data.to_vec(), b"Hello, some of the world!");
+        .expect("channel_open_session failed");
+    channel
+        .exec(false, "admin")
+        .await
+        .expect("exec admin failed");
+
+    // 4. Interact with the admin interface and verify displayed data
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut writer = channel.make_writer();
+    let jh = tokio::spawn(async move {
+        let mut parser = vt100_ctt::Parser::new(30, 140, 0);
+        let mut screen = Vec::new();
+        while let Some(msg) = channel.wait().await {
+            match msg {
+                russh::ChannelMsg::Data { data } => {
+                    parser.process(&data);
+                    let new_screen = parser.screen();
+                    let contents_formatted = new_screen.contents_formatted();
+                    if contents_formatted != screen {
+                        screen = contents_formatted;
+                        tx.send(new_screen.contents()).unwrap();
+                    }
+                }
+                _ => break,
             }
-            msg => panic!("Unexpected message {:?}", msg),
         }
+    });
+    if timeout(Duration::from_secs(1), async move {
+        // 4a. Validate header, system information, and HTTP tab data
+        let search_strings: Vec<Regex> = [
+            r#"PTY not detected! Make sure to connect with "ssh -t \.\.\. admin" instead\."#,
+            r"Press Ctrl-C to close this connection\.",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 4f. Quit the admin interface with Ctrl-C (ETX)
+        writer
+            .write(&b"\x03"[..])
+            .await
+            .expect("channel write failed");
     })
     .await
     .is_err()
     {
-        panic!("Timeout waiting for server to reply.")
-    };
-
-    // 3b. Try to local-forward with invalid key
-    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
-    let ssh_client = SshClient;
-    let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
-    assert!(
-        session
-            .authenticate_publickey(
-                "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-            )
-            .await
-            .expect("SSH authentication failed"),
-        "authentication didn't succeed"
-    );
-    assert!(
-        session
-            .channel_open_direct_tcpip("proxy.hostname", 12345, "my.hostname", 23456)
-            .await
-            .is_err(),
-        "shouldn't be able to connect to restricted tunnel"
-    );
-    assert!(
-        session.is_closed(),
-        "didn't close connection for unauthenticated session"
-    );
+        panic!("Timed out waiting for admin interface.");
+    }
+    sleep(Duration::from_millis(200)).await;
+    assert!(session.is_closed(), "session didn't close properly");
+    jh.abort();
 }
 
 struct SshClient;
@@ -185,10 +195,7 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        channel
-            .data(&b"Hello, some of the world!"[..])
-            .await
-            .unwrap();
+        channel.data(&b"Hello, world!"[..]).await.unwrap();
         channel.eof().await.unwrap();
         Ok(())
     }
