@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Run tests
+      - name: Build
         run: |
           rustup toolchain install ${RUST_MSRV}-x86_64-unknown-linux-gnu
           rustup override set ${RUST_MSRV}-x86_64-unknown-linux-gnu
@@ -53,9 +53,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Run tests
+      - name: Test
         run: |
-          cargo test --verbose
+          cargo install cargo-llvm-cov
+          cargo llvm-cov --verbose --codecov --output-path codecov.json
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./codecov.json
+          token: ${{ secrets.CODECOV_TOKEN }}
   build:
     if: github.ref == 'refs/heads/main'
     permissions:
