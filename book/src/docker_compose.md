@@ -4,7 +4,7 @@ The most straightforward way to have Sandhole up and running is with Docker Comp
 
 For this, you'll first need to install [Docker Engine](https://docs.docker.com/engine/install/) on your server.
 
-An example configuration is provided in the repository's [docker-compose-example](https://github.com/EpicEric/sandhole/tree/main/docker-compose-example) directory, using `server.com` as the example domain and Hetzner as the DNS provider for DNS-01 challenges. Adjust the `compose.yml` and `le-config.yml` files as necessary.
+An example configuration is provided in the repository's [docker-compose-example](https://github.com/EpicEric/sandhole/tree/main/docker-compose-example) directory, using `sandhole.com` as the example domain and Hetzner as the DNS provider for DNS-01 challenges. Adjust the `compose.yml` and `le-config.yml` files as necessary.
 
 Then, simply run:
 

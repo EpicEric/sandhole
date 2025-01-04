@@ -84,7 +84,7 @@ async fn ssh_proxy_jump() {
         .await
         .expect("tcpip_forward failed");
 
-    // 3. Connect to the SSH port of our proxy
+    // 3. Connect to the SSH port of our proxy with anonymous user
     let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = ProxyClient;
     let mut session_two = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
@@ -93,7 +93,7 @@ async fn ssh_proxy_jump() {
     assert!(
         session_two
             .authenticate_publickey(
-                "user",
+                "user1",
                 PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
             )
             .await
@@ -133,6 +133,62 @@ async fn ssh_proxy_jump() {
     {
         panic!("Timeout waiting for proxy server to reply.")
     };
+
+    // 3. Connect to the SSH port of our proxy with known user
+    let key = load_secret_key(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
+        None,
+    )
+    .expect("Missing file key2");
+    let ssh_client = ProxyClient;
+    let mut session_two = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
+    assert!(
+        session_two
+            .authenticate_publickey(
+                "user2",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
+    let channel = session_two
+        .channel_open_direct_tcpip("test.foobar.tld", 18022, "::1", 12345)
+        .await
+        .expect("Local forwarding failed");
+    let fake_socket = channel.into_stream();
+    let new_ssh_client = ProxyClient;
+    let mut proxy_session = client::connect_stream(Default::default(), fake_socket, new_ssh_client)
+        .await
+        .expect("Failed to connect to proxied SSH server");
+    assert!(
+        proxy_session
+            .authenticate_password("user", "password")
+            .await
+            .expect("Proxy SSH authentication failed"),
+        "authentication didn't succeed"
+    );
+    let mut session_channel = proxy_session
+        .channel_open_session()
+        .await
+        .expect("Failed to open session to proxied SSH server");
+    if timeout(Duration::from_secs(5), async {
+        match session_channel.wait().await.unwrap() {
+            russh::ChannelMsg::Data { data } => {
+                assert_eq!(data.to_vec(), b"Hello, world!");
+            }
+            msg => panic!("Unexpected message {:?}", msg),
+        }
+    })
+    .await
+    .is_err()
+    {
+        panic!("Timeout waiting for proxy server to reply.")
+    };
+
+    // 5. Attempt to close SSH aliasing
     session_one
         .cancel_tcpip_forward("test.foobar.tld", 22)
         .await

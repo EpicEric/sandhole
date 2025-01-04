@@ -62,11 +62,11 @@ async fn tcp_allow_requested_ports() {
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+    let mut session_one = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(
-        session
+        session_one
             .authenticate_publickey(
                 "user",
                 PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
@@ -75,7 +75,7 @@ async fn tcp_allow_requested_ports() {
             .expect("SSH authentication failed"),
         "authentication didn't succeed"
     );
-    session
+    session_one
         .tcpip_forward("foobar.tld", 12345)
         .await
         .expect("tcpip_forward failed");
@@ -88,15 +88,14 @@ async fn tcp_allow_requested_ports() {
     tcp_stream.read(&mut buf).await.unwrap();
     assert_eq!(&buf, b"Hello, world!");
 
-    // 4. Local-forward the TCP port
+    // 4. Local-forward the TCP port for random user
     let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
-    let mut client_session =
-        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-            .await
-            .expect("Failed to connect to SSH server");
+    let mut session_two = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
     assert!(
-        client_session
+        session_two
             .authenticate_publickey(
                 "user",
                 PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
@@ -105,7 +104,7 @@ async fn tcp_allow_requested_ports() {
             .expect("SSH authentication failed"),
         "authentication didn't succeed"
     );
-    let mut channel = client_session
+    let mut channel = session_two
         .channel_open_direct_tcpip("", 12345, "::1", 23456)
         .await
         .expect("Local forwarding failed");
@@ -122,6 +121,51 @@ async fn tcp_allow_requested_ports() {
     {
         panic!("Timeout waiting for proxy server to reply.")
     };
+
+    // 4. Local-forward the TCP port for known user
+    let key = load_secret_key(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
+        None,
+    )
+    .expect("Missing file key2");
+    let ssh_client = SshClient;
+    let mut session_three =
+        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+            .await
+            .expect("Failed to connect to SSH server");
+    assert!(
+        session_three
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "authentication didn't succeed"
+    );
+    let mut channel = session_three
+        .channel_open_direct_tcpip("", 12345, "::1", 23456)
+        .await
+        .expect("Local forwarding failed");
+    if timeout(Duration::from_secs(5), async {
+        match &mut channel.wait().await.unwrap() {
+            russh::ChannelMsg::Data { data } => {
+                assert_eq!(data.to_vec(), b"Hello, world!");
+            }
+            msg => panic!("Unexpected message {:?}", msg),
+        }
+    })
+    .await
+    .is_err()
+    {
+        panic!("Timeout waiting for proxy server to reply.")
+    };
+
+    // 5. Attempt to close TCP forwarding
+    session_one
+        .cancel_tcpip_forward("foobar.tld", 12345)
+        .await
+        .expect("cancel_tcpip_forward failed");
 }
 
 struct SshClient;

@@ -1,10 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use axum::{routing::get, Router};
+use axum::{extract::Request, routing::get, Router};
 use clap::Parser;
-use http::{Request, StatusCode};
-use hyper::{body::Incoming, service::service_fn};
+use hyper::{body::Incoming, service::service_fn, StatusCode};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
@@ -22,11 +21,12 @@ use tokio::{
 use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn config_disable_http() {
+async fn http_redirects() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
+        "--domain-redirect=https://sandhole.eric.dev.br",
         "--user-keys-directory",
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
         "--admin-keys-directory",
@@ -42,9 +42,9 @@ async fn config_disable_http() {
         "--ssh-port=18022",
         "--http-port=18080",
         "--https-port=18443",
+        "--force-https",
         "--acme-use-staging",
-        "--bind-hostnames=none",
-        "--disable-http",
+        "--bind-hostnames=all",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
@@ -60,95 +60,98 @@ async fn config_disable_http() {
     {
         panic!("Timeout waiting for Sandhole to start.")
     };
-    assert!(
-        TcpStream::connect("127.0.0.1:18080").await.is_err(),
-        "shouldn't listen on HTTP port"
-    );
-    assert!(
-        TcpStream::connect("127.0.0.1:18443").await.is_err(),
-        "shouldn't listen on HTTPS port"
-    );
 
-    // 2. Start SSH client that will fail to bind HTTP
+    // 2. Start SSH client that will be proxied
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session_one = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(
-        session_one
+        session
             .authenticate_publickey(
-                "user1",
+                "user",
                 PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
             )
             .await
             .expect("SSH authentication failed"),
         "authentication didn't succeed"
     );
-    assert!(
-        session_one.tcpip_forward("some.address", 80).await.is_err(),
-        "should've failed to bind HTTP"
-    );
-    assert!(!session_one.is_closed(), "shouldn't have closed connection");
-    let channel = session_one
-        .channel_open_session()
+    session
+        .tcpip_forward("test.foobar.tld", 80)
         .await
-        .expect("channel_open_session_failed");
-    channel
-        .exec(true, "tcp-alias")
+        .expect("tcpip_forward failed");
+
+    // 3. Connect to the HTTP port of our proxy and check redirect for main domain
+    let tcp_stream = TcpStream::connect("127.0.0.1:18080")
         .await
-        .expect("shouldn't error synchronously for exec");
-    assert!(!session_one.is_closed(), "shouldn't have closed connection");
-    assert!(
-        session_one.tcpip_forward("some.address", 80).await.is_ok(),
-        "shouldn't have failed to create HTTP alias"
-    );
-    assert!(
-        session_one.tcpip_forward("some.proxy", 90).await.is_ok(),
-        "shouldn't have failed to bind alias"
-    );
-    assert!(
-        session_one
-            .cancel_tcpip_forward("some.address", 80)
+        .expect("TCP connection failed");
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream))
+        .await
+        .expect("HTTP handshake failed");
+    tokio::spawn(async move {
+        if let Err(err) = conn.await {
+            eprintln!("Connection failed: {:?}", err);
+        }
+    });
+    let request = Request::builder()
+        .method("GET")
+        .uri("/")
+        .header("host", "foobar.tld")
+        .body(http_body_util::Empty::<bytes::Bytes>::new())
+        .unwrap();
+    let Ok(response) = timeout(Duration::from_secs(5), async move {
+        sender
+            .send_request(request)
             .await
-            .is_ok(),
-        "shouldn't have failed to cancel HTTP alias"
-    );
-    assert!(
-        session_one
-            .cancel_tcpip_forward("some.proxy", 90)
-            .await
-            .is_ok(),
-        "shouldn't have failed to cancel alias"
+            .expect("Error sending HTTP request")
+    })
+    .await
+    else {
+        panic!("Timeout waiting for request to finish.");
+    };
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response.headers().get("location"),
+        Some(&"https://sandhole.eric.dev.br".try_into().unwrap())
     );
 
-    // 2. Start SSH client that manages to bind TCP
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
-        None,
-    )
-    .expect("Missing file key1");
-    let ssh_client = SshClient;
-    let mut session_two = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+    // 4. Connect to the HTTP port of our proxy and check redirect to HTTPS
+    let tcp_stream = TcpStream::connect("127.0.0.1:18080")
         .await
-        .expect("Failed to connect to SSH server");
-    assert!(
-        session_two
-            .authenticate_publickey(
-                "user1",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-            )
+        .expect("TCP connection failed");
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream))
+        .await
+        .expect("HTTP handshake failed");
+    tokio::spawn(async move {
+        if let Err(err) = conn.await {
+            eprintln!("Connection failed: {:?}", err);
+        }
+    });
+    let request = Request::builder()
+        .method("GET")
+        .uri("/example")
+        .header("host", "test.foobar.tld")
+        .body(http_body_util::Empty::<bytes::Bytes>::new())
+        .unwrap();
+    let Ok(response) = timeout(Duration::from_secs(5), async move {
+        sender
+            .send_request(request)
             .await
-            .expect("SSH authentication failed"),
-        "authentication didn't succeed"
-    );
-    assert!(
-        session_two.tcpip_forward("localhost", 12345).await.is_ok(),
-        "shouldn't have failed to bind TCP"
+            .expect("Error sending HTTP request")
+    })
+    .await
+    else {
+        panic!("Timeout waiting for request to finish.");
+    };
+    assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(
+        response.headers().get("location"),
+        Some(&"https://test.foobar.tld:18443/example".try_into().unwrap())
     );
 }
 
@@ -172,7 +175,10 @@ impl russh::client::Handler for SshClient {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let router = Router::new()
-            .route("/", get(|| async move { StatusCode::NO_CONTENT }))
+            .route(
+                "/",
+                get(|| async move { format!("This is only accessible via HTTPS!") }),
+            )
             .into_service();
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {

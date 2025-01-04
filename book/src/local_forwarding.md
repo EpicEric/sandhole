@@ -5,7 +5,7 @@ In addition to remote port forwarding, Sandhole also supports local port forward
 Given a remote service running as
 
 ```bash
-ssh -R my.tunnel:3000:localhost:2000 server.com -p 2222
+ssh -R my.tunnel:3000:localhost:2000 sandhole.com -p 2222
 ```
 
 Note that the server won't listen on port 3000; instead, you can establish a local forward to the port from your machine:
@@ -23,7 +23,7 @@ Local forwarding is always enabled for SSH hosts, and is conditionally enabled f
 To enable local forwarding for HTTP hosts, pass either the `tcp-alias` or [the `allowed-fingerprints`](#restricting-access-to-local-forwardings) command to the remote forwarding command as follows:
 
 ```bash
-ssh -R my.tunnel:80:localhost:8080 server.com -p 2222 tcp-alias
+ssh -R my.tunnel:80:localhost:8080 sandhole.com -p 2222 tcp-alias
 ```
 
 ## Restricting access to local forwardings
@@ -31,7 +31,7 @@ ssh -R my.tunnel:80:localhost:8080 server.com -p 2222 tcp-alias
 If you'd like to restrict which users can access your service, you can provide the allowed fingerprints as a comma-separated list at the end of the command, like so:
 
 ```bash
-ssh -R my.tunnel:3000:localhost:2000 server.com -p 2222 allowed-fingerprints=SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ,SHA256:bwf4FDtNeZzFv8xHBzHJwRpDRxssCll8w2tCHFC9n1o
+ssh -R my.tunnel:3000:localhost:2000 sandhole.com -p 2222 allowed-fingerprints=SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ,SHA256:bwf4FDtNeZzFv8xHBzHJwRpDRxssCll8w2tCHFC9n1o
 ```
 
 ## Disabling local forwarding

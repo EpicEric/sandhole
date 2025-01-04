@@ -979,12 +979,13 @@ impl Handler for ServerHandler {
                         );
                         self.tx.send(
                             format!(
-                                "Cannot listen to HTTP on http://{}{} ({})\r\n",
+                                "Cannot listen to HTTP on http://{}{} for {} ({})\r\n",
                                 &assigned_host,
                                 match self.server.http_port {
                                     80 => "".into(),
                                     port => format!(":{}", port),
                                 },
+                                address,
                                 err,
                             )
                             .into_bytes(),
@@ -995,23 +996,25 @@ impl Handler for ServerHandler {
                         info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
                         self.tx.send(
                             format!(
-                                "Serving HTTP on http://{}{}\r\n",
-                                address,
+                                "Serving HTTP on http://{}{} for {}\r\n",
+                                &assigned_host,
                                 match self.server.http_port {
                                     80 => "".into(),
                                     port => format!(":{}", port),
-                                }
+                                },
+                                address,
                             )
                             .into_bytes(),
                         );
                         self.tx.send(
                             format!(
-                                "Serving HTTPS on https://{}{}\r\n",
+                                "Serving HTTPS on https://{}{} for {}\r\n",
                                 &assigned_host,
                                 match self.server.https_port {
                                     443 => "".into(),
                                     port => format!(":{}", port),
-                                }
+                                },
+                                address,
                             )
                             .into_bytes(),
                         );
@@ -1179,7 +1182,7 @@ impl Handler for ServerHandler {
                 } else {
                     *port as u16
                 };
-                // Add handler to TCP connection map
+                // Add handler to alias connection map
                 if let Err(err) = self.server.alias.insert(
                     TcpAlias(address.to_string(), assigned_port),
                     self.peer,

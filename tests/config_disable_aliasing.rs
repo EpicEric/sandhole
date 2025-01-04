@@ -9,6 +9,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
+use rand::rngs::OsRng;
 use russh::{
     client::{Msg, Session},
     Channel, ChannelId,
@@ -162,6 +163,24 @@ async fn config_disable_aliasing() {
             .await
             .is_err(),
         "shouldn't be allowed to alias HTTP"
+    );
+
+    // 4. Reject anonymous users if aliasing is disabled
+    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
+    let ssh_client = SshClientTwo;
+    let mut session_three =
+        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+            .await
+            .expect("Failed to connect to SSH server");
+    assert!(
+        !session_three
+            .authenticate_publickey(
+                "user3",
+                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+            )
+            .await
+            .expect("SSH authentication failed"),
+        "mustn't authenticate anonymously if aliasing is disabled"
     );
 }
 

@@ -5,9 +5,9 @@ Sandhole comes with a command-line admin interface available through SSH, which 
 To access it, simply run the command:
 
 ```bash
-ssh -t server.com -p 2222 admin
+ssh -t sandhole.com -p 2222 admin
 ```
 
-where `server.com` is your hostname and `2222` is Sandhole's SSH port.
+where `sandhole.com` is your hostname and `2222` is Sandhole's SSH port.
 
 ![A terminal screenshot showing the "Sandhole admin" interface, displaying the HTTP services currently running.](./admin_interface.png)
