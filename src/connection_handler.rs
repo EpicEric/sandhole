@@ -4,6 +4,10 @@ use mockall::automock;
 use ssh_key::Fingerprint;
 use tokio::sync::mpsc;
 
+pub(crate) struct ConnectionHttpData {
+    pub(crate) redirect_http_to_https_port: Option<u16>,
+}
+
 // Trait for creating tunneling or aliasing channels (via an underlying SSH session).
 #[cfg_attr(test, automock)]
 #[async_trait]
@@ -21,4 +25,6 @@ pub(crate) trait ConnectionHandler<T: Sync> {
         port: u16,
         fingerprint: Option<&'a Fingerprint>,
     ) -> anyhow::Result<T>;
+
+    async fn http_data(&self) -> Option<ConnectionHttpData>;
 }

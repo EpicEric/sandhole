@@ -11,7 +11,7 @@ use std::{
 
 use crate::{
     admin::AdminInterface,
-    connection_handler::ConnectionHandler,
+    connection_handler::{ConnectionHandler, ConnectionHttpData},
     droppable_handle::DroppableHandle,
     error::ServerError,
     fingerprints::AuthenticationType,
@@ -53,6 +53,8 @@ type FingerprintFn = dyn Fn(Option<&Fingerprint>) -> bool + Send + Sync;
 pub(crate) struct SshTunnelHandler {
     // Closure to verify valid fingerprints for local forwardings. Default is to allow all.
     allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
+    // Port to redirect HTTP requests to. Default is to not redirect.
+    redirect_http_to_https_port: Arc<RwLock<Option<u16>>>,
     // Handle to the SSH connection, in order to create remote forwarding channels.
     handle: russh::server::Handle,
     // Sender to the opened data session, if any, for logging.
@@ -63,26 +65,6 @@ pub(crate) struct SshTunnelHandler {
     address: String,
     // Port used for the remote forwarding, required for the client to open the correct session channels.
     port: u32,
-}
-
-impl SshTunnelHandler {
-    pub(crate) fn new(
-        allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
-        handle: russh::server::Handle,
-        tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
-        peer: SocketAddr,
-        address: String,
-        port: u32,
-    ) -> Self {
-        SshTunnelHandler {
-            allow_fingerprint,
-            handle,
-            address,
-            peer,
-            port,
-            tx,
-        }
-    }
 }
 
 impl Drop for SshTunnelHandler {
@@ -134,12 +116,20 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
             Err(ServerError::FingerprintDenied.into())
         }
     }
+
+    async fn http_data(&self) -> Option<ConnectionHttpData> {
+        Some(ConnectionHttpData {
+            redirect_http_to_https_port: *self.redirect_http_to_https_port.read().await,
+        })
+    }
 }
 
 // Data shared by user and admin SSH sessions,
 struct UserData {
     // Closure to verify valid fingerprints for local forwardings. Default is to allow all.
     allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
+    // Port to redirect HTTP requests to. Default is to not redirect.
+    redirect_http_to_https_port: Arc<RwLock<Option<u16>>>,
     // Whether this session only has aliases, from the `tcp-alias`` or `allowed-fingerprints`` option(s).
     tcp_alias_only: bool,
     // Identifier for the user, used for creating quota tokens.
@@ -156,6 +146,7 @@ impl UserData {
     fn new(quota_key: TokenHolder) -> Self {
         Self {
             allow_fingerprint: Arc::new(RwLock::new(Box::new(|_| true))),
+            redirect_http_to_https_port: Arc::new(RwLock::new(None)),
             tcp_alias_only: false,
             quota_key,
             host_addressing: Default::default(),
@@ -696,6 +687,15 @@ impl Handler for ServerHandler {
                         }
                     }
                 }
+                // - `force-https` causes tunneled HTTP requests to be redirected to HTTPS.
+                (
+                    "force-https",
+                    AuthenticatedData::User { user_data, .. }
+                    | AuthenticatedData::Admin { user_data, .. },
+                ) => {
+                    *user_data.redirect_http_to_https_port.write().await =
+                        Some(self.server.https_port);
+                }
                 // - Unknown command
                 (command, _) => {
                     debug!(
@@ -828,14 +828,17 @@ impl Handler for ServerHandler {
                     address.to_string(),
                     self.peer,
                     user_data.quota_key.clone(),
-                    Arc::new(SshTunnelHandler::new(
-                        Arc::clone(&user_data.allow_fingerprint),
+                    Arc::new(SshTunnelHandler {
+                        allow_fingerprint: Arc::clone(&user_data.allow_fingerprint),
+                        redirect_http_to_https_port: Arc::clone(
+                            &user_data.redirect_http_to_https_port,
+                        ),
                         handle,
-                        self.tx.clone_inner(),
-                        self.peer,
-                        address.to_string(),
-                        *port,
-                    )),
+                        tx: self.tx.clone_inner(),
+                        peer: self.peer,
+                        address: address.to_string(),
+                        port: *port,
+                    }),
                 ) {
                     // Adding to connection map failed.
                     info!("Rejecting SSH for {} ({}) - {}", address, self.peer, err);
@@ -898,14 +901,17 @@ impl Handler for ServerHandler {
                         TcpAlias(address.into(), 80),
                         self.peer,
                         user_data.quota_key.clone(),
-                        Arc::new(SshTunnelHandler::new(
-                            Arc::clone(&user_data.allow_fingerprint),
+                        Arc::new(SshTunnelHandler {
+                            allow_fingerprint: Arc::clone(&user_data.allow_fingerprint),
+                            redirect_http_to_https_port: Arc::clone(
+                                &user_data.redirect_http_to_https_port,
+                            ),
                             handle,
-                            self.tx.clone_inner(),
-                            self.peer,
-                            address.into(),
-                            *port,
-                        )),
+                            tx: self.tx.clone_inner(),
+                            peer: self.peer,
+                            address: address.into(),
+                            port: *port,
+                        }),
                     ) {
                         // Adding to connection map failed.
                         info!(
@@ -963,14 +969,17 @@ impl Handler for ServerHandler {
                         assigned_host.clone(),
                         self.peer,
                         user_data.quota_key.clone(),
-                        Arc::new(SshTunnelHandler::new(
-                            Arc::clone(&user_data.allow_fingerprint),
+                        Arc::new(SshTunnelHandler {
+                            allow_fingerprint: Arc::clone(&user_data.allow_fingerprint),
+                            redirect_http_to_https_port: Arc::clone(
+                                &user_data.redirect_http_to_https_port,
+                            ),
                             handle,
-                            self.tx.clone_inner(),
-                            self.peer,
-                            address.to_string(),
-                            *port,
-                        )),
+                            tx: self.tx.clone_inner(),
+                            peer: self.peer,
+                            address: address.to_string(),
+                            port: *port,
+                        }),
                     ) {
                         // Adding to connection map failed.
                         info!(
@@ -1115,14 +1124,17 @@ impl Handler for ServerHandler {
                         assigned_port,
                         self.peer,
                         user_data.quota_key.clone(),
-                        Arc::new(SshTunnelHandler::new(
-                            Arc::clone(&user_data.allow_fingerprint),
+                        Arc::new(SshTunnelHandler {
+                            allow_fingerprint: Arc::clone(&user_data.allow_fingerprint),
+                            redirect_http_to_https_port: Arc::clone(
+                                &user_data.redirect_http_to_https_port,
+                            ),
                             handle,
-                            self.tx.clone_inner(),
-                            self.peer,
-                            address.to_string(),
-                            *port,
-                        )),
+                            tx: self.tx.clone_inner(),
+                            peer: self.peer,
+                            address: address.to_string(),
+                            port: *port,
+                        }),
                     ) {
                         // Adding to connection map failed.
                         info!(
@@ -1187,14 +1199,17 @@ impl Handler for ServerHandler {
                     TcpAlias(address.to_string(), assigned_port),
                     self.peer,
                     user_data.quota_key.clone(),
-                    Arc::new(SshTunnelHandler::new(
-                        Arc::clone(&user_data.allow_fingerprint),
+                    Arc::new(SshTunnelHandler {
+                        allow_fingerprint: Arc::clone(&user_data.allow_fingerprint),
+                        redirect_http_to_https_port: Arc::clone(
+                            &user_data.redirect_http_to_https_port,
+                        ),
                         handle,
-                        self.tx.clone_inner(),
-                        self.peer,
-                        address.to_string(),
-                        *port,
-                    )),
+                        tx: self.tx.clone_inner(),
+                        peer: self.peer,
+                        address: address.to_string(),
+                        port: *port,
+                    }),
                 ) {
                     // Adding to connection map failed.
                     info!(

@@ -5,6 +5,7 @@
 ### Added
 
 - Add User-Agent to login API requests
+- Add `force-https` option for remote forwarding connections.
 
 ## 0.3.1 (2024-12-31)
 

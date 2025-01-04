@@ -1,16 +1,16 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use axum::{routing::get, Router};
+use axum::{extract::Request, routing::get, Router};
 use clap::Parser;
-use http::{Request, StatusCode};
-use hyper::{body::Incoming, service::service_fn};
+use http_body_util::BodyExt;
+use hyper::{body::Incoming, service::service_fn, StatusCode};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
 use russh::{
-    client::{self, Msg, Session},
+    client::{Msg, Session},
     Channel,
 };
 use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
@@ -21,13 +21,8 @@ use tokio::{
 };
 use tower::Service;
 
-/// In order for tunneling to work, Sandhole must allow any public key to connect.
-/// However, unauthorized users should have much more restricted access, only being allowed
-/// to request local port forwarding (as of this version).
-///
-/// This test ensures that any other actions result in an error with a disconnect.
 #[tokio::test(flavor = "multi_thread")]
-async fn alias_http_aliases() {
+async fn http_force_https_by_user() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -48,8 +43,8 @@ async fn alias_http_aliases() {
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
-        "--bind-hostnames=none",
-        "--idle-connection-timeout=800ms",
+        "--bind-hostnames=all",
+        "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
     ]);
@@ -65,7 +60,7 @@ async fn alias_http_aliases() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH clients that will be proxied via alias for specific fingerprints
+    // 2. Start SSH client that will set force-https
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
@@ -78,7 +73,7 @@ async fn alias_http_aliases() {
     assert!(
         session
             .authenticate_publickey(
-                "user",
+                "user1",
                 PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
             )
             .await
@@ -86,7 +81,7 @@ async fn alias_http_aliases() {
         "authentication didn't succeed"
     );
     session
-        .tcpip_forward("proxy.first", 80)
+        .tcpip_forward("force-https.foobar.tld", 80)
         .await
         .expect("tcpip_forward failed");
     let channel = session
@@ -94,15 +89,11 @@ async fn alias_http_aliases() {
         .await
         .expect("channel_open_session_failed");
     channel
-        .exec(
-            false,
-            // key1 and admin
-            "allowed-fingerprints=\
-            SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ,\
-            SHA256:eDZoeAWBWd+SO64PPW1VBrdlBxYM4OEywSkGlIy0Kro",
-        )
+        .exec(false, "force-https")
         .await
         .expect("exec failed");
+
+    // 3. Start SSH client that will NOT set force-https
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
@@ -115,33 +106,94 @@ async fn alias_http_aliases() {
     assert!(
         session
             .authenticate_publickey(
-                "user",
+                "user1",
                 PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
             )
             .await
             .expect("SSH authentication failed"),
         "authentication didn't succeed"
     );
-    let channel = session
-        .channel_open_session()
-        .await
-        .expect("channel_open_session_failed");
-    channel
-        .exec(
-            false,
-            // key1 and admin
-            "allowed-fingerprints=\
-            SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ,\
-            SHA256:eDZoeAWBWd+SO64PPW1VBrdlBxYM4OEywSkGlIy0Kro",
-        )
-        .await
-        .expect("exec failed");
     session
-        .tcpip_forward("proxy.second", 80)
+        .tcpip_forward("just-http.foobar.tld", 80)
         .await
         .expect("tcpip_forward failed");
 
-    // 3. Start SSH client that will be proxied via alias for all fingerprints
+    // 4. Connect to the HTTP port of our non-`force-https` proxy and receive regular response
+    let tcp_stream = TcpStream::connect("127.0.0.1:18080")
+        .await
+        .expect("TCP connection failed");
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream))
+        .await
+        .expect("HTTP handshake failed");
+    tokio::spawn(async move {
+        if let Err(err) = conn.await {
+            eprintln!("Connection failed: {:?}", err);
+        }
+    });
+    let request = Request::builder()
+        .method("GET")
+        .uri("/")
+        .header("host", "just-http.foobar.tld")
+        .body(http_body_util::Empty::<bytes::Bytes>::new())
+        .unwrap();
+    let Ok(response) = timeout(Duration::from_secs(5), async move {
+        sender
+            .send_request(request)
+            .await
+            .expect("Error sending HTTP request")
+    })
+    .await
+    else {
+        panic!("Timeout waiting for request to finish.");
+    };
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_body = String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .expect("Error collecting response")
+            .to_bytes()
+            .into(),
+    )
+    .expect("Invalid response body");
+    assert_eq!(response_body, "Hello from my (sometimes) secure server!");
+
+    // 5. Connect to the HTTP port of our `force-https` proxy and receive redirect
+    let tcp_stream = TcpStream::connect("127.0.0.1:18080")
+        .await
+        .expect("TCP connection failed");
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream))
+        .await
+        .expect("HTTP handshake failed");
+    tokio::spawn(async move {
+        if let Err(err) = conn.await {
+            eprintln!("Connection failed: {:?}", err);
+        }
+    });
+    let request = Request::builder()
+        .method("GET")
+        .uri("/")
+        .header("host", "force-https.foobar.tld")
+        .body(http_body_util::Empty::<bytes::Bytes>::new())
+        .unwrap();
+    let Ok(response) = timeout(Duration::from_secs(5), async move {
+        sender
+            .send_request(request)
+            .await
+            .expect("Error sending HTTP request")
+    })
+    .await
+    else {
+        panic!("Timeout waiting for request to finish.");
+    };
+    assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(
+        response.headers().get("location"),
+        Some(&"https://force-https.foobar.tld:18443/".try_into().unwrap())
+    );
+
+    // 6. Create alias to the HTTP, to ensure that user-enforced HTTPS redirects don't apply there
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
         None,
@@ -154,35 +206,7 @@ async fn alias_http_aliases() {
     assert!(
         session
             .authenticate_publickey(
-                "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-            )
-            .await
-            .expect("SSH authentication failed"),
-        "authentication didn't succeed"
-    );
-    session
-        .tcpip_forward("proxy.third", 80)
-        .await
-        .expect("tcpip_forward failed");
-    let channel = session
-        .channel_open_session()
-        .await
-        .expect("channel_open_session_failed");
-    channel.exec(false, "tcp-alias").await.expect("exec failed");
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
-        None,
-    )
-    .expect("Missing file key2");
-    let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
-    assert!(
-        session
-            .authenticate_publickey(
-                "user",
+                "user2",
                 PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
             )
             .await
@@ -190,68 +214,46 @@ async fn alias_http_aliases() {
         "authentication didn't succeed"
     );
     let channel = session
-        .channel_open_session()
+        .channel_open_direct_tcpip("force-https.foobar.tld", 18080, "my.hostname", 12345)
         .await
-        .expect("channel_open_session_failed");
-    channel.exec(false, "tcp-alias").await.expect("exec failed");
-    session
-        .tcpip_forward("proxy.fourth", 80)
-        .await
-        .expect("tcpip_forward failed");
-
-    // 4. Local-forward with valid key
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
-        None,
+        .expect("channel_open_direct_tcpip failed");
+    let (mut sender, conn) =
+        hyper::client::conn::http1::handshake(TokioIo::new(channel.into_stream()))
+            .await
+            .expect("HTTP handshake failed");
+    tokio::spawn(async move {
+        if let Err(err) = conn.await {
+            eprintln!("Connection failed: {:?}", err);
+        }
+    });
+    let request = Request::builder()
+        .method("GET")
+        .uri("/")
+        .header("host", "foobar.tld")
+        .body(http_body_util::Empty::<bytes::Bytes>::new())
+        .unwrap();
+    let Ok(response) = timeout(Duration::from_secs(5), async {
+        sender
+            .send_request(request)
+            .await
+            .expect("Error sending HTTP request")
+    })
+    .await
+    else {
+        panic!("Timeout waiting for server to reply.")
+    };
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_body = String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .expect("Error collecting response")
+            .to_bytes()
+            .into(),
     )
-    .expect("Missing file key1");
-    let ssh_client = SshClient;
-    let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
-    assert!(
-        session
-            .authenticate_publickey(
-                "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
-            )
-            .await
-            .expect("SSH authentication failed"),
-        "authentication didn't succeed"
-    );
-
-    for alias in ["proxy.first", "proxy.second", "proxy.third", "proxy.fourth"].into_iter() {
-        let channel = session
-            .channel_open_direct_tcpip(alias, 80, "my.hostname", 12345)
-            .await
-            .expect("channel_open_direct_tcpip failed");
-        let (mut sender, conn) =
-            hyper::client::conn::http1::handshake(TokioIo::new(channel.into_stream()))
-                .await
-                .expect("HTTP handshake failed");
-        tokio::spawn(async move {
-            if let Err(err) = conn.await {
-                eprintln!("Connection failed: {:?}", err);
-            }
-        });
-        let request = Request::builder()
-            .method("GET")
-            .uri("/")
-            .header("host", "foobar.tld")
-            .body(http_body_util::Empty::<bytes::Bytes>::new())
-            .unwrap();
-        let Ok(response) = timeout(Duration::from_secs(5), async {
-            sender
-                .send_request(request)
-                .await
-                .expect("Error sending HTTP request")
-        })
-        .await
-        else {
-            panic!("Timeout waiting for server to reply.")
-        };
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    }
+    .expect("Invalid response body");
+    assert_eq!(response_body, "Hello from my (sometimes) secure server!");
 }
 
 struct SshClient;
@@ -274,7 +276,10 @@ impl russh::client::Handler for SshClient {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let router = Router::new()
-            .route("/", get(|| async move { StatusCode::NO_CONTENT }))
+            .route(
+                "/",
+                get(|| async move { format!("Hello from my (sometimes) secure server!") }),
+            )
             .into_service();
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {

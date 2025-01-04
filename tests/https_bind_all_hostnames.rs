@@ -148,7 +148,7 @@ async fn https_bind_all_hostnames() {
             .into(),
     )
     .expect("Invalid response body");
-    assert_eq!(response_body, "Hello from test.foobar.tld!");
+    assert_eq!(response_body, "Hello from foobar.tld!");
     session
         .cancel_tcpip_forward("foobar.tld", 80)
         .await
@@ -177,7 +177,7 @@ impl russh::client::Handler for SshClient {
         let router = Router::new()
             .route(
                 "/",
-                get(|| async move { format!("Hello from test.foobar.tld!") }),
+                get(|| async move { format!("Hello from foobar.tld!") }),
             )
             .into_service();
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));

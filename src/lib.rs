@@ -16,7 +16,7 @@ use addressing::AddressDelegatorData;
 use anyhow::Context;
 use connections::{ConnectionMapReactor, HttpAliasingConnection};
 use http::{DomainRedirect, ProxyData, ProxyType};
-use hyper::{body::Incoming, service::service_fn, Request};
+use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
@@ -571,8 +571,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 });
                 let io = TokioIo::new(stream);
                 tokio::spawn(async move {
-                    let server = auto::Builder::new(TokioExecutor::new());
-                    let conn = server.serve_connection_with_upgrades(io, service);
+                    let server = http1::Builder::new();
+                    let conn = server.serve_connection(io, service).with_upgrades();
                     let _ = conn.await;
                 });
             }

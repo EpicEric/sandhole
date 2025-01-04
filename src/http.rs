@@ -88,17 +88,9 @@ fn http_log(data: HttpLog, tx: Option<mpsc::UnboundedSender<Vec<u8>>>, disable_h
 }
 
 pub(crate) enum Protocol {
-    Http {
-        port: u16,
-    },
-    #[expect(dead_code)]
-    TlsRedirect {
-        from: u16,
-        to: u16,
-    },
-    Https {
-        port: u16,
-    },
+    Http { port: u16 },
+    TlsRedirect { from: u16, to: u16 },
+    Https { port: u16 },
 }
 
 pub(crate) struct DomainRedirect {
@@ -193,12 +185,17 @@ where
         // No handler was found, return 404
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
+    let http_data = handler.http_data().await;
+    let redirect_http_to_https_port = http_data.and_then(|data| data.redirect_http_to_https_port);
     // Read protocol information for X-Forwarded headers
-    let (proto, port) = match protocol {
-        Protocol::Http { port } => ("http", port.to_string()),
-        Protocol::Https { port } => ("https", port.to_string()),
-        // If --force-https is true, redirect this HTTP request to HTTPS
-        Protocol::TlsRedirect { to: to_port, .. } => {
+    let (proto, port) = match (
+        protocol,
+        redirect_http_to_https_port.as_ref(),
+        &proxy_data.proxy_type,
+    ) {
+        // If force-https is true, redirect this HTTP request to HTTPS
+        (Protocol::Http { .. }, Some(to_port), ProxyType::Tunneling)
+        | (Protocol::TlsRedirect { to: to_port, .. }, _, ProxyType::Tunneling) => {
             let elapsed_time = timer.elapsed();
             let response = Redirect::permanent(
                 format!(
@@ -228,6 +225,11 @@ where
             );
             return Ok(response);
         }
+        (Protocol::Http { port }, _, _)
+        | (Protocol::TlsRedirect { from: port, .. }, _, ProxyType::Aliasing) => {
+            ("http", port.to_string())
+        }
+        (Protocol::Https { port }, _, _) => ("https", port.to_string()),
     };
     // Add proxied info to the proper headers
     request
@@ -390,7 +392,7 @@ mod proxy_handler_tests {
 
     use crate::{
         config::LoadBalancing,
-        connection_handler::MockConnectionHandler,
+        connection_handler::{ConnectionHttpData, MockConnectionHandler},
         connections::{ConnectionMap, MockConnectionMapReactor},
         quota::{DummyQuotaHandler, TokenHolder, UserIdentification},
         telemetry::Telemetry,
@@ -532,7 +534,7 @@ mod proxy_handler_tests {
     }
 
     #[tokio::test]
-    async fn returns_redirect_to_https() {
+    async fn returns_redirect_to_https_from_global_config() {
         let conn_manager: Arc<
             ConnectionMap<
                 String,
@@ -547,6 +549,11 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel().never();
         mock.expect_tunneling_channel().never();
+        mock.expect_http_data().once().return_once(move || {
+            Some(ConnectionHttpData {
+                redirect_http_to_https_port: None,
+            })
+        });
         conn_manager
             .insert(
                 "with.handler".into(),
@@ -594,7 +601,7 @@ mod proxy_handler_tests {
     }
 
     #[tokio::test]
-    async fn returns_redirect_to_non_standard_https_port() {
+    async fn returns_redirect_to_non_standard_https_port_from_global_config() {
         let conn_manager: Arc<
             ConnectionMap<
                 String,
@@ -609,6 +616,11 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel().never();
         mock.expect_tunneling_channel().never();
+        mock.expect_http_data().once().return_once(move || {
+            Some(ConnectionHttpData {
+                redirect_http_to_https_port: None,
+            })
+        });
         conn_manager
             .insert(
                 "non.standard".into(),
@@ -656,6 +668,140 @@ mod proxy_handler_tests {
     }
 
     #[tokio::test]
+    async fn returns_redirect_to_https_from_connection_data() {
+        let conn_manager: Arc<
+            ConnectionMap<
+                String,
+                Arc<MockConnectionHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
+        > = Arc::new(ConnectionMap::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(DummyQuotaHandler)),
+            None,
+        ));
+        let mut mock = MockConnectionHandler::new();
+        mock.expect_log_channel().never();
+        mock.expect_tunneling_channel().never();
+        mock.expect_http_data().once().return_once(move || {
+            Some(ConnectionHttpData {
+                redirect_http_to_https_port: Some(443),
+            })
+        });
+        conn_manager
+            .insert(
+                "with.handler".into(),
+                "127.0.0.1:12345".parse().unwrap(),
+                TokenHolder::User(UserIdentification::Username("a".into())),
+                Arc::new(mock),
+            )
+            .unwrap();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/endpoint")
+            .header("host", "with.handler")
+            .body(String::from("Hello world"))
+            .unwrap();
+        let response = proxy_handler(
+            request,
+            "127.0.0.1:12345".parse().unwrap(),
+            None,
+            Arc::new(ProxyData {
+                conn_manager: Arc::clone(&conn_manager),
+                telemetry: Arc::new(Telemetry::new()),
+                domain_redirect: Arc::new(DomainRedirect {
+                    from: "main.domain".into(),
+                    to: "https://example.com".into(),
+                }),
+                protocol: Protocol::Http { port: 80 },
+                proxy_type: ProxyType::Tunneling,
+                http_request_timeout: Duration::from_secs(5),
+                websocket_timeout: None,
+                disable_http_logs: false,
+                _phantom_data: PhantomData,
+            }),
+        )
+        .await;
+        assert!(
+            response.is_ok(),
+            "should return response when HTTPS redirect"
+        );
+        let response = response.unwrap();
+        assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(
+            response.headers().get("location").unwrap(),
+            "https://with.handler:443/api/endpoint"
+        );
+    }
+
+    #[tokio::test]
+    async fn returns_redirect_to_non_standard_https_port_from_connection_data() {
+        let conn_manager: Arc<
+            ConnectionMap<
+                String,
+                Arc<MockConnectionHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
+        > = Arc::new(ConnectionMap::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(DummyQuotaHandler)),
+            None,
+        ));
+        let mut mock = MockConnectionHandler::new();
+        mock.expect_log_channel().never();
+        mock.expect_tunneling_channel().never();
+        mock.expect_http_data().once().return_once(move || {
+            Some(ConnectionHttpData {
+                redirect_http_to_https_port: Some(8443),
+            })
+        });
+        conn_manager
+            .insert(
+                "non.standard".into(),
+                "127.0.0.1:12345".parse().unwrap(),
+                TokenHolder::User(UserIdentification::Username("a".into())),
+                Arc::new(mock),
+            )
+            .unwrap();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/test")
+            .header("host", "non.standard")
+            .body(String::from("Hello world"))
+            .unwrap();
+        let response = proxy_handler(
+            request,
+            "127.0.0.1:12345".parse().unwrap(),
+            None,
+            Arc::new(ProxyData {
+                conn_manager: Arc::clone(&conn_manager),
+                telemetry: Arc::new(Telemetry::new()),
+                domain_redirect: Arc::new(DomainRedirect {
+                    from: "main.domain".into(),
+                    to: "https://example.com".into(),
+                }),
+                protocol: Protocol::Http { port: 80 },
+                proxy_type: ProxyType::Tunneling,
+                http_request_timeout: Duration::from_secs(5),
+                websocket_timeout: None,
+                disable_http_logs: false,
+                _phantom_data: PhantomData,
+            }),
+        )
+        .await;
+        assert!(
+            response.is_ok(),
+            "should return response whyen HTTPS redirect to non-standard port"
+        );
+        let response = response.unwrap();
+        assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(
+            response.headers().get("location").unwrap(),
+            "https://non.standard:8443/test"
+        );
+    }
+
+    #[tokio::test]
     async fn returns_response_for_existing_handler() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -677,6 +823,11 @@ mod proxy_handler_tests {
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
+        mock.expect_http_data().once().return_once(move || {
+            Some(ConnectionHttpData {
+                redirect_http_to_https_port: None,
+            })
+        });
         conn_manager
             .insert(
                 "with.handler".into(),
@@ -748,6 +899,103 @@ mod proxy_handler_tests {
     }
 
     #[tokio::test]
+    async fn returns_response_for_aliasing_handler() {
+        let conn_manager: Arc<
+            ConnectionMap<
+                String,
+                Arc<MockConnectionHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
+        > = Arc::new(ConnectionMap::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(DummyQuotaHandler)),
+            None,
+        ));
+        let (server, handler) = tokio::io::duplex(1024);
+        let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let mut mock = MockConnectionHandler::new();
+        mock.expect_log_channel()
+            .once()
+            .return_once(move || Some(logging_tx));
+        mock.expect_aliasing_channel()
+            .once()
+            .return_once(move |_, _, _| Ok(handler));
+        mock.expect_http_data().once().return_once(move || {
+            Some(ConnectionHttpData {
+                redirect_http_to_https_port: Some(443),
+            })
+        });
+        conn_manager
+            .insert(
+                "with.handler".into(),
+                "127.0.0.1:12345".parse().unwrap(),
+                TokenHolder::User(UserIdentification::Username("a".into())),
+                Arc::new(mock),
+            )
+            .unwrap();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/endpoint")
+            .header("host", "with.handler")
+            .body(String::from("Hello world"))
+            .unwrap();
+        let router = axum::Router::new()
+            .route(
+                "/api/endpoint",
+                axum::routing::post(|headers: HeaderMap, body: String| async move {
+                    if headers.get("X-Forwarded-For").unwrap() == "127.0.0.1"
+                        && headers.get("X-Forwarded-Host").unwrap() == "with.handler"
+                        && body == "Hello world"
+                    {
+                        "Success."
+                    } else {
+                        "Failure."
+                    }
+                }),
+            )
+            .into_service();
+        let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
+        let jh = tokio::spawn(async move {
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection(TokioIo::new(server), router_service)
+                .await
+                .expect("Invalid request");
+        });
+        assert!(
+            logging_rx.is_empty(),
+            "shouldn't log before handling request"
+        );
+        let response = proxy_handler(
+            request,
+            "127.0.0.1:12345".parse().unwrap(),
+            None,
+            Arc::new(ProxyData {
+                conn_manager: Arc::clone(&conn_manager),
+                telemetry: Arc::new(Telemetry::new()),
+                domain_redirect: Arc::new(DomainRedirect {
+                    from: "main.domain".into(),
+                    to: "https://example.com".into(),
+                }),
+                protocol: Protocol::Http { port: 80 },
+                proxy_type: ProxyType::Aliasing,
+                http_request_timeout: Duration::from_secs(5),
+                websocket_timeout: None,
+                disable_http_logs: false,
+                _phantom_data: PhantomData,
+            }),
+        )
+        .await;
+        assert!(!logging_rx.is_empty(), "should log after proxying request");
+        assert!(response.is_ok(), "should return response after proxy");
+        let response = response.unwrap();
+        assert_eq!(response.status(), hyper::StatusCode::OK);
+        let body = response.into_body();
+        let body = axum::body::to_bytes(body, 32).await.unwrap();
+        assert_eq!(body, bytes::Bytes::from("Success."));
+        jh.abort();
+    }
+
+    #[tokio::test]
     async fn returns_response_for_handler_of_root_domain() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -769,6 +1017,11 @@ mod proxy_handler_tests {
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
+        mock.expect_http_data().once().return_once(move || {
+            Some(ConnectionHttpData {
+                redirect_http_to_https_port: None,
+            })
+        });
         conn_manager
             .insert(
                 "root.domain".into(),
@@ -864,6 +1117,11 @@ mod proxy_handler_tests {
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
+        mock.expect_http_data().once().return_once(move || {
+            Some(ConnectionHttpData {
+                redirect_http_to_https_port: None,
+            })
+        });
         conn_manager
             .insert(
                 "with.websocket".into(),

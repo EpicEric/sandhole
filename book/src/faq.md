@@ -34,7 +34,11 @@ With the `--load-balancing=deny` or `--load-balancing=replace` [CLI flag](./cli.
 
 ## How do I force HTTP requests to get redirected to HTTPS?
 
-With the `--force-https` [CLI flag](./cli.md).
+With the `--force-https` [CLI flag](./cli.md), or by passing `force-https` on the tunneling connection(s):
+
+```bash
+ssh -R website.com:80:localhost:3000 sandhole.com -p 2222 force-https
+```
 
 ## How do I allow/block certain IP ranges?
 
