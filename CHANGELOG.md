@@ -4,9 +4,14 @@
 
 ### Added
 
-- Add User-Agent to login API requests
+- Add User-Agent to login API requests.
 - Add `force-https` option for remote forwarding connections.
 - Add `ip-allowlist`/`ip-blocklist` options for remote forwarding connections.
+
+### Changed
+
+- Error early on missing/blocked HTTP alias for `channel_open_direct_tcpip`.
+- Return "unknown alias" error messages when failing any pre-conditions.
 
 ## 0.3.1 (2024-12-31)
 

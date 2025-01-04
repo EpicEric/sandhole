@@ -11,12 +11,13 @@ use hyper_util::{
 };
 use russh::{
     client::{self, Msg, Session},
-    Channel,
+    Channel, ChannelId,
 };
 use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
+    sync::mpsc,
     time::{sleep, timeout},
 };
 use tower::Service;
@@ -66,12 +67,14 @@ async fn alias_http_aliases() {
     };
 
     // 2. Start SSH clients that will be proxied via alias for specific fingerprints
+    // 2a. Tunnel first, then exec allowed-fingerprints
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
-    let ssh_client = SshClient;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let ssh_client = SshClientProxy(tx);
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
@@ -95,7 +98,7 @@ async fn alias_http_aliases() {
         .expect("channel_open_session_failed");
     channel
         .exec(
-            false,
+            true,
             // key1 and admin
             "allowed-fingerprints=\
             SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ,\
@@ -103,12 +106,19 @@ async fn alias_http_aliases() {
         )
         .await
         .expect("exec failed");
+    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+    else {
+        panic!("Timeout waiting for server to reply.");
+    };
+    assert_eq!(channel_id, channel.id());
+    // 2b. exec allowed-fingerprints first, then alias
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
-    let ssh_client = SshClient;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let ssh_client = SshClientProxy(tx);
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
@@ -128,7 +138,7 @@ async fn alias_http_aliases() {
         .expect("channel_open_session_failed");
     channel
         .exec(
-            false,
+            true,
             // key1 and admin
             "allowed-fingerprints=\
             SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ,\
@@ -136,18 +146,25 @@ async fn alias_http_aliases() {
         )
         .await
         .expect("exec failed");
+    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+    else {
+        panic!("Timeout waiting for server to reply.");
+    };
+    assert_eq!(channel_id, channel.id());
     session
         .tcpip_forward("proxy.second", 80)
         .await
         .expect("tcpip_forward failed");
 
     // 3. Start SSH client that will be proxied via alias for all fingerprints
+    // 3a. Tunnel first, then exec tcp-alias
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
         None,
     )
     .expect("Missing file key2");
-    let ssh_client = SshClient;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let ssh_client = SshClientProxy(tx);
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
@@ -169,13 +186,20 @@ async fn alias_http_aliases() {
         .channel_open_session()
         .await
         .expect("channel_open_session_failed");
-    channel.exec(false, "tcp-alias").await.expect("exec failed");
+    channel.exec(true, "tcp-alias").await.expect("exec failed");
+    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+    else {
+        panic!("Timeout waiting for server to reply.");
+    };
+    assert_eq!(channel_id, channel.id());
+    // 3b. exec tcp-alias first, then alias
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
         None,
     )
     .expect("Missing file key2");
-    let ssh_client = SshClient;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let ssh_client = SshClientProxy(tx);
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
@@ -193,7 +217,12 @@ async fn alias_http_aliases() {
         .channel_open_session()
         .await
         .expect("channel_open_session_failed");
-    channel.exec(false, "tcp-alias").await.expect("exec failed");
+    channel.exec(true, "tcp-alias").await.expect("exec failed");
+    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+    else {
+        panic!("Timeout waiting for server to reply.");
+    };
+    assert_eq!(channel_id, channel.id());
     session
         .tcpip_forward("proxy.fourth", 80)
         .await
@@ -254,10 +283,10 @@ async fn alias_http_aliases() {
     }
 }
 
-struct SshClient;
+struct SshClientProxy(mpsc::UnboundedSender<ChannelId>);
 
 #[async_trait]
-impl russh::client::Handler for SshClient {
+impl russh::client::Handler for SshClientProxy {
     type Error = anyhow::Error;
 
     async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
@@ -284,5 +313,25 @@ impl russh::client::Handler for SshClient {
                 .expect("Invalid request");
         });
         Ok(())
+    }
+
+    async fn channel_success(
+        &mut self,
+        channel: ChannelId,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.0.send(channel).unwrap();
+        Ok(())
+    }
+}
+
+struct SshClient;
+
+#[async_trait]
+impl russh::client::Handler for SshClient {
+    type Error = anyhow::Error;
+
+    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+        Ok(true)
     }
 }

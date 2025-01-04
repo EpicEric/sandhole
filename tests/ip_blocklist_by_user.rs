@@ -11,12 +11,13 @@ use hyper_util::{
 };
 use russh::{
     client::{Msg, Session},
-    Channel,
+    Channel, ChannelId,
 };
 use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
+    sync::mpsc,
     time::{sleep, timeout},
 };
 use tower::Service;
@@ -66,7 +67,8 @@ async fn ip_blocklist_by_user() {
         None,
     )
     .expect("Missing file key1");
-    let ssh_client = SshClient;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let ssh_client = SshClientProxy(tx);
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
@@ -89,9 +91,14 @@ async fn ip_blocklist_by_user() {
         .await
         .expect("channel_open_session_failed");
     channel
-        .exec(false, "ip-allowlist=127.0.0.0/8 ip-blocklist=::/32")
+        .exec(true, "ip-allowlist=127.0.0.0/8 ip-blocklist=::/32")
         .await
         .expect("exec failed");
+    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+    else {
+        panic!("Timeout waiting for server to reply.");
+    };
+    assert_eq!(channel_id, channel.id());
 
     // 3. Connect to the HTTP port of our proxy and get blocked by IP
     let tcp_stream = TcpStream::connect("[::]:18080")
@@ -173,36 +180,13 @@ async fn ip_blocklist_by_user() {
             .expect("SSH authentication failed"),
         "authentication didn't succeed"
     );
-    let channel = session
-        .channel_open_direct_tcpip("test.foobar.tld", 18080, "my.hostname", 12345)
-        .await
-        .expect("channel_open_direct_tcpip failed");
-    let (mut sender, conn) =
-        hyper::client::conn::http1::handshake(TokioIo::new(channel.into_stream()))
+    assert!(
+        session
+            .channel_open_direct_tcpip("test.foobar.tld", 18080, "my.hostname", 12345)
             .await
-            .expect("HTTP handshake failed");
-    tokio::spawn(async move {
-        if let Err(err) = conn.await {
-            eprintln!("Connection failed: {:?}", err);
-        }
-    });
-    let request = Request::builder()
-        .method("GET")
-        .uri("/")
-        .header("host", "localhost")
-        .body(http_body_util::Empty::<bytes::Bytes>::new())
-        .unwrap();
-    let Ok(response) = timeout(Duration::from_secs(5), async {
-        sender
-            .send_request(request)
-            .await
-            .expect("Error sending HTTP request")
-    })
-    .await
-    else {
-        panic!("Timeout waiting for server to reply.")
-    };
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            .is_err(),
+        "channel_open_direct_tcpip failed"
+    );
 
     // 6. Start SSH client that will be allowed to alias to the service
     let key = load_secret_key(
@@ -256,10 +240,10 @@ async fn ip_blocklist_by_user() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }
 
-struct SshClient;
+struct SshClientProxy(mpsc::UnboundedSender<ChannelId>);
 
 #[async_trait]
-impl russh::client::Handler for SshClient {
+impl russh::client::Handler for SshClientProxy {
     type Error = anyhow::Error;
 
     async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
@@ -286,5 +270,25 @@ impl russh::client::Handler for SshClient {
                 .expect("Invalid request");
         });
         Ok(())
+    }
+
+    async fn channel_success(
+        &mut self,
+        channel: ChannelId,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.0.send(channel).unwrap();
+        Ok(())
+    }
+}
+
+struct SshClient;
+
+#[async_trait]
+impl russh::client::Handler for SshClient {
+    type Error = anyhow::Error;
+
+    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+        Ok(true)
     }
 }

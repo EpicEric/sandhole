@@ -114,8 +114,24 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
                 .into_stream();
             Ok(channel)
         } else {
-            Err(ServerError::IpNotAllowed.into())
+            Err(ServerError::TunnelingNotAllowed.into())
         }
+    }
+
+    async fn can_alias<'a>(
+        &self,
+        ip: IpAddr,
+        _port: u16,
+        fingerprint: Option<&'a Fingerprint>,
+    ) -> bool {
+        // Check if this IP is not blocked for the alias
+        self.ip_filter
+            .read()
+            .await
+            .as_ref()
+            .is_none_or(|filter| filter.is_allowed(ip))
+            // Check if the given fingerprint is allowed to local-forward this alias
+            && (self.allow_fingerprint.read().await)(fingerprint)
     }
 
     async fn aliasing_channel<'a>(
@@ -124,32 +140,20 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
         port: u16,
         fingerprint: Option<&'a Fingerprint>,
     ) -> anyhow::Result<ChannelStream<Msg>> {
-        // Check if this IP is not blocked
-        if self
-            .ip_filter
-            .read()
-            .await
-            .as_ref()
-            .is_none_or(|filter| filter.is_allowed(ip))
-        {
-            // Check if the given fingerprint is allowed to local-forward this alias
-            if (self.allow_fingerprint.read().await)(fingerprint) {
-                let channel = self
-                    .handle
-                    .channel_open_forwarded_tcpip(
-                        self.address.clone(),
-                        self.port,
-                        ip.to_string(),
-                        port.into(),
-                    )
-                    .await?
-                    .into_stream();
-                Ok(channel)
-            } else {
-                Err(ServerError::FingerprintDenied.into())
-            }
+        if self.can_alias(ip, port, fingerprint).await {
+            let channel = self
+                .handle
+                .channel_open_forwarded_tcpip(
+                    self.address.clone(),
+                    self.port,
+                    ip.to_string(),
+                    port.into(),
+                )
+                .await?
+                .into_stream();
+            Ok(channel)
         } else {
-            Err(ServerError::IpNotAllowed.into())
+            Err(ServerError::AliasingNotAllowed.into())
         }
     }
 
@@ -734,6 +738,14 @@ impl Handler for ServerHandler {
                     AuthenticatedData::User { user_data, .. }
                     | AuthenticatedData::Admin { user_data, .. },
                 ) => {
+                    if commands.contains("force-https") {
+                        self.tx.send(
+                            b"Invalid option \"force-https\": duplicated command\r\n".to_vec(),
+                        );
+                        success = false;
+                        break;
+                    }
+                    commands.insert("force-https".into());
                     user_data
                         .http_data
                         .write()
@@ -745,6 +757,14 @@ impl Handler for ServerHandler {
                 (command, AuthenticatedData::User { .. } | AuthenticatedData::Admin { .. })
                     if command.starts_with("ip-allowlist=") =>
                 {
+                    if commands.contains("ip-allowlist") {
+                        self.tx.send(
+                            b"Invalid option \"ip-allowlist\": duplicated command\r\n".to_vec(),
+                        );
+                        success = false;
+                        break;
+                    }
+                    commands.insert("ip-allowlist".into());
                     allowlist = Some(
                         command
                             .trim_start_matches("ip-allowlist=")
@@ -770,6 +790,14 @@ impl Handler for ServerHandler {
                 (command, AuthenticatedData::User { .. } | AuthenticatedData::Admin { .. })
                     if command.starts_with("ip-blocklist=") =>
                 {
+                    if commands.contains("ip-blocklist") {
+                        self.tx.send(
+                            b"Invalid option \"ip-blocklist\": duplicated command\r\n".to_vec(),
+                        );
+                        success = false;
+                        break;
+                    }
+                    commands.insert("ip-blocklist".into());
                     blocklist = Some(
                         command
                             .trim_start_matches("ip-blocklist=")
@@ -802,7 +830,7 @@ impl Handler for ServerHandler {
                 }
             }
         }
-        if allowlist.is_some() || blocklist.is_some() {
+        if success && (allowlist.is_some() || blocklist.is_some()) {
             match &mut self.auth_data {
                 AuthenticatedData::User { user_data, .. }
                 | AuthenticatedData::Admin { user_data, .. } => {
@@ -1588,58 +1616,71 @@ impl Handler for ServerHandler {
                         .send(format!("Forwarding SSH from {}\r\n", host_to_connect).into_bytes());
                     return Ok(true);
                 }
-            } else {
-                self.tx
-                    .send(format!("Unknown SSH alias {}\r\n", host_to_connect).into_bytes());
             }
+            self.tx
+                .send(format!("Unknown SSH alias {}\r\n", host_to_connect).into_bytes());
         // Handle local forwarding for HTTP
         } else if port_to_connect == self.server.http_port
             || port_to_connect == self.server.https_port
         {
-            let peer = self.peer;
-            let fingerprint = self.key_fingerprint;
-            let proxy_data = Arc::clone(&self.server.aliasing_proxy_data);
-            // Set HTTP host via header (kinda hacky...)
-            let host_to_connect = host_to_connect.to_string();
-            let service = service_fn(move |mut req: Request<Incoming>| {
-                req.headers_mut()
-                    .insert("host", host_to_connect.clone().try_into().unwrap());
-                proxy_handler(req, peer, fingerprint, Arc::clone(&proxy_data))
-            });
-            let io = TokioIo::new(channel.into_stream());
-            match self.auth_data {
-                // Serve HTTP for unauthed user, then add disconnection timeout if this is the last proxy connection
-                AuthenticatedData::None { ref proxy_count } => {
-                    self.timeout_handle.lock().await.take();
-                    proxy_count.fetch_add(1, Ordering::Release);
-                    let proxy_count = Arc::clone(proxy_count);
-                    let timeout_handle = Arc::clone(&self.timeout_handle);
-                    let unproxied_connection_timeout = self.server.unproxied_connection_timeout;
-                    let cancellation_token = self.cancellation_token.clone();
-                    tokio::spawn(async move {
-                        let server = auto::Builder::new(TokioExecutor::new());
-                        let conn = server.serve_connection_with_upgrades(io, service);
-                        let _ = conn.await;
-                        if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
-                            *timeout_handle.lock().await =
-                                Some(DroppableHandle(tokio::spawn(async move {
-                                    sleep(unproxied_connection_timeout).await;
-                                    cancellation_token.cancel();
-                                })));
+            if let Some(handler) = self.server.http.get(host_to_connect) {
+                if handler
+                    .can_alias(
+                        self.peer.ip(),
+                        self.peer.port(),
+                        self.key_fingerprint.as_ref(),
+                    )
+                    .await
+                {
+                    let peer = self.peer;
+                    let fingerprint = self.key_fingerprint;
+                    let proxy_data = Arc::clone(&self.server.aliasing_proxy_data);
+                    let host_to_connect = host_to_connect.to_string();
+                    let service = service_fn(move |mut req: Request<Incoming>| {
+                        // Set HTTP host via header
+                        req.headers_mut()
+                            .insert("host", host_to_connect.clone().try_into().unwrap());
+                        proxy_handler(req, peer, fingerprint, Arc::clone(&proxy_data))
+                    });
+                    let io = TokioIo::new(channel.into_stream());
+                    match self.auth_data {
+                        // Serve HTTP for unauthed user, then add disconnection timeout if this is the last proxy connection
+                        AuthenticatedData::None { ref proxy_count } => {
+                            self.timeout_handle.lock().await.take();
+                            proxy_count.fetch_add(1, Ordering::Release);
+                            let proxy_count = Arc::clone(proxy_count);
+                            let timeout_handle = Arc::clone(&self.timeout_handle);
+                            let unproxied_connection_timeout =
+                                self.server.unproxied_connection_timeout;
+                            let cancellation_token = self.cancellation_token.clone();
+                            tokio::spawn(async move {
+                                let server = auto::Builder::new(TokioExecutor::new());
+                                let conn = server.serve_connection_with_upgrades(io, service);
+                                let _ = conn.await;
+                                if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
+                                    *timeout_handle.lock().await =
+                                        Some(DroppableHandle(tokio::spawn(async move {
+                                            sleep(unproxied_connection_timeout).await;
+                                            cancellation_token.cancel();
+                                        })));
+                                }
+                            });
                         }
-                    });
-                }
-                // Serve HTTP normally for authed user
-                _ => {
-                    tokio::spawn(async move {
-                        let server = auto::Builder::new(TokioExecutor::new());
-                        let conn = server.serve_connection_with_upgrades(io, service);
-                        let _ = conn.await;
-                    });
+                        // Serve HTTP normally for authed user
+                        _ => {
+                            tokio::spawn(async move {
+                                let server = auto::Builder::new(TokioExecutor::new());
+                                let conn = server.serve_connection_with_upgrades(io, service);
+                                let _ = conn.await;
+                            });
+                        }
+                    }
+
+                    return Ok(true);
                 }
             }
-
-            return Ok(true);
+            self.tx
+                .send(format!("Unknown HTTP alias {}\r\n", host_to_connect).into_bytes());
         // Handle local forwarding for TCP
         } else if !self.server.is_alias(host_to_connect) {
             if let Some(handler) = self.server.tcp.get(&port_to_connect) {
@@ -1723,93 +1764,97 @@ impl Handler for ServerHandler {
                         .send(format!("Forwarding TCP from {}\r\n", host_to_connect).into_bytes());
                     return Ok(true);
                 }
-            } else {
-                self.tx
-                    .send(format!("Unknown TCP port {}\r\n", port_to_connect).into_bytes());
             }
+            self.tx
+                .send(format!("Unknown TCP port {}\r\n", port_to_connect).into_bytes());
         // Handle local forwarding for alias
-        } else if let Some(handler) = self
-            .server
-            .alias
-            .get(&BorrowedTcpAlias(host_to_connect, &port_to_connect) as &dyn TcpAliasKey)
-        {
-            if let Ok(mut io) = handler
-                .aliasing_channel(
-                    self.peer.ip(),
-                    self.peer.port(),
-                    self.key_fingerprint.as_ref(),
-                )
-                .await
-            {
-                handler.log_channel().inspect(|tx| {
-                    let _ = tx.send(
-                        format!(
-                            "New TCP proxy from {}:{} => {}:{}\r\n",
-                            originator_address, originator_port, host_to_connect, port_to_connect
-                        )
-                        .into_bytes(),
-                    );
-                });
-                match self.auth_data {
-                    // Serve TCP for unauthed user, then add disconnection timeout if this is the last proxy connection
-                    AuthenticatedData::None { ref proxy_count } => {
-                        self.timeout_handle.lock().await.take();
-                        proxy_count.fetch_add(1, Ordering::Release);
-                        let proxy_count = Arc::clone(proxy_count);
-                        let timeout_handle = Arc::clone(&self.timeout_handle);
-                        let unproxied_connection_timeout = self.server.unproxied_connection_timeout;
-                        let cancellation_token = self.cancellation_token.clone();
-                        let tcp_connection_timeout = self.server.tcp_connection_timeout;
-                        tokio::spawn(async move {
-                            let mut stream = channel.into_stream();
-                            match tcp_connection_timeout {
-                                Some(duration) => {
-                                    let _ = timeout(duration, async {
-                                        copy_bidirectional(&mut stream, &mut io).await
-                                    })
-                                    .await;
-                                }
-                                None => {
-                                    let _ = copy_bidirectional(&mut stream, &mut io).await;
-                                }
-                            }
-                            if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
-                                *timeout_handle.lock().await =
-                                    Some(DroppableHandle(tokio::spawn(async move {
-                                        sleep(unproxied_connection_timeout).await;
-                                        cancellation_token.cancel();
-                                    })));
-                            }
-                        });
-                    }
-                    // Serve TCP normally for authed user
-                    _ => {
-                        let tcp_connection_timeout = self.server.tcp_connection_timeout;
-                        tokio::spawn(async move {
-                            let mut stream = channel.into_stream();
-                            match tcp_connection_timeout {
-                                Some(duration) => {
-                                    let _ = timeout(duration, async {
-                                        copy_bidirectional(&mut stream, &mut io).await
-                                    })
-                                    .await;
-                                }
-                                None => {
-                                    let _ = copy_bidirectional(&mut stream, &mut io).await;
-                                }
-                            }
-                        });
-                    }
-                }
-                info!(
-                    "Accepted connection from {} => {} ({})",
-                    self.peer, host_to_connect, handler.peer,
-                );
-                self.tx
-                    .send(format!("Forwarding TCP from {}\r\n", host_to_connect).into_bytes());
-                return Ok(true);
-            }
         } else {
+            if let Some(handler) = self
+                .server
+                .alias
+                .get(&BorrowedTcpAlias(host_to_connect, &port_to_connect) as &dyn TcpAliasKey)
+            {
+                if let Ok(mut io) = handler
+                    .aliasing_channel(
+                        self.peer.ip(),
+                        self.peer.port(),
+                        self.key_fingerprint.as_ref(),
+                    )
+                    .await
+                {
+                    handler.log_channel().inspect(|tx| {
+                        let _ = tx.send(
+                            format!(
+                                "New TCP proxy from {}:{} => {}:{}\r\n",
+                                originator_address,
+                                originator_port,
+                                host_to_connect,
+                                port_to_connect
+                            )
+                            .into_bytes(),
+                        );
+                    });
+                    match self.auth_data {
+                        // Serve TCP for unauthed user, then add disconnection timeout if this is the last proxy connection
+                        AuthenticatedData::None { ref proxy_count } => {
+                            self.timeout_handle.lock().await.take();
+                            proxy_count.fetch_add(1, Ordering::Release);
+                            let proxy_count = Arc::clone(proxy_count);
+                            let timeout_handle = Arc::clone(&self.timeout_handle);
+                            let unproxied_connection_timeout =
+                                self.server.unproxied_connection_timeout;
+                            let cancellation_token = self.cancellation_token.clone();
+                            let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                            tokio::spawn(async move {
+                                let mut stream = channel.into_stream();
+                                match tcp_connection_timeout {
+                                    Some(duration) => {
+                                        let _ = timeout(duration, async {
+                                            copy_bidirectional(&mut stream, &mut io).await
+                                        })
+                                        .await;
+                                    }
+                                    None => {
+                                        let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                    }
+                                }
+                                if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
+                                    *timeout_handle.lock().await =
+                                        Some(DroppableHandle(tokio::spawn(async move {
+                                            sleep(unproxied_connection_timeout).await;
+                                            cancellation_token.cancel();
+                                        })));
+                                }
+                            });
+                        }
+                        // Serve TCP normally for authed user
+                        _ => {
+                            let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                            tokio::spawn(async move {
+                                let mut stream = channel.into_stream();
+                                match tcp_connection_timeout {
+                                    Some(duration) => {
+                                        let _ = timeout(duration, async {
+                                            copy_bidirectional(&mut stream, &mut io).await
+                                        })
+                                        .await;
+                                    }
+                                    None => {
+                                        let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    info!(
+                        "Accepted connection from {} => {} ({})",
+                        self.peer, host_to_connect, handler.peer,
+                    );
+                    self.tx
+                        .send(format!("Forwarding TCP from {}\r\n", host_to_connect).into_bytes());
+                    return Ok(true);
+                }
+            }
             self.tx.send(
                 format!("Unknown alias {}:{}\r\n", host_to_connect, port_to_connect).into_bytes(),
             );

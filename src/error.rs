@@ -16,8 +16,6 @@ pub(crate) enum ServerError {
     RequestTimeout,
     #[error("Invalid file path")]
     InvalidFilePath,
-    #[error("Fingerprint denied")]
-    FingerprintDenied,
     #[error("Already bound by another service")]
     LoadBalancingAlreadyBound,
     #[error("Quota reached for user")]
@@ -30,6 +28,8 @@ pub(crate) enum ServerError {
     MissingDirectory(PathBuf),
     #[error("Duplicate network CIDR {0}")]
     DuplicateNetworkCidr(IpNet),
-    #[error("IP not allowed")]
-    IpNotAllowed,
+    #[error("Tunneling not allowed")]
+    TunnelingNotAllowed,
+    #[error("Aliasing not allowed")]
+    AliasingNotAllowed,
 }

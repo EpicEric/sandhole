@@ -17,13 +17,21 @@ pub(crate) struct ConnectionHttpData {
 #[cfg_attr(test, automock)]
 #[async_trait]
 pub(crate) trait ConnectionHandler<T: Sync> {
-    // Return a copy of the logging channel associated with this connection.
+    // Return a copy of the logging channel associated with this handler.
     fn log_channel(&self) -> Option<mpsc::UnboundedSender<Vec<u8>>>;
 
-    // Return the tunneling channel for this connection.
+    // Return a tunneling channel for this handler.
     async fn tunneling_channel(&self, ip: IpAddr, port: u16) -> anyhow::Result<T>;
 
-    // Return the aliasing channel for this connection.
+    // Whether the given credentials can create an aliasing channel to this handler.
+    async fn can_alias<'a>(
+        &self,
+        ip: IpAddr,
+        port: u16,
+        fingerprint: Option<&'a Fingerprint>,
+    ) -> bool;
+
+    // Return an aliasing channel for this handler.
     async fn aliasing_channel<'a>(
         &self,
         ip: IpAddr,
@@ -31,5 +39,6 @@ pub(crate) trait ConnectionHandler<T: Sync> {
         fingerprint: Option<&'a Fingerprint>,
     ) -> anyhow::Result<T>;
 
+    // Returns HTTP-specific data for this handler.
     async fn http_data(&self) -> Option<ConnectionHttpData>;
 }

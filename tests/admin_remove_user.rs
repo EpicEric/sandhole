@@ -121,7 +121,7 @@ async fn admin_remove_user() {
         None,
     )
     .expect("Missing file admin");
-    let ssh_client = SshClient;
+    let ssh_client = SshClientAdmin;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
@@ -381,5 +381,16 @@ impl russh::client::Handler for SshClient {
                 .expect("Invalid request");
         });
         Ok(())
+    }
+}
+
+struct SshClientAdmin;
+
+#[async_trait]
+impl russh::client::Handler for SshClientAdmin {
+    type Error = anyhow::Error;
+
+    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+        Ok(true)
     }
 }

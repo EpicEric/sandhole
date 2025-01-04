@@ -11,12 +11,13 @@ use hyper_util::{
 };
 use russh::{
     client::{Msg, Session},
-    Channel,
+    Channel, ChannelId,
 };
 use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
+    sync::mpsc,
     time::{sleep, timeout},
 };
 use tower::Service;
@@ -66,7 +67,8 @@ async fn http_force_https_by_user() {
         None,
     )
     .expect("Missing file key1");
-    let ssh_client = SshClient;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let ssh_client = SshClientProxy(tx);
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
@@ -89,9 +91,14 @@ async fn http_force_https_by_user() {
         .await
         .expect("channel_open_session_failed");
     channel
-        .exec(false, "force-https")
+        .exec(true, "force-https")
         .await
         .expect("exec failed");
+    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+    else {
+        panic!("Timeout waiting for server to reply.");
+    };
+    assert_eq!(channel_id, channel.id());
 
     // 3. Start SSH client that will NOT set force-https
     let key = load_secret_key(
@@ -254,6 +261,51 @@ async fn http_force_https_by_user() {
     )
     .expect("Invalid response body");
     assert_eq!(response_body, "Hello from my (sometimes) secure server!");
+}
+
+struct SshClientProxy(mpsc::UnboundedSender<ChannelId>);
+
+#[async_trait]
+impl russh::client::Handler for SshClientProxy {
+    type Error = anyhow::Error;
+
+    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+        Ok(true)
+    }
+
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: Channel<Msg>,
+        _connected_address: &str,
+        _connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let router = Router::new()
+            .route(
+                "/",
+                get(|| async move { format!("Hello from my (sometimes) secure server!") }),
+            )
+            .into_service();
+        let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
+        tokio::spawn(async move {
+            Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(TokioIo::new(channel.into_stream()), service)
+                .await
+                .expect("Invalid request");
+        });
+        Ok(())
+    }
+
+    async fn channel_success(
+        &mut self,
+        channel: ChannelId,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.0.send(channel).unwrap();
+        Ok(())
+    }
 }
 
 struct SshClient;

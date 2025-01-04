@@ -251,16 +251,12 @@ where
     let Ok(io) = (match proxy_data.proxy_type {
         ProxyType::Tunneling => {
             handler
-                .tunneling_channel(tcp_address.ip().to_canonical(), tcp_address.port())
+                .tunneling_channel(tcp_address.ip(), tcp_address.port())
                 .await
         }
         ProxyType::Aliasing => {
             handler
-                .aliasing_channel(
-                    tcp_address.ip().to_canonical(),
-                    tcp_address.port(),
-                    fingerprint.as_ref(),
-                )
+                .aliasing_channel(tcp_address.ip(), tcp_address.port(), fingerprint.as_ref())
                 .await
         }
     }) else {
