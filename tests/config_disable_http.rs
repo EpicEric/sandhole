@@ -126,7 +126,7 @@ async fn config_disable_http() {
         "shouldn't have failed to cancel alias"
     );
 
-    // 2. Start SSH client that manages to bind TCP
+    // 3. Start SSH client that manages to bind TCP
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,

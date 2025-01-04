@@ -249,14 +249,22 @@ where
 
     // Find the appropriate handler for this proxy type
     let Ok(io) = (match proxy_data.proxy_type {
-        ProxyType::Tunneling => handler.tunneling_channel(&ip, tcp_address.port()).await,
+        ProxyType::Tunneling => {
+            handler
+                .tunneling_channel(tcp_address.ip().to_canonical(), tcp_address.port())
+                .await
+        }
         ProxyType::Aliasing => {
             handler
-                .aliasing_channel(&ip, tcp_address.port(), fingerprint.as_ref())
+                .aliasing_channel(
+                    tcp_address.ip().to_canonical(),
+                    tcp_address.port(),
+                    fingerprint.as_ref(),
+                )
                 .await
         }
     }) else {
-        // If getting the handler failed, return 404 (they may have an allowlist for fingerprints)
+        // If getting the handler failed, return 404 (they may have an allowlist for fingerprints/IP networks)
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
     let tx = handler.log_channel();

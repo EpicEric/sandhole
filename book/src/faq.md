@@ -42,4 +42,8 @@ ssh -R website.com:80:localhost:3000 sandhole.com -p 2222 force-https
 
 ## How do I allow/block certain IP ranges?
 
-With the `--ip-allowlist` and `--ip-blocklist` [CLI flags](./cli.md) respectively.
+With the `--ip-allowlist` and `--ip-blocklist` [CLI flags](./cli.md) respectively, or by passing `ip-allowist=...` and/or `ip-blocklist=...` on the tunneling connection(s):
+
+```bash
+ssh -R website.com:80:localhost:3000 sandhole.com -p 2222 ip-allowlist=10.0.0.0/8 ip-blocklist=10.1.0.0/16
+```

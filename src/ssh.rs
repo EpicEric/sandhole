@@ -2,7 +2,7 @@ use std::{
     borrow::Borrow,
     collections::{BTreeSet, HashMap, HashSet},
     fmt::Display,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -16,6 +16,7 @@ use crate::{
     error::ServerError,
     fingerprints::AuthenticationType,
     http::proxy_handler,
+    ip::{IpFilter, IpFilterConfig},
     login::AuthenticationRequest,
     quota::{TokenHolder, UserIdentification},
     tcp::PortHandler,
@@ -30,6 +31,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
 };
+use ipnet::IpNet;
 use log::{debug, info, warn};
 use russh::{
     server::{Auth, Handler, Msg, Session},
@@ -53,8 +55,10 @@ type FingerprintFn = dyn Fn(Option<&Fingerprint>) -> bool + Send + Sync;
 pub(crate) struct SshTunnelHandler {
     // Closure to verify valid fingerprints for local forwardings. Default is to allow all.
     allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
-    // Port to redirect HTTP requests to. Default is to not redirect.
-    redirect_http_to_https_port: Arc<RwLock<Option<u16>>>,
+    // Optional extra data available for HTTP tunneling/aliasing connections.
+    http_data: Option<Arc<RwLock<ConnectionHttpData>>>,
+    // Optional IP filtering for this handler's tunneling and aliasing channels.
+    ip_filter: Arc<RwLock<Option<IpFilter>>>,
     // Handle to the SSH connection, in order to create remote forwarding channels.
     handle: russh::server::Handle,
     // Sender to the opened data session, if any, for logging.
@@ -89,38 +93,68 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
         self.tx.clone()
     }
 
-    async fn tunneling_channel(&self, ip: &str, port: u16) -> anyhow::Result<ChannelStream<Msg>> {
-        let channel = self
-            .handle
-            .channel_open_forwarded_tcpip(self.address.clone(), self.port, ip, port.into())
-            .await?
-            .into_stream();
-        Ok(channel)
-    }
-
-    async fn aliasing_channel<'a>(
-        &self,
-        ip: &str,
-        port: u16,
-        fingerprint: Option<&'a Fingerprint>,
-    ) -> anyhow::Result<ChannelStream<Msg>> {
-        // Check if the given fingerprint is allowed to local-forward this alias
-        if (self.allow_fingerprint.read().await)(fingerprint) {
+    async fn tunneling_channel(&self, ip: IpAddr, port: u16) -> anyhow::Result<ChannelStream<Msg>> {
+        // Check if this IP is not blocked
+        if self
+            .ip_filter
+            .read()
+            .await
+            .as_ref()
+            .is_none_or(|filter| filter.is_allowed(ip))
+        {
             let channel = self
                 .handle
-                .channel_open_forwarded_tcpip(self.address.clone(), self.port, ip, port.into())
+                .channel_open_forwarded_tcpip(
+                    self.address.clone(),
+                    self.port,
+                    ip.to_string(),
+                    port.into(),
+                )
                 .await?
                 .into_stream();
             Ok(channel)
         } else {
-            Err(ServerError::FingerprintDenied.into())
+            Err(ServerError::IpNotAllowed.into())
+        }
+    }
+
+    async fn aliasing_channel<'a>(
+        &self,
+        ip: IpAddr,
+        port: u16,
+        fingerprint: Option<&'a Fingerprint>,
+    ) -> anyhow::Result<ChannelStream<Msg>> {
+        // Check if this IP is not blocked
+        if self
+            .ip_filter
+            .read()
+            .await
+            .as_ref()
+            .is_none_or(|filter| filter.is_allowed(ip))
+        {
+            // Check if the given fingerprint is allowed to local-forward this alias
+            if (self.allow_fingerprint.read().await)(fingerprint) {
+                let channel = self
+                    .handle
+                    .channel_open_forwarded_tcpip(
+                        self.address.clone(),
+                        self.port,
+                        ip.to_string(),
+                        port.into(),
+                    )
+                    .await?
+                    .into_stream();
+                Ok(channel)
+            } else {
+                Err(ServerError::FingerprintDenied.into())
+            }
+        } else {
+            Err(ServerError::IpNotAllowed.into())
         }
     }
 
     async fn http_data(&self) -> Option<ConnectionHttpData> {
-        Some(ConnectionHttpData {
-            redirect_http_to_https_port: *self.redirect_http_to_https_port.read().await,
-        })
+        Some(self.http_data.as_ref()?.read().await.clone())
     }
 }
 
@@ -128,8 +162,10 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
 struct UserData {
     // Closure to verify valid fingerprints for local forwardings. Default is to allow all.
     allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
-    // Port to redirect HTTP requests to. Default is to not redirect.
-    redirect_http_to_https_port: Arc<RwLock<Option<u16>>>,
+    // Extra data available for HTTP tunneling/aliasing connections.
+    http_data: Arc<RwLock<ConnectionHttpData>>,
+    // Optional IP filtering for this connection's tunneling and aliasing channels.
+    ip_filter: Arc<RwLock<Option<IpFilter>>>,
     // Whether this session only has aliases, from the `tcp-alias`` or `allowed-fingerprints`` option(s).
     tcp_alias_only: bool,
     // Identifier for the user, used for creating quota tokens.
@@ -146,7 +182,10 @@ impl UserData {
     fn new(quota_key: TokenHolder) -> Self {
         Self {
             allow_fingerprint: Arc::new(RwLock::new(Box::new(|_| true))),
-            redirect_http_to_https_port: Arc::new(RwLock::new(None)),
+            http_data: Arc::new(RwLock::new(ConnectionHttpData {
+                redirect_http_to_https_port: None,
+            })),
+            ip_filter: Arc::new(RwLock::new(None)),
             tcp_alias_only: false,
             quota_key,
             host_addressing: Default::default(),
@@ -491,6 +530,8 @@ impl Handler for ServerHandler {
         let cmd = String::from_utf8_lossy(data);
         // Split commands by whitespace and handle each.
         let mut commands = HashSet::<String>::new();
+        let mut allowlist = None;
+        let mut blocklist = None;
         for command in cmd.split_whitespace() {
             match (command, &mut self.auth_data) {
                 // - `admin` command creates an admin interface if the user is an admin
@@ -693,8 +734,61 @@ impl Handler for ServerHandler {
                     AuthenticatedData::User { user_data, .. }
                     | AuthenticatedData::Admin { user_data, .. },
                 ) => {
-                    *user_data.redirect_http_to_https_port.write().await =
-                        Some(self.server.https_port);
+                    user_data
+                        .http_data
+                        .write()
+                        .await
+                        .redirect_http_to_https_port = Some(self.server.https_port);
+                }
+                // - `ip-allowlist` requires tunneling/aliasing connections to come from
+                //   specific IP ranges.
+                (command, AuthenticatedData::User { .. } | AuthenticatedData::Admin { .. })
+                    if command.starts_with("ip-allowlist=") =>
+                {
+                    allowlist = Some(
+                        command
+                            .trim_start_matches("ip-allowlist=")
+                            .split(',')
+                            .filter_map(|network| match network.parse::<IpNet>() {
+                                Ok(ip_net) => Some(ip_net),
+                                Err(err) => {
+                                    self.tx.send(
+                                        format!(
+                                            "Failed to parse IP network {}, ignoring ({})\r\n",
+                                            network, err
+                                        )
+                                        .into_bytes(),
+                                    );
+                                    None
+                                }
+                            })
+                            .collect(),
+                    );
+                }
+                // - `ip-blocklist` requires tunneling/aliasing connections to come from
+                //   specific IP ranges.
+                (command, AuthenticatedData::User { .. } | AuthenticatedData::Admin { .. })
+                    if command.starts_with("ip-blocklist=") =>
+                {
+                    blocklist = Some(
+                        command
+                            .trim_start_matches("ip-blocklist=")
+                            .split(',')
+                            .filter_map(|network| match network.parse::<IpNet>() {
+                                Ok(ip_net) => Some(ip_net),
+                                Err(err) => {
+                                    self.tx.send(
+                                        format!(
+                                            "Failed to parse IP network {}, ignoring ({})\r\n",
+                                            network, err
+                                        )
+                                        .into_bytes(),
+                                    );
+                                    None
+                                }
+                            })
+                            .collect(),
+                    );
                 }
                 // - Unknown command
                 (command, _) => {
@@ -706,6 +800,38 @@ impl Handler for ServerHandler {
                         .send(format!("Ignoring unknown command {}...", command).into_bytes());
                     success = false;
                 }
+            }
+        }
+        if allowlist.is_some() || blocklist.is_some() {
+            match &mut self.auth_data {
+                AuthenticatedData::User { user_data, .. }
+                | AuthenticatedData::Admin { user_data, .. } => {
+                    match IpFilter::new(IpFilterConfig {
+                        allowlist,
+                        blocklist,
+                    }) {
+                        Ok(ip_filter) => {
+                            let mut guard = user_data.ip_filter.write().await;
+                            if guard.is_none() {
+                                *guard = Some(ip_filter);
+                            } else {
+                                self.tx.send(
+                                    b"Failed to create IP filter for connection (already created)\r\n"
+                                        .to_vec(),
+                                );
+                                success = false;
+                            }
+                        }
+                        Err(err) => {
+                            self.tx.send(
+                                format!("Failed to create IP filter for connection ({})\r\n", err)
+                                    .into_bytes(),
+                            );
+                            success = false;
+                        }
+                    }
+                }
+                _ => (),
             }
         }
         if success {
@@ -830,9 +956,8 @@ impl Handler for ServerHandler {
                     user_data.quota_key.clone(),
                     Arc::new(SshTunnelHandler {
                         allow_fingerprint: Arc::clone(&user_data.allow_fingerprint),
-                        redirect_http_to_https_port: Arc::clone(
-                            &user_data.redirect_http_to_https_port,
-                        ),
+                        http_data: None,
+                        ip_filter: Arc::clone(&user_data.ip_filter),
                         handle,
                         tx: self.tx.clone_inner(),
                         peer: self.peer,
@@ -903,9 +1028,8 @@ impl Handler for ServerHandler {
                         user_data.quota_key.clone(),
                         Arc::new(SshTunnelHandler {
                             allow_fingerprint: Arc::clone(&user_data.allow_fingerprint),
-                            redirect_http_to_https_port: Arc::clone(
-                                &user_data.redirect_http_to_https_port,
-                            ),
+                            http_data: Some(Arc::clone(&user_data.http_data)),
+                            ip_filter: Arc::clone(&user_data.ip_filter),
                             handle,
                             tx: self.tx.clone_inner(),
                             peer: self.peer,
@@ -971,9 +1095,8 @@ impl Handler for ServerHandler {
                         user_data.quota_key.clone(),
                         Arc::new(SshTunnelHandler {
                             allow_fingerprint: Arc::clone(&user_data.allow_fingerprint),
-                            redirect_http_to_https_port: Arc::clone(
-                                &user_data.redirect_http_to_https_port,
-                            ),
+                            http_data: Some(Arc::clone(&user_data.http_data)),
+                            ip_filter: Arc::clone(&user_data.ip_filter),
                             handle,
                             tx: self.tx.clone_inner(),
                             peer: self.peer,
@@ -1126,9 +1249,8 @@ impl Handler for ServerHandler {
                         user_data.quota_key.clone(),
                         Arc::new(SshTunnelHandler {
                             allow_fingerprint: Arc::clone(&user_data.allow_fingerprint),
-                            redirect_http_to_https_port: Arc::clone(
-                                &user_data.redirect_http_to_https_port,
-                            ),
+                            http_data: None,
+                            ip_filter: Arc::clone(&user_data.ip_filter),
                             handle,
                             tx: self.tx.clone_inner(),
                             peer: self.peer,
@@ -1201,9 +1323,8 @@ impl Handler for ServerHandler {
                     user_data.quota_key.clone(),
                     Arc::new(SshTunnelHandler {
                         allow_fingerprint: Arc::clone(&user_data.allow_fingerprint),
-                        redirect_http_to_https_port: Arc::clone(
-                            &user_data.redirect_http_to_https_port,
-                        ),
+                        http_data: None,
+                        ip_filter: Arc::clone(&user_data.ip_filter),
                         handle,
                         tx: self.tx.clone_inner(),
                         peer: self.peer,
@@ -1384,59 +1505,13 @@ impl Handler for ServerHandler {
                 admin_data.is_forwarding = true;
             }
         }
-        // Handle local forwarding for HTTP
-        if port_to_connect == self.server.http_port || port_to_connect == self.server.https_port {
-            let peer = self.peer;
-            let fingerprint = self.key_fingerprint;
-            let proxy_data = Arc::clone(&self.server.aliasing_proxy_data);
-            // Set HTTP host via header (kinda hacky...)
-            let host_to_connect = host_to_connect.to_string();
-            let service = service_fn(move |mut req: Request<Incoming>| {
-                req.headers_mut()
-                    .insert("host", host_to_connect.clone().try_into().unwrap());
-                proxy_handler(req, peer, fingerprint, Arc::clone(&proxy_data))
-            });
-            let io = TokioIo::new(channel.into_stream());
-            match self.auth_data {
-                // Serve HTTP for unauthed user, then add disconnection timeout if this is the last proxy connection
-                AuthenticatedData::None { ref proxy_count } => {
-                    self.timeout_handle.lock().await.take();
-                    proxy_count.fetch_add(1, Ordering::Release);
-                    let proxy_count = Arc::clone(proxy_count);
-                    let timeout_handle = Arc::clone(&self.timeout_handle);
-                    let unproxied_connection_timeout = self.server.unproxied_connection_timeout;
-                    let cancellation_token = self.cancellation_token.clone();
-                    tokio::spawn(async move {
-                        let server = auto::Builder::new(TokioExecutor::new());
-                        let conn = server.serve_connection_with_upgrades(io, service);
-                        let _ = conn.await;
-                        if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
-                            *timeout_handle.lock().await =
-                                Some(DroppableHandle(tokio::spawn(async move {
-                                    sleep(unproxied_connection_timeout).await;
-                                    cancellation_token.cancel();
-                                })));
-                        }
-                    });
-                }
-                // Serve HTTP normally for authed user
-                _ => {
-                    tokio::spawn(async move {
-                        let server = auto::Builder::new(TokioExecutor::new());
-                        let conn = server.serve_connection_with_upgrades(io, service);
-                        let _ = conn.await;
-                    });
-                }
-            }
-
-            return Ok(true);
         // Handle local forwarding for SSH
-        } else if port_to_connect == self.server.ssh_port {
+        if port_to_connect == self.server.ssh_port {
             if let Some(handler) = self.server.ssh.get(host_to_connect) {
                 if let Ok(mut io) = handler
                     .aliasing_channel(
-                        originator_address,
-                        originator_port as u16,
+                        self.peer.ip(),
+                        self.peer.port(),
                         self.key_fingerprint.as_ref(),
                     )
                     .await
@@ -1517,13 +1592,61 @@ impl Handler for ServerHandler {
                 self.tx
                     .send(format!("Unknown SSH alias {}\r\n", host_to_connect).into_bytes());
             }
+        // Handle local forwarding for HTTP
+        } else if port_to_connect == self.server.http_port
+            || port_to_connect == self.server.https_port
+        {
+            let peer = self.peer;
+            let fingerprint = self.key_fingerprint;
+            let proxy_data = Arc::clone(&self.server.aliasing_proxy_data);
+            // Set HTTP host via header (kinda hacky...)
+            let host_to_connect = host_to_connect.to_string();
+            let service = service_fn(move |mut req: Request<Incoming>| {
+                req.headers_mut()
+                    .insert("host", host_to_connect.clone().try_into().unwrap());
+                proxy_handler(req, peer, fingerprint, Arc::clone(&proxy_data))
+            });
+            let io = TokioIo::new(channel.into_stream());
+            match self.auth_data {
+                // Serve HTTP for unauthed user, then add disconnection timeout if this is the last proxy connection
+                AuthenticatedData::None { ref proxy_count } => {
+                    self.timeout_handle.lock().await.take();
+                    proxy_count.fetch_add(1, Ordering::Release);
+                    let proxy_count = Arc::clone(proxy_count);
+                    let timeout_handle = Arc::clone(&self.timeout_handle);
+                    let unproxied_connection_timeout = self.server.unproxied_connection_timeout;
+                    let cancellation_token = self.cancellation_token.clone();
+                    tokio::spawn(async move {
+                        let server = auto::Builder::new(TokioExecutor::new());
+                        let conn = server.serve_connection_with_upgrades(io, service);
+                        let _ = conn.await;
+                        if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
+                            *timeout_handle.lock().await =
+                                Some(DroppableHandle(tokio::spawn(async move {
+                                    sleep(unproxied_connection_timeout).await;
+                                    cancellation_token.cancel();
+                                })));
+                        }
+                    });
+                }
+                // Serve HTTP normally for authed user
+                _ => {
+                    tokio::spawn(async move {
+                        let server = auto::Builder::new(TokioExecutor::new());
+                        let conn = server.serve_connection_with_upgrades(io, service);
+                        let _ = conn.await;
+                    });
+                }
+            }
+
+            return Ok(true);
         // Handle local forwarding for TCP
         } else if !self.server.is_alias(host_to_connect) {
             if let Some(handler) = self.server.tcp.get(&port_to_connect) {
                 if let Ok(mut io) = handler
                     .aliasing_channel(
-                        originator_address,
-                        originator_port as u16,
+                        self.peer.ip(),
+                        self.peer.port(),
                         self.key_fingerprint.as_ref(),
                     )
                     .await
@@ -1612,8 +1735,8 @@ impl Handler for ServerHandler {
         {
             if let Ok(mut io) = handler
                 .aliasing_channel(
-                    originator_address,
-                    originator_port as u16,
+                    self.peer.ip(),
+                    self.peer.port(),
                     self.key_fingerprint.as_ref(),
                 )
                 .await

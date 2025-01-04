@@ -30,4 +30,6 @@ pub(crate) enum ServerError {
     MissingDirectory(PathBuf),
     #[error("Duplicate network CIDR {0}")]
     DuplicateNetworkCidr(IpNet),
+    #[error("IP not allowed")]
+    IpNotAllowed,
 }
