@@ -245,7 +245,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
       <b>--http-request-timeout</b> &lt;DURATION&gt;
           Time until an outgoing HTTP request is automatically canceled
 
-          [default: 10s]
+          [default: 30s]
 
       <b>--tcp-connection-timeout</b> &lt;DURATION&gt;
           How long until TCP connections (including Websockets and local

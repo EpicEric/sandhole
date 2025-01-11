@@ -87,7 +87,7 @@ impl PortHandler for Arc<TcpHandler> {
                         // Get the handler for this port
                         if let Some(handler) = clone.conn_manager.get(&port) {
                             if let Ok(mut channel) = handler
-                                .tunneling_channel(address.ip().to_canonical(), address.port())
+                                .tunneling_channel(address.ip(), address.port())
                                 .await
                             {
                                 // Log new connection to SSH handler

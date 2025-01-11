@@ -295,7 +295,7 @@ pub struct ApplicationConfig {
     pub authentication_request_timeout: Duration,
 
     /// Time until an outgoing HTTP request is automatically canceled.
-    #[arg(long, default_value = "10s", value_name = "DURATION")]
+    #[arg(long, default_value = "30s", value_name = "DURATION")]
     pub http_request_timeout: Duration,
 
     /// How long until TCP connections (including Websockets and local forwardings) are automatically garbage-collected.

@@ -12,6 +12,7 @@
 
 - Error early on missing/blocked HTTP alias for `channel_open_direct_tcpip`.
 - Return "unknown alias" error messages when failing any pre-conditions.
+- Change default value of `--http-request-timeout` to 30s.
 
 ## 0.3.1 (2024-12-31)
 
