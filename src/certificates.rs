@@ -5,10 +5,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    connections::ConnectionMapReactor, directory::watch_directory,
-    droppable_handle::DroppableHandle, error::ServerError,
-};
+use crate::{directory::watch_directory, droppable_handle::DroppableHandle, error::ServerError};
 use log::{error, warn};
 #[cfg(test)]
 use mockall::automock;
@@ -204,6 +201,15 @@ impl CertificateResolver {
     pub(crate) fn challenge_rustls_config(&self) -> Option<Arc<ServerConfig>> {
         self.alpn_resolver.read().unwrap().challenge_rustls_config()
     }
+
+    // Find the list of domains that don't have a certificate associated with them, and request ACME challenges for them.
+    pub(crate) fn update_acme_domains(&self, hostnames: Vec<String>) {
+        let domains = hostnames
+            .into_iter()
+            .filter(|domain| self.resolve_server_name(domain.as_ref()).is_none())
+            .collect();
+        self.alpn_resolver.write().unwrap().update_domains(domains);
+    }
 }
 
 impl ResolvesServerCert for CertificateResolver {
@@ -220,27 +226,13 @@ impl ResolvesServerCert for CertificateResolver {
     }
 }
 
-impl ConnectionMapReactor<String> for Arc<CertificateResolver> {
-    // Find the list of domains that don't have a certificate associated with them, and request ACME challenges for them.
-    fn call(&self, hostnames: Vec<String>) {
-        let domains = hostnames
-            .into_iter()
-            .filter(|domain| self.resolve_server_name(domain.as_ref()).is_none())
-            .collect();
-        self.alpn_resolver.write().unwrap().update_domains(domains);
-    }
-}
-
 #[cfg(test)]
 mod certificate_resolver_tests {
     use std::sync::{Arc, RwLock};
 
     use mockall::predicate::eq;
 
-    use super::{
-        CertificateResolver, ConnectionMapReactor, DummyAlpnChallengeResolver,
-        MockAlpnChallengeResolver,
-    };
+    use super::{CertificateResolver, DummyAlpnChallengeResolver, MockAlpnChallengeResolver};
 
     static CERTIFICATES_DIRECTORY: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates");
@@ -306,6 +298,6 @@ mod certificate_resolver_tests {
             .await
             .unwrap(),
         );
-        resolver.call(vec!["foobar.tld".into(), "example.com".into()]);
+        resolver.update_acme_domains(vec!["foobar.tld".into(), "example.com".into()]);
     }
 }

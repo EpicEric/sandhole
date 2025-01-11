@@ -7,29 +7,16 @@ use std::{
 };
 
 use dashmap::DashMap;
-#[cfg(test)]
-use mockall::automock;
 use rand::{seq::SliceRandom, thread_rng};
 
 use crate::{
     config::LoadBalancing,
     error::ServerError,
     quota::{QuotaHandler, QuotaToken, TokenHolder},
+    reactor::{AliasReactor, ConnectionMapReactor, DummyConnectionMapReactor, HttpReactor},
     ssh::SshTunnelHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
-    HttpReactor,
 };
-
-#[cfg_attr(test, automock)]
-pub(crate) trait ConnectionMapReactor<K> {
-    fn call(&self, identifiers: Vec<K>);
-}
-
-pub(crate) struct DummyConnectionMapReactor;
-
-impl<K> ConnectionMapReactor<K> for DummyConnectionMapReactor {
-    fn call(&self, _: Vec<K>) {}
-}
 
 // Data stored for a connection map entry.
 struct ConnectionMapEntry<H> {
@@ -256,13 +243,13 @@ where
 // Struct that can select HTTP hosts from HTTP forwardings or TCP alias forwardings under port 80.
 pub(crate) struct HttpAliasingConnection {
     http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
-    alias: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>>>,
+    alias: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, AliasReactor>>,
 }
 
 impl HttpAliasingConnection {
     pub(crate) fn new(
         http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
-        tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>>>,
+        tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, AliasReactor>>,
     ) -> Self {
         HttpAliasingConnection { http, alias: tcp }
     }
@@ -286,9 +273,10 @@ mod connection_map_tests {
     use crate::{
         config::LoadBalancing,
         quota::{get_test_token, MockQuotaHandler, TokenHolder, UserIdentification},
+        reactor::MockConnectionMapReactor,
     };
 
-    use super::{ConnectionMap, MockConnectionMapReactor};
+    use super::ConnectionMap;
 
     #[test]
     fn inserts_and_removes_one_handler() {

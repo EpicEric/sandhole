@@ -188,6 +188,7 @@ impl UserData {
             allow_fingerprint: Arc::new(RwLock::new(Box::new(|_| true))),
             http_data: Arc::new(RwLock::new(ConnectionHttpData {
                 redirect_http_to_https_port: None,
+                is_aliasing: false,
             })),
             ip_filter: Arc::new(RwLock::new(None)),
             tcp_alias_only: false,
@@ -592,6 +593,7 @@ impl Handler for ServerHandler {
                     }
                     commands.insert("allowed-fingerprints".into());
                     user_data.tcp_alias_only = true;
+                    user_data.http_data.write().await.is_aliasing = true;
                     // Create a set from the provided list of fingerprints
                     let set: BTreeSet<Fingerprint> = command
                         .trim_start_matches("allowed-fingerprints=")
@@ -683,6 +685,7 @@ impl Handler for ServerHandler {
                     }
                     commands.insert("tcp-alias".into());
                     user_data.tcp_alias_only = true;
+                    user_data.http_data.write().await.is_aliasing = true;
                     // Reject TCP ports
                     if !self.server.tcp.remove_by_address(&self.peer).is_empty() {
                         self.tx
@@ -1544,6 +1547,9 @@ impl Handler for ServerHandler {
                     )
                     .await
                 {
+                    self.server
+                        .telemetry
+                        .add_ssh_connection(host_to_connect.into());
                     handler.log_channel().inspect(|tx| {
                         let _ = tx.send(
                             format!(
@@ -1692,6 +1698,7 @@ impl Handler for ServerHandler {
                     )
                     .await
                 {
+                    self.server.telemetry.add_tcp_connection(port_to_connect);
                     handler.log_channel().inspect(|tx| {
                         let _ = tx.send(
                             format!(
@@ -1782,6 +1789,9 @@ impl Handler for ServerHandler {
                     )
                     .await
                 {
+                    self.server
+                        .telemetry
+                        .add_alias_connection(TcpAlias(host_to_connect.into(), port_to_connect));
                     handler.log_channel().inspect(|tx| {
                         let _ = tx.send(
                             format!(

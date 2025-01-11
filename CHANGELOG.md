@@ -7,6 +7,7 @@
 - Add User-Agent to login API requests.
 - Add `force-https` option for remote forwarding connections.
 - Add `ip-allowlist`/`ip-blocklist` options for remote forwarding connections.
+- Add telemetry for SSH/TCP/alias connections.
 
 ### Changed
 

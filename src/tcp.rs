@@ -1,11 +1,9 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use crate::{
-    connection_handler::ConnectionHandler,
-    connections::{ConnectionMap, ConnectionMapReactor},
-    droppable_handle::DroppableHandle,
-    ip::IpFilter,
-    ssh::SshTunnelHandler,
+    connection_handler::ConnectionHandler, connections::ConnectionMap,
+    droppable_handle::DroppableHandle, ip::IpFilter, reactor::TcpReactor, ssh::SshTunnelHandler,
+    telemetry::Telemetry,
 };
 use anyhow::Context;
 use async_trait::async_trait;
@@ -20,7 +18,8 @@ pub(crate) struct TcpHandler {
     // Map containing spawned tasks of connections for each socket.
     sockets: DashMap<u16, DroppableHandle<()>>,
     // Connection map to assign a tunneling service for each incoming connection.
-    conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<Self>>>,
+    conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
+    telemetry: Arc<Telemetry>,
     // Service that identifies whether to allow or block a given IP address.
     ip_filter: Arc<IpFilter>,
     // Optional duration to time out TCP connections.
@@ -32,7 +31,8 @@ pub(crate) struct TcpHandler {
 impl TcpHandler {
     pub(crate) fn new(
         listen_address: String,
-        conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<Self>>>,
+        conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
+        telemetry: Arc<Telemetry>,
         ip_filter: Arc<IpFilter>,
         tcp_connection_timeout: Option<Duration>,
         disable_tcp_logs: bool,
@@ -41,6 +41,7 @@ impl TcpHandler {
             listen_address,
             sockets: DashMap::new(),
             conn_manager,
+            telemetry,
             ip_filter,
             tcp_connection_timeout,
             disable_tcp_logs,
@@ -52,6 +53,7 @@ impl TcpHandler {
 pub(crate) trait PortHandler {
     async fn create_port_listener(&self, port: u16) -> anyhow::Result<u16>;
     async fn get_free_port(&self) -> anyhow::Result<u16>;
+    fn update_ports(&self, ports: Vec<u16>);
 }
 
 #[async_trait]
@@ -68,16 +70,13 @@ impl PortHandler for Arc<TcpHandler> {
             .with_context(|| "Missing local address when binding port")?
             .port();
         let clone = Arc::clone(self);
-        let tcp_connection_timeout = self.tcp_connection_timeout;
-        let disable_tcp_logs = self.disable_tcp_logs;
-        let ip_filter_clone = Arc::clone(&self.ip_filter);
         // Start task that will listen to incoming connections.
         let join_handle = DroppableHandle(tokio::spawn(async move {
             loop {
                 match listener.accept().await {
                     Ok((mut stream, address)) => {
                         let ip = address.ip();
-                        if !ip_filter_clone.is_allowed(ip) {
+                        if !clone.ip_filter.is_allowed(ip) {
                             info!("Rejecting TCP connection for {}: not allowed", ip);
                             continue;
                         }
@@ -90,8 +89,9 @@ impl PortHandler for Arc<TcpHandler> {
                                 .tunneling_channel(address.ip(), address.port())
                                 .await
                             {
+                                clone.telemetry.add_tcp_connection(port);
                                 // Log new connection to SSH handler
-                                if !disable_tcp_logs {
+                                if !clone.disable_tcp_logs {
                                     handler.log_channel().inspect(|tx| {
                                         let _ = tx.send(
                                             format!(
@@ -105,7 +105,7 @@ impl PortHandler for Arc<TcpHandler> {
                                     });
                                 }
                                 // Copy data between the TCP stream and the reverse forwarding channel, with optional timeout
-                                match tcp_connection_timeout {
+                                match clone.tcp_connection_timeout {
                                     Some(duration) => {
                                         let _ = timeout(duration, async {
                                             copy_bidirectional(&mut stream, &mut channel).await
@@ -132,11 +132,9 @@ impl PortHandler for Arc<TcpHandler> {
         // By passing 0 to create_port_listener, the OS will choose a port for us.
         self.create_port_listener(0).await
     }
-}
 
-impl ConnectionMapReactor<u16> for Arc<TcpHandler> {
     // Handle changes to the proxy ports, creating/deleting listeners as needed.
-    fn call(&self, ports: Vec<u16>) {
+    fn update_ports(&self, ports: Vec<u16>) {
         // Find the ports listening to the localhost address
         let mut ports: HashSet<u16> = ports.into_iter().collect();
         // Remove any socket tasks not in the list of localhost port

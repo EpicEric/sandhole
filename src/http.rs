@@ -5,6 +5,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use crate::connection_handler::ConnectionHandler;
 use crate::connections::ConnectionGetByHttpHost;
+use crate::tcp_alias::TcpAlias;
 use crate::telemetry::Telemetry;
 
 use super::error::ServerError;
@@ -186,7 +187,9 @@ where
         return Ok((StatusCode::NOT_FOUND, "").into_response());
     };
     let http_data = handler.http_data().await;
-    let redirect_http_to_https_port = http_data.and_then(|data| data.redirect_http_to_https_port);
+    let redirect_http_to_https_port = http_data
+        .as_ref()
+        .and_then(|data| data.redirect_http_to_https_port);
     // Read protocol information for X-Forwarded headers
     let (proto, port) = match (
         protocol,
@@ -226,10 +229,8 @@ where
             return Ok(response);
         }
         (Protocol::Http { port }, _, _)
-        | (Protocol::TlsRedirect { from: port, .. }, _, ProxyType::Aliasing) => {
-            ("http", port.to_string())
-        }
-        (Protocol::Https { port }, _, _) => ("https", port.to_string()),
+        | (Protocol::TlsRedirect { from: port, .. }, _, ProxyType::Aliasing) => ("http", *port),
+        (Protocol::Https { port }, _, _) => ("https", *port),
     };
     // Add proxied info to the proper headers
     request
@@ -243,9 +244,13 @@ where
         .insert(X_FORWARDED_PROTO, proto.parse().unwrap());
     request
         .headers_mut()
-        .insert(X_FORWARDED_PORT, port.parse().unwrap());
+        .insert(X_FORWARDED_PORT, port.to_string().parse().unwrap());
     // Add this request to the telemetry for the host
-    telemetry.add_http_request(host.clone());
+    if http_data.as_ref().is_some_and(|data| data.is_aliasing) {
+        telemetry.add_alias_connection(TcpAlias(host.clone(), port));
+    } else {
+        telemetry.add_http_request(host.clone());
+    }
 
     // Find the appropriate handler for this proxy type
     let Ok(io) = (match proxy_data.proxy_type {
@@ -397,8 +402,9 @@ mod proxy_handler_tests {
     use crate::{
         config::LoadBalancing,
         connection_handler::{ConnectionHttpData, MockConnectionHandler},
-        connections::{ConnectionMap, MockConnectionMapReactor},
+        connections::ConnectionMap,
         quota::{DummyQuotaHandler, TokenHolder, UserIdentification},
+        reactor::MockConnectionMapReactor,
         telemetry::Telemetry,
     };
 
@@ -556,6 +562,7 @@ mod proxy_handler_tests {
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
+                is_aliasing: false,
             })
         });
         conn_manager
@@ -623,6 +630,7 @@ mod proxy_handler_tests {
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
+                is_aliasing: false,
             })
         });
         conn_manager
@@ -690,6 +698,7 @@ mod proxy_handler_tests {
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: Some(443),
+                is_aliasing: false,
             })
         });
         conn_manager
@@ -757,6 +766,7 @@ mod proxy_handler_tests {
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: Some(8443),
+                is_aliasing: false,
             })
         });
         conn_manager
@@ -830,6 +840,7 @@ mod proxy_handler_tests {
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
+                is_aliasing: false,
             })
         });
         conn_manager
@@ -927,6 +938,7 @@ mod proxy_handler_tests {
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: Some(443),
+                is_aliasing: false,
             })
         });
         conn_manager
@@ -1024,6 +1036,7 @@ mod proxy_handler_tests {
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
+                is_aliasing: false,
             })
         });
         conn_manager
@@ -1124,6 +1137,7 @@ mod proxy_handler_tests {
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
+                is_aliasing: false,
             })
         });
         conn_manager

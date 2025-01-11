@@ -14,7 +14,7 @@ use std::{
 
 use addressing::AddressDelegatorData;
 use anyhow::Context;
-use connections::{ConnectionMapReactor, HttpAliasingConnection};
+use connections::HttpAliasingConnection;
 use http::{DomainRedirect, ProxyData, ProxyType};
 use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
 use hyper_util::{
@@ -26,6 +26,7 @@ use log::{debug, error, info, warn};
 use login::ApiLogin;
 use quota::{DummyQuotaHandler, QuotaHandler, QuotaMap};
 use rand::rngs::OsRng;
+use reactor::{AliasReactor, HttpReactor, SshReactor, TcpReactor};
 use russh::{
     server::{Config, Msg},
     ChannelStream,
@@ -78,25 +79,11 @@ mod http;
 mod ip;
 mod login;
 mod quota;
+mod reactor;
 mod ssh;
 mod tcp;
 mod tcp_alias;
 mod telemetry;
-
-struct HttpReactor {
-    certificates: Arc<CertificateResolver>,
-    telemetry: Arc<Telemetry>,
-}
-
-// When the list of hostnames served by Sandhole changes, we must notify the
-// certificates resolver (in order to update the ACME challenges) and the telemetry
-// (in order to tell which hostnames are still being tracked or not).
-impl ConnectionMapReactor<String> for HttpReactor {
-    fn call(&self, identifiers: Vec<String>) {
-        self.certificates.call(identifiers.clone());
-        self.telemetry.call(identifiers);
-    }
-}
 
 // Data collected from the system and displayed on the admin interface.
 #[derive(Default, Clone)]
@@ -123,22 +110,23 @@ pub(crate) struct SandholeServer {
     pub(crate) sessions_password: Mutex<HashMap<String, SessionMap>>,
     // A map of all sessions for a given user authenticated with a public key.
     pub(crate) sessions_publickey: Mutex<BTreeMap<Fingerprint, SessionMap>>,
+    // The map for forwarded SSH connections.
+    pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, SshReactor>>,
     // The map for forwarded HTTP connections.
     pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
-    // The map for forwarded SSH connections.
-    pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>>>,
     // The map for forwarded TCP connections.
-    pub(crate) tcp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, Arc<TcpHandler>>>,
+    pub(crate) tcp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
     // The map for forwarded aliased connections.
-    pub(crate) alias: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>>>,
+    pub(crate) alias: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, AliasReactor>>,
+    pub(crate) telemetry: Arc<Telemetry>,
+    // Data related to the SSH forwardings for the admin interface.
+    pub(crate) ssh_data: DataTable<String, (BTreeMap<SocketAddr, String>, f64)>,
     // Data related to the HTTP forwardings for the admin interface.
     pub(crate) http_data: DataTable<String, (BTreeMap<SocketAddr, String>, f64)>,
-    // Data related to the SSH forwardings for the admin interface.
-    pub(crate) ssh_data: DataTable<String, BTreeMap<SocketAddr, String>>,
     // Data related to the TCP forwardings for the admin interface.
-    pub(crate) tcp_data: DataTable<u16, BTreeMap<SocketAddr, String>>,
+    pub(crate) tcp_data: DataTable<u16, (BTreeMap<SocketAddr, String>, f64)>,
     // Data related to the alias forwardings for the admin interface.
-    pub(crate) alias_data: DataTable<TcpAlias, BTreeMap<SocketAddr, String>>,
+    pub(crate) alias_data: DataTable<TcpAlias, (BTreeMap<SocketAddr, String>, f64)>,
     // System data for the admin interface.
     pub(crate) system_data: Arc<RwLock<SystemData>>,
     // HTTP proxy data used by the local forwarding aliasing connections.
@@ -304,7 +292,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let ssh_connections = Arc::new(ConnectionMap::new(
         config.load_balancing,
         Arc::clone(&quota_handler),
-        None,
+        Some(SshReactor(Arc::clone(&telemetry))),
     ));
     let tcp_connections = Arc::new(ConnectionMap::new(
         config.load_balancing,
@@ -314,17 +302,21 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let alias_connections = Arc::new(ConnectionMap::new(
         config.load_balancing,
         Arc::clone(&quota_handler),
-        None,
+        Some(AliasReactor(Arc::clone(&telemetry))),
     ));
     let tcp_handler: Arc<TcpHandler> = Arc::new(TcpHandler::new(
         config.listen_address,
         Arc::clone(&tcp_connections),
+        Arc::clone(&telemetry),
         Arc::clone(&ip_filter),
         config.tcp_connection_timeout.map(Into::into),
         config.disable_tcp_logs,
     ));
     // Add TCP handler service as a listener for TCP port updates.
-    tcp_connections.update_reactor(Some(Arc::clone(&tcp_handler)));
+    tcp_connections.update_reactor(Some(TcpReactor {
+        handler: Arc::clone(&tcp_handler),
+        telemetry: Arc::clone(&telemetry),
+    }));
     // Add addressing service with optional profanity filtering
     let requested_domain_filter: Option<&'static rustrict::Trie> =
         if config.requested_domain_filter_profanities {
@@ -358,6 +350,28 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     });
 
     // Telemetry tasks
+    let ssh_data = Arc::new(RwLock::default());
+    if !config.disable_aliasing {
+        let data_clone = Arc::clone(&ssh_data);
+        let connections_clone = Arc::clone(&ssh_connections);
+        let telemetry_clone = Arc::clone(&telemetry);
+        // Periodically update SSH data, based on the connection map.
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_millis(3_000)).await;
+                let data = connections_clone.data();
+                let telemetry = telemetry_clone.get_ssh_connections_per_minute();
+                let data = data
+                    .into_iter()
+                    .map(|(alias, addresses)| {
+                        let connections_per_minute = *telemetry.get(&alias).unwrap_or(&0f64);
+                        (alias, (addresses, connections_per_minute))
+                    })
+                    .collect();
+                *data_clone.write().unwrap() = data;
+            }
+        });
+    }
     let http_data = Arc::new(RwLock::default());
     if !config.disable_http {
         let data_clone = Arc::clone(&http_data);
@@ -380,28 +394,24 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             }
         });
     }
-    let ssh_data = Arc::new(RwLock::default());
-    if !config.disable_aliasing {
-        let data_clone = Arc::clone(&ssh_data);
-        let connections_clone = Arc::clone(&ssh_connections);
-        // Periodically update SSH data, based on the connection map.
-        tokio::spawn(async move {
-            loop {
-                sleep(Duration::from_millis(3_000)).await;
-                let data = connections_clone.data();
-                *data_clone.write().unwrap() = data;
-            }
-        });
-    }
     let tcp_data = Arc::new(RwLock::default());
     if !config.disable_tcp {
         let data_clone = Arc::clone(&tcp_data);
         let connections_clone = Arc::clone(&tcp_connections);
+        let telemetry_clone = Arc::clone(&telemetry);
         // Periodically update TCP data, based on the connection map.
         tokio::spawn(async move {
             loop {
                 sleep(Duration::from_millis(3_000)).await;
                 let data = connections_clone.data();
+                let telemetry = telemetry_clone.get_tcp_connections_per_minute();
+                let data = data
+                    .into_iter()
+                    .map(|(port, addresses)| {
+                        let connections_per_minute = *telemetry.get(&port).unwrap_or(&0f64);
+                        (port, (addresses, connections_per_minute))
+                    })
+                    .collect();
                 *data_clone.write().unwrap() = data;
             }
         });
@@ -410,11 +420,20 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     if !config.disable_aliasing {
         let data_clone = Arc::clone(&alias_data);
         let connections_clone = Arc::clone(&alias_connections);
+        let telemetry_clone = Arc::clone(&telemetry);
         // Periodically update alias data, based on the connection map.
         tokio::spawn(async move {
             loop {
                 sleep(Duration::from_millis(3_000)).await;
                 let data = connections_clone.data();
+                let telemetry = telemetry_clone.get_alias_connections_per_minute();
+                let data = data
+                    .into_iter()
+                    .map(|(alias, addresses)| {
+                        let connections_per_minute = *telemetry.get(&alias).unwrap_or(&0f64);
+                        (alias, (addresses, connections_per_minute))
+                    })
+                    .collect();
                 *data_clone.write().unwrap() = data;
             }
         });
@@ -486,6 +505,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         ssh: ssh_connections,
         tcp: tcp_connections,
         alias: alias_connections,
+        telemetry: Arc::clone(&telemetry),
         http_data,
         ssh_data,
         tcp_data,
