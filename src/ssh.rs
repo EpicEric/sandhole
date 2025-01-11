@@ -12,6 +12,7 @@ use std::{
 use crate::{
     admin::AdminInterface,
     connection_handler::{ConnectionHandler, ConnectionHttpData},
+    connections::ConnectionGetByHttpHost,
     droppable_handle::DroppableHandle,
     error::ServerError,
     fingerprints::AuthenticationType,
@@ -1629,7 +1630,12 @@ impl Handler for ServerHandler {
         } else if port_to_connect == self.server.http_port
             || port_to_connect == self.server.https_port
         {
-            if let Some(handler) = self.server.http.get(host_to_connect) {
+            if let Some(handler) = self
+                .server
+                .aliasing_proxy_data
+                .conn_manager
+                .get_by_http_host(host_to_connect)
+            {
                 if handler
                     .can_alias(
                         self.peer.ip(),

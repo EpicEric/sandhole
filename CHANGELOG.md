@@ -9,6 +9,10 @@
 - Add `ip-allowlist`/`ip-blocklist` options for remote forwarding connections.
 - Add telemetry for SSH/TCP/alias connections.
 
+### Fixed
+
+- Fix HTTP aliasing not working.
+
 ### Changed
 
 - Error early on missing/blocked HTTP alias for `channel_open_direct_tcpip`.

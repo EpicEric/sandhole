@@ -372,7 +372,7 @@ mod application_config_tests {
                 idle_connection_timeout: Duration::from_str("2s").unwrap(),
                 unproxied_connection_timeout: None,
                 authentication_request_timeout: Duration::from_str("5s").unwrap(),
-                http_request_timeout: Duration::from_str("10s").unwrap(),
+                http_request_timeout: Duration::from_str("30s").unwrap(),
                 tcp_connection_timeout: None
             }
         )
