@@ -661,8 +661,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                                 address,
                                 &ssh_config_clone,
                                 &mut sandhole_clone,
-                            )
-                            .await;
+                            );
                             continue;
                         }
                     }
@@ -673,22 +672,23 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 let service = service_fn(move |req: Request<Incoming>| {
                     proxy_handler(req, address, None, Arc::clone(&proxy_data))
                 });
+                let certificates = Arc::clone(&certificates_clone);
                 // Create a ClientHello TLS stream from the TCP stream.
-                match LazyConfigAcceptor::new(Default::default(), stream).await {
-                    Ok(handshake) => {
-                        // Handle ALPN challenges with the ACME resolver.
-                        if is_tls_alpn_challenge(&handshake.client_hello()) {
-                            if let Some(challenge_config) =
-                                certificates_clone.challenge_rustls_config()
-                            {
-                                tokio::spawn(async move {
+                let acceptor = LazyConfigAcceptor::new(Default::default(), stream);
+                tokio::spawn(async move {
+                    tokio::pin!(acceptor);
+                    match acceptor.as_mut().await {
+                        Ok(handshake) => {
+                            // Handle ALPN challenges with the ACME resolver.
+                            if is_tls_alpn_challenge(&handshake.client_hello()) {
+                                if let Some(challenge_config) =
+                                    certificates.challenge_rustls_config()
+                                {
                                     let mut tls =
                                         handshake.into_stream(challenge_config).await.unwrap();
                                     tls.shutdown().await.unwrap();
-                                });
-                            }
-                        } else {
-                            tokio::spawn(async move {
+                                }
+                            } else {
                                 match handshake.into_stream(server_config).await {
                                     Ok(stream) => {
                                         let server = auto::Builder::new(TokioExecutor::new());
@@ -705,17 +705,16 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                                         );
                                     }
                                 }
-                            });
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                "Failed to establish TLS handshake with {}: {}",
+                                address, err
+                            );
                         }
                     }
-                    Err(err) => {
-                        warn!(
-                            "Failed to establish TLS handshake with {}: {}",
-                            address, err
-                        );
-                        continue;
-                    }
-                }
+                });
             }
         })
     };
@@ -747,7 +746,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 if let Err(err) = stream.set_nodelay(true) {
                     warn!("Error setting nodelay for {}: {}", address, err);
                 }
-                handle_ssh_connection(stream, address, &ssh_config, &mut sandhole).await;
+                handle_ssh_connection(stream, address, &ssh_config, &mut sandhole);
             }
             _ = &mut signal_handler => {
                 break;
@@ -766,7 +765,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_ssh_connection(
+fn handle_ssh_connection(
     stream: TcpStream,
     address: SocketAddr,
     config: &Arc<Config>,

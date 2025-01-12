@@ -12,6 +12,7 @@
 ### Fixed
 
 - Fix HTTP aliasing not working.
+- Fix HTTPS connections occasionally locking up.
 
 ### Changed
 
