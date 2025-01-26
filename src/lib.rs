@@ -631,7 +631,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             disable_http_logs: config.disable_http_logs,
             _phantom_data: PhantomData,
         });
-        let mut sandhole_clone = Arc::clone(&sandhole);
+        let sandhole_clone = Arc::clone(&sandhole);
         let ssh_config_clone = Arc::clone(&ssh_config);
         tokio::spawn(async move {
             loop {
@@ -647,35 +647,32 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     info!("Rejecting HTTPS connection for {}: not allowed", ip);
                     continue;
                 }
-                if let Err(err) = stream.set_nodelay(true) {
-                    warn!("Error setting nodelay for {}: {}", address, err);
-                }
-                if config.connect_ssh_on_https_port {
-                    // Check if this is an SSH-2.0 handshake.
-                    let mut buf = [0u8; 8];
-                    if let Ok(n) = stream.peek(&mut buf).await {
-                        if buf[..n].starts_with(b"SSH-2.0-") {
-                            // Handle as an SSH connection instead of HTTPS.
-                            handle_ssh_connection(
-                                stream,
-                                address,
-                                &ssh_config_clone,
-                                &mut sandhole_clone,
-                            );
-                            continue;
-                        }
-                    }
-                }
                 let proxy_data = Arc::clone(&https_proxy_data);
                 let server_config = Arc::clone(&tls_server_config);
-                // Create a Hyper service and serve over the accepted TLS connection.
-                let service = service_fn(move |req: Request<Incoming>| {
-                    proxy_handler(req, address, None, Arc::clone(&proxy_data))
-                });
+                let ssh_config = Arc::clone(&ssh_config_clone);
+                let mut sandhole = Arc::clone(&sandhole_clone);
                 let certificates = Arc::clone(&certificates_clone);
-                // Create a ClientHello TLS stream from the TCP stream.
-                let acceptor = LazyConfigAcceptor::new(Default::default(), stream);
                 tokio::spawn(async move {
+                    if let Err(err) = stream.set_nodelay(true) {
+                        warn!("Error setting nodelay for {}: {}", address, err);
+                    }
+                    if config.connect_ssh_on_https_port {
+                        // Check if this is an SSH-2.0 handshake.
+                        let mut buf = [0u8; 8];
+                        if let Ok(n) = stream.peek(&mut buf).await {
+                            if buf[..n].starts_with(b"SSH-2.0-") {
+                                // Handle as an SSH connection instead of HTTPS.
+                                handle_ssh_connection(stream, address, &ssh_config, &mut sandhole);
+                                return;
+                            }
+                        }
+                    }
+                    // Create a Hyper service and serve over the accepted TLS connection.
+                    let service = service_fn(move |req: Request<Incoming>| {
+                        proxy_handler(req, address, None, Arc::clone(&proxy_data))
+                    });
+                    // Create a ClientHello TLS stream from the TCP stream.
+                    let acceptor = LazyConfigAcceptor::new(Default::default(), stream);
                     tokio::pin!(acceptor);
                     match acceptor.as_mut().await {
                         Ok(handshake) => {
