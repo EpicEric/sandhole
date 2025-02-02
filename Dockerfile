@@ -8,11 +8,11 @@ COPY Cargo.toml Cargo.lock .
 RUN mkdir src \
   && echo "fn main() {}" > src/main.rs \
   && cargo fetch \
-  && cargo zigbuild --release --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl \
+  && cargo zigbuild --release --locked --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl \
   && rm src/main.rs
 COPY src ./src
 COPY README.md .
-RUN cargo zigbuild --release --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
+RUN cargo zigbuild --release --locked --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
 
 FROM --platform=$BUILDPLATFORM scratch AS binary
 COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/sandhole /sandhole-linux-amd64
