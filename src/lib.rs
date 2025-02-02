@@ -492,7 +492,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         },
         // Always use aliasing channels instead of tunneling channels.
         proxy_type: ProxyType::Aliasing,
-        http_request_timeout: config.http_request_timeout.into(),
+        http_request_timeout: config.http_request_timeout.map(Into::into),
         websocket_timeout: config.tcp_connection_timeout.map(Into::into),
         disable_http_logs: config.disable_http_logs,
         _phantom_data: PhantomData,
@@ -562,7 +562,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             },
             // Always use tunneling channels.
             proxy_type: ProxyType::Tunneling,
-            http_request_timeout: config.http_request_timeout.into(),
+            http_request_timeout: config.http_request_timeout.map(Into::into),
             websocket_timeout: config.tcp_connection_timeout.map(Into::into),
             disable_http_logs: config.disable_http_logs,
             _phantom_data: PhantomData,
@@ -626,7 +626,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             },
             // Always use tunneling channels.
             proxy_type: ProxyType::Tunneling,
-            http_request_timeout: config.http_request_timeout.into(),
+            http_request_timeout: config.http_request_timeout.map(Into::into),
             websocket_timeout: config.tcp_connection_timeout.map(Into::into),
             disable_http_logs: config.disable_http_logs,
             _phantom_data: PhantomData,

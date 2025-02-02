@@ -295,8 +295,10 @@ pub struct ApplicationConfig {
     pub authentication_request_timeout: Duration,
 
     /// Time until an outgoing HTTP request is automatically canceled.
-    #[arg(long, default_value = "30s", value_name = "DURATION")]
-    pub http_request_timeout: Duration,
+    ///
+    /// By default, outgoing requests are not terminated by Sandhole.
+    #[arg(long, value_name = "DURATION")]
+    pub http_request_timeout: Option<Duration>,
 
     /// How long until TCP connections (including Websockets and local forwardings) are automatically garbage-collected.
     ///
@@ -372,7 +374,7 @@ mod application_config_tests {
                 idle_connection_timeout: Duration::from_str("2s").unwrap(),
                 unproxied_connection_timeout: None,
                 authentication_request_timeout: Duration::from_str("5s").unwrap(),
-                http_request_timeout: Duration::from_str("30s").unwrap(),
+                http_request_timeout: None,
                 tcp_connection_timeout: None
             }
         )
@@ -419,7 +421,7 @@ mod application_config_tests {
             "--idle-connection-timeout=3s",
             "--unproxied-connection-timeout=4s",
             "--authentication-request-timeout=6s",
-            "--http-request-timeout=11s",
+            "--http-request-timeout=15s",
             "--tcp-connection-timeout=30s",
         ]);
         assert_eq!(
@@ -465,7 +467,7 @@ mod application_config_tests {
                 idle_connection_timeout: Duration::from_str("3s").unwrap(),
                 unproxied_connection_timeout: Some(Duration::from_str("4s").unwrap()),
                 authentication_request_timeout: Duration::from_str("6s").unwrap(),
-                http_request_timeout: Duration::from_str("11s").unwrap(),
+                http_request_timeout: Some(Duration::from_str("15s").unwrap()),
                 tcp_connection_timeout: Some(Duration::from_str("30s").unwrap())
             }
         )

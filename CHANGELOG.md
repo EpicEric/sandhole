@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Further fixes to HTTPS connections lock-ups.
+
+### Changed
+
+- **BREAKING**: Make `--http-request-timeout` optional by default.
+
 ## 0.3.2 (2025-01-12)
 
 ### Added

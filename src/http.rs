@@ -121,8 +121,8 @@ where
     pub(crate) protocol: Protocol,
     // Configuration on which type of channel to retrieve from the handler.
     pub(crate) proxy_type: ProxyType,
-    // Duration until an outgoing request is canceled.
-    pub(crate) http_request_timeout: Duration,
+    // Optional duration until an outgoing request is canceled.
+    pub(crate) http_request_timeout: Option<Duration>,
     // Optional duration until an established Websocket connection is canceled.
     pub(crate) websocket_timeout: Option<Duration>,
     // If set, disables sending HTTP logs to the handler.
@@ -283,13 +283,13 @@ where
                     warn!("Connection failed: {:?}", err);
                 }
             });
-            // Await for a response under the given duration.
-            let response = timeout(
-                proxy_data.http_request_timeout,
-                sender.send_request(request),
-            )
-            .await
-            .map_err(|_| ServerError::RequestTimeout)??;
+            let response = match proxy_data.http_request_timeout {
+                // Await for a response under the given duration.
+                Some(duration) => timeout(duration, sender.send_request(request))
+                    .await
+                    .map_err(|_| ServerError::RequestTimeout)??,
+                None => sender.send_request(request).await?,
+            };
             let elapsed_time = timer.elapsed();
             http_log(
                 HttpLog {
@@ -317,13 +317,13 @@ where
             let request_type = request_upgrade.to_str()?.to_string();
             // Retrieve the OnUpgrade from the incoming request
             let upgraded_request = hyper::upgrade::on(&mut request);
-            // Await for a response under the given duration.
-            let mut response = timeout(
-                proxy_data.http_request_timeout,
-                sender.send_request(request),
-            )
-            .await
-            .map_err(|_| ServerError::RequestTimeout)??;
+            let mut response = match proxy_data.http_request_timeout {
+                // Await for a response under the given duration.
+                Some(duration) => timeout(duration, sender.send_request(request))
+                    .await
+                    .map_err(|_| ServerError::RequestTimeout)??,
+                None => sender.send_request(request).await?,
+            };
             let elapsed_time = timer.elapsed();
             http_log(
                 HttpLog {
@@ -395,7 +395,7 @@ mod proxy_handler_tests {
     use hyper::{body::Incoming, service::service_fn, HeaderMap, Request, StatusCode};
     use hyper_util::rt::TokioIo;
     use std::{marker::PhantomData, sync::Arc, time::Duration};
-    use tokio::{io::DuplexStream, sync::mpsc};
+    use tokio::{io::DuplexStream, sync::mpsc, time::sleep};
     use tokio_tungstenite::client_async;
     use tower::Service;
 
@@ -403,6 +403,7 @@ mod proxy_handler_tests {
         config::LoadBalancing,
         connection_handler::{ConnectionHttpData, MockConnectionHandler},
         connections::ConnectionMap,
+        http::ServerError,
         quota::{DummyQuotaHandler, TokenHolder, UserIdentification},
         reactor::MockConnectionMapReactor,
         telemetry::Telemetry,
@@ -441,7 +442,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Http { port: 80 },
                 proxy_type: ProxyType::Tunneling,
-                http_request_timeout: Duration::from_secs(5),
+                http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
@@ -483,7 +484,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Http { port: 80 },
                 proxy_type: ProxyType::Tunneling,
-                http_request_timeout: Duration::from_secs(5),
+                http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
@@ -527,7 +528,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Http { port: 80 },
                 proxy_type: ProxyType::Tunneling,
-                http_request_timeout: Duration::from_secs(5),
+                http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
@@ -592,7 +593,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::TlsRedirect { from: 80, to: 443 },
                 proxy_type: ProxyType::Tunneling,
-                http_request_timeout: Duration::from_secs(5),
+                http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
@@ -660,7 +661,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::TlsRedirect { from: 80, to: 8443 },
                 proxy_type: ProxyType::Tunneling,
-                http_request_timeout: Duration::from_secs(5),
+                http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
@@ -728,7 +729,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Http { port: 80 },
                 proxy_type: ProxyType::Tunneling,
-                http_request_timeout: Duration::from_secs(5),
+                http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
@@ -796,7 +797,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Http { port: 80 },
                 proxy_type: ProxyType::Tunneling,
-                http_request_timeout: Duration::from_secs(5),
+                http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
@@ -813,6 +814,101 @@ mod proxy_handler_tests {
             response.headers().get("location").unwrap(),
             "https://non.standard:8443/test"
         );
+    }
+
+    #[tokio::test]
+    async fn returns_error_for_outgoing_request_timeout() {
+        let conn_manager: Arc<
+            ConnectionMap<
+                String,
+                Arc<MockConnectionHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
+        > = Arc::new(ConnectionMap::new(
+            LoadBalancing::Allow,
+            Arc::new(Box::new(DummyQuotaHandler)),
+            None,
+        ));
+        let (server, handler) = tokio::io::duplex(1024);
+        let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let mut mock = MockConnectionHandler::new();
+        mock.expect_log_channel()
+            .once()
+            .return_once(move || Some(logging_tx));
+        mock.expect_tunneling_channel()
+            .once()
+            .return_once(move |_, _| Ok(handler));
+        mock.expect_http_data().once().return_once(move || {
+            Some(ConnectionHttpData {
+                redirect_http_to_https_port: None,
+                is_aliasing: false,
+            })
+        });
+        conn_manager
+            .insert(
+                "slow.handler".into(),
+                "127.0.0.1:12345".parse().unwrap(),
+                TokenHolder::User(UserIdentification::Username("a".into())),
+                Arc::new(mock),
+            )
+            .unwrap();
+        let request = Request::builder()
+            .method("GET")
+            .uri("/slow_endpoint")
+            .header("host", "slow.handler")
+            .body(Empty::<Bytes>::new())
+            .unwrap();
+        let router = axum::Router::new()
+            .route(
+                "/slow_endpoint",
+                axum::routing::get(|| async move {
+                    sleep(Duration::from_secs(1)).await;
+                    "Slow hello."
+                }),
+            )
+            .into_service();
+        let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
+        let jh = tokio::spawn(async move {
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection(TokioIo::new(server), router_service)
+                .await
+                .expect("Invalid request");
+        });
+        assert!(
+            logging_rx.is_empty(),
+            "shouldn't log before handling request"
+        );
+        let response = proxy_handler(
+            request,
+            "127.0.0.1:12345".parse().unwrap(),
+            None,
+            Arc::new(ProxyData {
+                conn_manager: Arc::clone(&conn_manager),
+                telemetry: Arc::new(Telemetry::new()),
+                domain_redirect: Arc::new(DomainRedirect {
+                    from: "main.domain".into(),
+                    to: "https://example.com".into(),
+                }),
+                protocol: Protocol::Https { port: 443 },
+                proxy_type: ProxyType::Tunneling,
+                http_request_timeout: Some(Duration::from_millis(500)),
+                websocket_timeout: None,
+                disable_http_logs: false,
+                _phantom_data: PhantomData,
+            }),
+        )
+        .await;
+        assert!(
+            logging_rx.is_empty(),
+            "shouldn't log if failed to proxy request"
+        );
+        assert!(response.is_err(), "should fail if timed out");
+        let error = response.unwrap_err();
+        assert!(matches!(
+            error.downcast().unwrap(),
+            ServerError::RequestTimeout
+        ));
+        jh.abort();
     }
 
     #[tokio::test]
@@ -896,7 +992,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Https { port: 443 },
                 proxy_type: ProxyType::Tunneling,
-                http_request_timeout: Duration::from_secs(5),
+                http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
@@ -994,7 +1090,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Http { port: 80 },
                 proxy_type: ProxyType::Aliasing,
-                http_request_timeout: Duration::from_secs(5),
+                http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
@@ -1092,7 +1188,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Https { port: 443 },
                 proxy_type: ProxyType::Tunneling,
-                http_request_timeout: Duration::from_secs(5),
+                http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
                 _phantom_data: PhantomData,
@@ -1184,7 +1280,7 @@ mod proxy_handler_tests {
                     }),
                     protocol: Protocol::Https { port: 443 },
                     proxy_type: ProxyType::Tunneling,
-                    http_request_timeout: Duration::from_secs(5),
+                    http_request_timeout: None,
                     websocket_timeout: None,
                     disable_http_logs: false,
                     _phantom_data: PhantomData,

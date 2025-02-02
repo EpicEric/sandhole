@@ -243,7 +243,9 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           [default: 5s]
 
       <b>--http-request-timeout</b> &lt;DURATION&gt;
-          Time until an outgoing HTTP request is automatically canceled
+          Time until an outgoing HTTP request is automatically canceled.
+
+          By default, outgoing requests are not terminated by Sandhole.
 
           [default: 30s]
 
