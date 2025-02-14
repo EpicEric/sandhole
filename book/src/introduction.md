@@ -12,5 +12,5 @@ Welcome to the **Sandhole book**. This is a guide on how to install, configure, 
 - Exposing endpoints or ports on IoT devices, game servers, and other applications.
 - Hosting a dual-stack HTTP+SSH service (via ProxyJump), such as a Git instance.
 - Handling a multi-tenant network with several websites under the same domain.
-- Using the tunnel for peer-to-peer connections, or [even as a basic VPN](./advanced_uses.md#local-forwarding-and-aliasing).
+- Using the tunnel for peer-to-peer connections, or [even as a basic VPN](./local_forwarding.md).
 - And possibly more!
