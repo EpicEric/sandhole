@@ -1,13 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
-use async_trait::async_trait;
 use clap::Parser;
 use rand::rngs::OsRng;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
     Channel,
 };
-use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
@@ -68,10 +67,18 @@ async fn alias_aliasing_tunnel() {
         proxy_session
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    proxy_session
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     proxy_session
@@ -84,7 +91,7 @@ async fn alias_aliasing_tunnel() {
     );
 
     // 3. Establish a tunnel via aliasing
-    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut client_session =
         russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
@@ -94,10 +101,18 @@ async fn alias_aliasing_tunnel() {
         client_session
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    client_session
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     let mut channel = client_session
@@ -142,11 +157,13 @@ async fn alias_aliasing_tunnel() {
 
 struct SshClient;
 
-#[async_trait]
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 

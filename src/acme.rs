@@ -6,7 +6,7 @@ use rustls::{
     sign::CertifiedKey,
     ServerConfig,
 };
-use rustls_acme::{caches::DirCache, AcmeConfig, ResolvesServerCertAcme};
+use rustls_acme::{caches::DirCache, AcmeConfig, ResolvesServerCertAcme, UseChallenge};
 use tokio_stream::StreamExt;
 
 use crate::{certificates::AlpnChallengeResolver, droppable_handle::DroppableHandle};
@@ -57,6 +57,7 @@ impl AlpnChallengeResolver for AcmeResolver {
             .contact_push(format!("mailto:{}", self.contact))
             .cache(DirCache::new(self.cache_dir.clone()))
             .directory_lets_encrypt(!self.use_staging)
+            .challenge_type(UseChallenge::TlsAlpn01)
             .state();
         self.config = Some(new_state.challenge_rustls_config());
         self.resolver = Some(new_state.resolver());

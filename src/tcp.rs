@@ -6,7 +6,6 @@ use crate::{
     telemetry::Telemetry,
 };
 use anyhow::Context;
-use async_trait::async_trait;
 use dashmap::DashMap;
 use log::{error, info, warn};
 use tokio::{io::copy_bidirectional, net::TcpListener, time::timeout};
@@ -49,14 +48,12 @@ impl TcpHandler {
     }
 }
 
-#[async_trait]
 pub(crate) trait PortHandler {
     async fn create_port_listener(&self, port: u16) -> anyhow::Result<u16>;
     async fn get_free_port(&self) -> anyhow::Result<u16>;
     fn update_ports(&self, ports: Vec<u16>);
 }
 
-#[async_trait]
 impl PortHandler for Arc<TcpHandler> {
     // Create a TCP listener on the given port.
     async fn create_port_listener(&self, port: u16) -> anyhow::Result<u16> {

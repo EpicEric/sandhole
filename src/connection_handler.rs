@@ -1,9 +1,8 @@
 use std::net::IpAddr;
 
-use async_trait::async_trait;
 #[cfg(test)]
 use mockall::automock;
-use ssh_key::Fingerprint;
+use russh::keys::ssh_key::Fingerprint;
 use tokio::sync::mpsc;
 
 // Extra data available for HTTP tunneling/aliasing connections.
@@ -16,7 +15,6 @@ pub(crate) struct ConnectionHttpData {
 
 // Trait for creating tunneling or aliasing channels (via an underlying SSH session).
 #[cfg_attr(test, automock)]
-#[async_trait]
 pub(crate) trait ConnectionHandler<T: Sync> {
     // Return a copy of the logging channel associated with this handler.
     fn log_channel(&self) -> Option<mpsc::UnboundedSender<Vec<u8>>>;
@@ -25,6 +23,7 @@ pub(crate) trait ConnectionHandler<T: Sync> {
     async fn tunneling_channel(&self, ip: IpAddr, port: u16) -> anyhow::Result<T>;
 
     // Whether the given credentials can create an aliasing channel to this handler.
+    #[expect(clippy::needless_lifetimes)]
     async fn can_alias<'a>(
         &self,
         ip: IpAddr,
@@ -33,6 +32,7 @@ pub(crate) trait ConnectionHandler<T: Sync> {
     ) -> bool;
 
     // Return an aliasing channel for this handler.
+    #[expect(clippy::needless_lifetimes)]
     async fn aliasing_channel<'a>(
         &self,
         ip: IpAddr,

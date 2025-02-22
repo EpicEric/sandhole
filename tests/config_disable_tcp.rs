@@ -1,6 +1,5 @@
 use std::{sync::Arc, time::Duration};
 
-use async_trait::async_trait;
 use axum::{routing::get, Router};
 use clap::Parser;
 use http::{Request, StatusCode};
@@ -9,11 +8,11 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
     Channel,
 };
-use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
@@ -74,11 +73,15 @@ async fn config_disable_tcp() {
     assert!(
         session
             .authenticate_publickey(
-                "user1",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                "user",
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     assert!(
@@ -102,11 +105,13 @@ async fn config_disable_tcp() {
 
 struct SshClient;
 
-#[async_trait]
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 

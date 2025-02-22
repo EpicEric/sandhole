@@ -2,7 +2,6 @@
 
 use std::{
     borrow::Borrow,
-    cmp::Ordering,
     hash::{Hash, Hasher},
 };
 
@@ -43,18 +42,6 @@ impl PartialEq for (dyn TcpAliasKey + '_) {
 }
 
 impl Eq for (dyn TcpAliasKey + '_) {}
-
-impl PartialOrd for (dyn TcpAliasKey + '_) {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for (dyn TcpAliasKey + '_) {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.key().cmp(&other.key())
-    }
-}
 
 impl Hash for (dyn TcpAliasKey + '_) {
     fn hash<H: Hasher>(&self, state: &mut H) {

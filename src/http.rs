@@ -20,7 +20,7 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use log::warn;
-use ssh_key::Fingerprint;
+use russh::keys::ssh_key::Fingerprint;
 use tokio::{
     io::{copy_bidirectional, AsyncRead, AsyncWrite},
     sync::mpsc,
@@ -390,7 +390,7 @@ where
 #[cfg(test)]
 mod proxy_handler_tests {
     use bytes::Bytes;
-    use futures_util::StreamExt;
+    use futures_util::{SinkExt, StreamExt};
     use http_body_util::Empty;
     use hyper::{body::Incoming, service::service_fn, HeaderMap, Request, StatusCode};
     use hyper_util::rt::TokioIo;

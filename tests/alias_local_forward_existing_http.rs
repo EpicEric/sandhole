@@ -1,6 +1,5 @@
 use std::{sync::Arc, time::Duration};
 
-use async_trait::async_trait;
 use axum::{routing::get, Router};
 use clap::Parser;
 use http::{Request, StatusCode};
@@ -11,11 +10,11 @@ use hyper_util::{
     server::conn::auto::Builder,
 };
 use rand::rngs::OsRng;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{self, Msg, Session},
     Channel,
 };
-use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
@@ -81,10 +80,14 @@ async fn alias_local_forward_existing_http() {
         session
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     session
@@ -93,7 +96,7 @@ async fn alias_local_forward_existing_http() {
         .expect("tcpip_forward failed");
 
     // 3. Local-forward instead of connecting directly
-    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -102,13 +105,16 @@ async fn alias_local_forward_existing_http() {
         session
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
-
     let channel = session
         .channel_open_direct_tcpip("example.foobar.tld", 18080, "localhost", 12345)
         .await
@@ -154,11 +160,13 @@ async fn alias_local_forward_existing_http() {
 
 struct SshClient;
 
-#[async_trait]
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 

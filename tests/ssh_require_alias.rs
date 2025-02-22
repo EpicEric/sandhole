@@ -1,9 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
-use async_trait::async_trait;
 use clap::Parser;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{client, Channel};
-use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
@@ -63,10 +62,14 @@ async fn ssh_require_alias() {
         session
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     assert!(
@@ -77,11 +80,13 @@ async fn ssh_require_alias() {
 
 struct SshClient;
 
-#[async_trait]
 impl client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 

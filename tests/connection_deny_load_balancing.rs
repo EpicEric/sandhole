@@ -1,14 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
-use async_trait::async_trait;
 use clap::Parser;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
     Channel,
 };
-use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
-use ssh_key::HashAlg;
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
@@ -69,10 +67,14 @@ async fn connection_deny_load_balancing() {
         session_a
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key_1), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key_1),
+                    session_a.best_supported_rsa_hash().await.unwrap().flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     session_a
@@ -106,10 +108,14 @@ async fn connection_deny_load_balancing() {
         session_b
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key_2), Some(HashAlg::Sha512)).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key_2),
+                    session_b.best_supported_rsa_hash().await.unwrap().flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     assert!(
@@ -138,11 +144,13 @@ async fn connection_deny_load_balancing() {
 
 struct SshClient;
 
-#[async_trait]
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 

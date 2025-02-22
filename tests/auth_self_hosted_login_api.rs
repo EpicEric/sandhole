@@ -1,6 +1,5 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use async_trait::async_trait;
 use axum::{extract::Request, response::IntoResponse, routing::post, Json, Router};
 use clap::Parser;
 use hyper::{body::Incoming, service::service_fn, StatusCode};
@@ -8,11 +7,11 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
     Channel,
 };
-use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use serde::Deserialize;
 use tokio::{
@@ -76,10 +75,14 @@ async fn auth_self_hosted_login_api() {
         session
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     session
@@ -96,7 +99,8 @@ async fn auth_self_hosted_login_api() {
         session
             .authenticate_password("eric", "sandhole")
             .await
-            .expect("password authentication failed"),
+            .expect("password authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
 
@@ -109,18 +113,21 @@ async fn auth_self_hosted_login_api() {
         !session
             .authenticate_password("eric", "invalid_password")
             .await
-            .expect("password authentication failed"),
+            .expect("password authentication failed")
+            .success(),
         "authentication shouldn't have succeeded"
     );
 }
 
 struct SshClient;
 
-#[async_trait]
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 

@@ -1,13 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
-use async_trait::async_trait;
 use clap::Parser;
 use rand::rngs::OsRng;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
     Channel,
 };
-use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     io::AsyncReadExt,
@@ -69,10 +68,18 @@ async fn tcp_allow_requested_ports() {
         session_one
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session_one
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     session_one
@@ -89,7 +96,7 @@ async fn tcp_allow_requested_ports() {
     assert_eq!(&buf, b"Hello, world!");
 
     // 4. Local-forward the TCP port for random user
-    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClient;
     let mut session_two = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -98,10 +105,18 @@ async fn tcp_allow_requested_ports() {
         session_two
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session_two
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     let mut channel = session_two
@@ -137,10 +152,18 @@ async fn tcp_allow_requested_ports() {
         session_three
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session_three
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     let mut channel = session_three
@@ -170,11 +193,13 @@ async fn tcp_allow_requested_ports() {
 
 struct SshClient;
 
-#[async_trait]
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 

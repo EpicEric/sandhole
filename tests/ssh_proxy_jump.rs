@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use async_trait::async_trait;
 use clap::Parser;
 use rand::rngs::OsRng;
 use russh::{
@@ -13,7 +12,10 @@ use russh::{
     server::{self, Auth, Server},
     Channel, MethodSet,
 };
-use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
+use russh::{
+    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
+    MethodKind,
+};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
@@ -73,10 +75,18 @@ async fn ssh_proxy_jump() {
         session_one
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session_one
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     session_one
@@ -85,7 +95,7 @@ async fn ssh_proxy_jump() {
         .expect("tcpip_forward failed");
 
     // 3. Connect to the SSH port of our proxy with anonymous user
-    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
     let ssh_client = ProxyClient;
     let mut session_two = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -94,10 +104,18 @@ async fn ssh_proxy_jump() {
         session_two
             .authenticate_publickey(
                 "user1",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session_two
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     let channel = session_two
@@ -113,7 +131,8 @@ async fn ssh_proxy_jump() {
         proxy_session
             .authenticate_password("user", "password")
             .await
-            .expect("Proxy SSH authentication failed"),
+            .expect("Proxy SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     let mut session_channel = proxy_session
@@ -148,10 +167,18 @@ async fn ssh_proxy_jump() {
         session_two
             .authenticate_publickey(
                 "user2",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session_two
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     let channel = session_two
@@ -167,7 +194,8 @@ async fn ssh_proxy_jump() {
         proxy_session
             .authenticate_password("user", "password")
             .await
-            .expect("Proxy SSH authentication failed"),
+            .expect("Proxy SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     let mut session_channel = proxy_session
@@ -199,11 +227,13 @@ struct SshClient {
     server: Honeypot,
 }
 
-#[async_trait]
 impl client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 
@@ -225,9 +255,9 @@ impl client::Handler for SshClient {
         tokio::spawn(async move {
             let session = match server::run_stream(
                 Arc::new(server::Config {
-                    keys: vec![russh_keys::PrivateKey::random(
+                    keys: vec![russh::keys::PrivateKey::random(
                         &mut OsRng,
-                        russh_keys::Algorithm::Ed25519,
+                        russh::keys::Algorithm::Ed25519,
                     )
                     .unwrap()],
                     ..Default::default()
@@ -247,7 +277,6 @@ impl client::Handler for SshClient {
                 Ok(_) => (),
                 Err(_) => {
                     // Connection closed with error
-                    return;
                 }
             }
         });
@@ -267,17 +296,16 @@ impl server::Server for Honeypot {
 
 struct HoneypotHandler;
 
-#[async_trait]
 impl server::Handler for HoneypotHandler {
     type Error = russh::Error;
 
     async fn auth_publickey(
         &mut self,
         _user: &str,
-        _public_key: &ssh_key::PublicKey,
+        _public_key: &russh::keys::PublicKey,
     ) -> Result<Auth, Self::Error> {
         Ok(Auth::Reject {
-            proceed_with_methods: Some(MethodSet::PASSWORD),
+            proceed_with_methods: Some(MethodSet::from([MethodKind::Password].as_slice())),
         })
     }
 
@@ -304,11 +332,13 @@ impl server::Handler for HoneypotHandler {
 
 struct ProxyClient;
 
-#[async_trait]
 impl client::Handler for ProxyClient {
     type Error = russh::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 
@@ -339,7 +369,6 @@ impl client::Handler for ProxyClient {
                 Ok(_) => (),
                 Err(_) => {
                     // Connection closed with error
-                    return;
                 }
             }
         });

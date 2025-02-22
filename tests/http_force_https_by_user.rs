@@ -1,6 +1,5 @@
 use std::{sync::Arc, time::Duration};
 
-use async_trait::async_trait;
 use axum::{extract::Request, routing::get, Router};
 use clap::Parser;
 use http_body_util::BodyExt;
@@ -9,11 +8,11 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
     Channel, ChannelId,
 };
-use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
@@ -76,10 +75,14 @@ async fn http_force_https_by_user() {
         session
             .authenticate_publickey(
                 "user1",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     session
@@ -114,10 +117,14 @@ async fn http_force_https_by_user() {
         session
             .authenticate_publickey(
                 "user1",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     session
@@ -214,10 +221,14 @@ async fn http_force_https_by_user() {
         session
             .authenticate_publickey(
                 "user2",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     let channel = session
@@ -265,11 +276,13 @@ async fn http_force_https_by_user() {
 
 struct SshClientProxy(mpsc::UnboundedSender<ChannelId>);
 
-#[async_trait]
 impl russh::client::Handler for SshClientProxy {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 
@@ -285,7 +298,7 @@ impl russh::client::Handler for SshClientProxy {
         let router = Router::new()
             .route(
                 "/",
-                get(|| async move { format!("Hello from my (sometimes) secure server!") }),
+                get(|| async move { "Hello from my (sometimes) secure server!".to_string() }),
             )
             .into_service();
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
@@ -310,11 +323,13 @@ impl russh::client::Handler for SshClientProxy {
 
 struct SshClient;
 
-#[async_trait]
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 
@@ -330,7 +345,7 @@ impl russh::client::Handler for SshClient {
         let router = Router::new()
             .route(
                 "/",
-                get(|| async move { format!("Hello from my (sometimes) secure server!") }),
+                get(|| async move { "Hello from my (sometimes) secure server!".to_string() }),
             )
             .into_service();
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));

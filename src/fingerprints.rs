@@ -9,7 +9,7 @@ use std::{
 use crate::{directory::watch_directory, droppable_handle::DroppableHandle, error::ServerError};
 use log::{error, warn};
 use notify::RecommendedWatcher;
-use ssh_key::{Algorithm, Fingerprint, HashAlg, PublicKey};
+use russh::keys::{ssh_key::Fingerprint, Algorithm, HashAlg, PublicKey};
 use tokio::{
     fs::{read_dir, read_to_string},
     sync::oneshot,
@@ -217,34 +217,32 @@ impl FingerprintsValidator {
     // Return the key data related to a given fingerprint
     pub(crate) fn get_data_for_fingerprint(&self, fingerprint: &Fingerprint) -> Option<KeyData> {
         // Check admin keys first
-        if let Some(key_data) = self.admin_fingerprints.read().unwrap().get(fingerprint) {
-            Some(key_data.clone())
-        // Check user keys next
-        } else {
-            self.user_fingerprints
+        match self.admin_fingerprints.read().unwrap().get(fingerprint) {
+            Some(key_data) => {
+                Some(key_data.clone())
+                // Check user keys next
+            }
+            _ => self
+                .user_fingerprints
                 .read()
                 .unwrap()
                 .get(fingerprint)
-                .cloned()
+                .cloned(),
         }
     }
 
     // Delete a user key from the fingerprints matcher and the filesystem
     pub(crate) fn remove_user_key(&self, fingerprint: &Fingerprint) -> anyhow::Result<()> {
-        if let Some(KeyData { file, .. }) =
-            self.user_fingerprints.write().unwrap().remove(fingerprint)
-        {
-            Ok(remove_file(file)?)
-        } else {
-            Err(ServerError::NoMatchingUserKey.into())
+        match self.user_fingerprints.write().unwrap().remove(fingerprint) {
+            Some(KeyData { file, .. }) => Ok(remove_file(file)?),
+            _ => Err(ServerError::NoMatchingUserKey.into()),
         }
     }
 }
 
 #[cfg(test)]
 mod fingerprints_validator_tests {
-    use russh_keys::parse_public_key_base64;
-    use ssh_key::HashAlg;
+    use russh::keys::{parse_public_key_base64, HashAlg};
 
     use super::{AuthenticationType, FingerprintsValidator};
 

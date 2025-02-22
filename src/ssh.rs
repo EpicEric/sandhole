@@ -25,7 +25,6 @@ use crate::{
     SandholeServer,
 };
 
-use async_trait::async_trait;
 use http::Request;
 use hyper::{body::Incoming, service::service_fn};
 use hyper_util::{
@@ -35,11 +34,10 @@ use hyper_util::{
 use ipnet::IpNet;
 use log::{debug, info, warn};
 use russh::{
+    keys::{ssh_key::Fingerprint, HashAlg, PublicKey},
     server::{Auth, Handler, Msg, Session},
-    Channel, ChannelId, ChannelStream, MethodSet,
+    Channel, ChannelId, ChannelStream, MethodKind, MethodSet,
 };
-use russh_keys::PublicKey;
-use ssh_key::{Fingerprint, HashAlg};
 use tokio::{
     io::{copy_bidirectional, AsyncWriteExt},
     sync::{mpsc, Mutex, RwLock},
@@ -88,7 +86,6 @@ impl Drop for SshTunnelHandler {
     }
 }
 
-#[async_trait]
 impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
     fn log_channel(&self) -> Option<mpsc::UnboundedSender<Vec<u8>>> {
         self.tx.clone()
@@ -119,11 +116,11 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
         }
     }
 
-    async fn can_alias<'a>(
+    async fn can_alias(
         &self,
         ip: IpAddr,
         _port: u16,
-        fingerprint: Option<&'a Fingerprint>,
+        fingerprint: Option<&'_ Fingerprint>,
     ) -> bool {
         // Check if this IP is not blocked for the alias
         self.ip_filter
@@ -135,11 +132,11 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
             && (self.allow_fingerprint.read().await)(fingerprint)
     }
 
-    async fn aliasing_channel<'a>(
+    async fn aliasing_channel(
         &self,
         ip: IpAddr,
         port: u16,
-        fingerprint: Option<&'a Fingerprint>,
+        fingerprint: Option<&'_ Fingerprint>,
     ) -> anyhow::Result<ChannelStream<Msg>> {
         if self.can_alias(ip, port, fingerprint).await {
             let channel = self
@@ -326,7 +323,6 @@ impl Server for Arc<SandholeServer> {
     }
 }
 
-#[async_trait]
 impl Handler for ServerHandler {
     type Error = russh::Error;
 
@@ -360,7 +356,7 @@ impl Handler for ServerHandler {
     // Return the default authentication method.
     async fn auth_none(&mut self, _user: &str) -> Result<Auth, Self::Error> {
         Ok(Auth::Reject {
-            proceed_with_methods: Some(MethodSet::PUBLICKEY),
+            proceed_with_methods: Some(MethodSet::from([MethodKind::PublicKey].as_slice())),
         })
     }
 
@@ -369,45 +365,47 @@ impl Handler for ServerHandler {
         // Check if the API login service has been initialized.
         if let Some(ref api_login) = self.server.api_login {
             // Send an auth request with a timeout.
-            if let Ok(is_authenticated) =
-                timeout(self.server.authentication_request_timeout, async {
-                    api_login
-                        .authenticate(&AuthenticationRequest {
-                            user,
-                            password,
-                            remote_address: &self.peer,
-                        })
-                        .await
-                })
-                .await
+            match timeout(self.server.authentication_request_timeout, async {
+                api_login
+                    .authenticate(&AuthenticationRequest {
+                        user,
+                        password,
+                        remote_address: &self.peer,
+                    })
+                    .await
+            })
+            .await
             {
-                // Check if authentication succeeded.
-                if is_authenticated {
-                    // Add this session to the password sessions, allowing it to be canceled via the admin TUI.
-                    self.server
-                        .sessions_password
-                        .lock()
-                        .unwrap()
-                        .entry(user.into())
-                        .or_default()
-                        .insert(self.id, self.cancellation_token.clone());
-                    self.user = Some(user.into());
-                    // Add user data, identifying its tokens by the username.
-                    self.auth_data = AuthenticatedData::User {
-                        user_data: Box::new(UserData::new(TokenHolder::User(
-                            UserIdentification::Username(user.into()),
-                        ))),
-                    };
-                    info!(
-                        "{} ({}) connected with {} (password)",
-                        user, self.peer, self.auth_data
-                    );
-                    return Ok(Auth::Accept);
-                } else {
-                    warn!("{} ({}) failed password authentication", user, self.peer);
+                Ok(is_authenticated) => {
+                    // Check if authentication succeeded.
+                    if is_authenticated {
+                        // Add this session to the password sessions, allowing it to be canceled via the admin TUI.
+                        self.server
+                            .sessions_password
+                            .lock()
+                            .unwrap()
+                            .entry(user.into())
+                            .or_default()
+                            .insert(self.id, self.cancellation_token.clone());
+                        self.user = Some(user.into());
+                        // Add user data, identifying its tokens by the username.
+                        self.auth_data = AuthenticatedData::User {
+                            user_data: Box::new(UserData::new(TokenHolder::User(
+                                UserIdentification::Username(user.into()),
+                            ))),
+                        };
+                        info!(
+                            "{} ({}) connected with {} (password)",
+                            user, self.peer, self.auth_data
+                        );
+                        return Ok(Auth::Accept);
+                    } else {
+                        warn!("{} ({}) failed password authentication", user, self.peer);
+                    }
                 }
-            } else {
-                warn!("Authentication request timed out");
+                _ => {
+                    warn!("Authentication request timed out");
+                }
             }
         }
         Ok(Auth::Reject {
@@ -982,7 +980,7 @@ impl Handler for ServerHandler {
                     return Ok(false);
                 }
                 // Add handler to SSH connection map
-                if let Err(err) = self.server.ssh.insert(
+                match self.server.ssh.insert(
                     address.to_string(),
                     self.peer,
                     user_data.quota_key.clone(),
@@ -997,45 +995,48 @@ impl Handler for ServerHandler {
                         port: *port,
                     }),
                 ) {
-                    // Adding to connection map failed.
-                    info!("Rejecting SSH for {} ({}) - {}", address, self.peer, err);
-                    self.tx.send(
-                        format!(
-                            "Cannot listen to SSH on {}:{} ({})\r\n",
-                            address, self.server.ssh_port, err,
-                        )
-                        .into_bytes(),
-                    );
-                    Ok(false)
-                } else {
-                    // Adding to connection map succeeded.
-                    info!("Serving SSH for {} ({})", address, self.peer);
-                    self.tx.send(
-                        format!(
-                            "Serving SSH on {}:{}\r\n\
+                    Err(err) => {
+                        // Adding to connection map failed.
+                        info!("Rejecting SSH for {} ({}) - {}", address, self.peer, err);
+                        self.tx.send(
+                            format!(
+                                "Cannot listen to SSH on {}:{} ({})\r\n",
+                                address, self.server.ssh_port, err,
+                            )
+                            .into_bytes(),
+                        );
+                        Ok(false)
+                    }
+                    _ => {
+                        // Adding to connection map succeeded.
+                        info!("Serving SSH for {} ({})", address, self.peer);
+                        self.tx.send(
+                            format!(
+                                "Serving SSH on {}:{}\r\n\
                                 \x1b[2mhint: connect with ssh -J {}{} {}{}\x1b[0m\r\n",
-                            address,
-                            self.server.ssh_port,
-                            self.server.domain,
-                            if self.server.ssh_port == 22 {
-                                "".into()
-                            } else {
-                                format!(":{}", self.server.ssh_port)
-                            },
-                            address,
-                            if self.server.ssh_port == 22 {
-                                "".into()
-                            } else {
-                                format!(" -p {}", self.server.ssh_port)
-                            },
-                        )
-                        .into_bytes(),
-                    );
-                    user_data.host_addressing.insert(
-                        TcpAlias(address.to_string(), *port as u16),
-                        address.to_string(),
-                    );
-                    Ok(true)
+                                address,
+                                self.server.ssh_port,
+                                self.server.domain,
+                                if self.server.ssh_port == 22 {
+                                    "".into()
+                                } else {
+                                    format!(":{}", self.server.ssh_port)
+                                },
+                                address,
+                                if self.server.ssh_port == 22 {
+                                    "".into()
+                                } else {
+                                    format!(" -p {}", self.server.ssh_port)
+                                },
+                            )
+                            .into_bytes(),
+                        );
+                        user_data.host_addressing.insert(
+                            TcpAlias(address.to_string(), *port as u16),
+                            address.to_string(),
+                        );
+                        Ok(true)
+                    }
                 }
             }
             // Assign HTTP host through config (specified by the usual HTTP/HTTPS ports)
@@ -1054,7 +1055,7 @@ impl Handler for ServerHandler {
                         return Ok(false);
                     }
                     // Add handler to TCP connection map
-                    if let Err(err) = self.server.alias.insert(
+                    match self.server.alias.insert(
                         TcpAlias(address.into(), 80),
                         self.peer,
                         user_data.quota_key.clone(),
@@ -1069,34 +1070,37 @@ impl Handler for ServerHandler {
                             port: *port,
                         }),
                     ) {
-                        // Adding to connection map failed.
-                        info!(
-                            "Rejecting HTTP alias for {} ({}) - {}",
-                            address, self.peer, err
-                        );
-                        self.tx.send(
-                            format!("Failed to bind HTTP alias {} ({})\r\n", address, err)
+                        Err(err) => {
+                            // Adding to connection map failed.
+                            info!(
+                                "Rejecting HTTP alias for {} ({}) - {}",
+                                address, self.peer, err
+                            );
+                            self.tx.send(
+                                format!("Failed to bind HTTP alias {} ({})\r\n", address, err)
+                                    .into_bytes(),
+                            );
+                            Ok(false)
+                        }
+                        _ => {
+                            // Adding to connection map succeeded.
+                            info!("Tunneling HTTP for {} ({})", address, self.peer);
+                            self.tx.send(
+                                format!(
+                                    "Tunneling HTTP for alias {}{}\r\n",
+                                    address,
+                                    match self.server.http_port {
+                                        80 => "".into(),
+                                        port => format!(":{}", port),
+                                    }
+                                )
                                 .into_bytes(),
-                        );
-                        Ok(false)
-                    } else {
-                        // Adding to connection map succeeded.
-                        info!("Tunneling HTTP for {} ({})", address, self.peer);
-                        self.tx.send(
-                            format!(
-                                "Tunneling HTTP for alias {}{}\r\n",
-                                address,
-                                match self.server.http_port {
-                                    80 => "".into(),
-                                    port => format!(":{}", port),
-                                }
-                            )
-                            .into_bytes(),
-                        );
-                        user_data
-                            .alias_addressing
-                            .insert(TcpAlias(address.into(), 80), TcpAlias(address.into(), 80));
-                        Ok(true)
+                            );
+                            user_data
+                                .alias_addressing
+                                .insert(TcpAlias(address.into(), 80), TcpAlias(address.into(), 80));
+                            Ok(true)
+                        }
                     }
                 // Reject when HTTP is disabled
                 } else if self.server.disable_http {
@@ -1121,7 +1125,7 @@ impl Handler for ServerHandler {
                         .get_http_address(address, &self.user, &self.key_fingerprint, &self.peer)
                         .await;
                     // Add handler to HTTP connection map
-                    if let Err(err) = self.server.http.insert(
+                    match self.server.http.insert(
                         assigned_host.clone(),
                         self.peer,
                         user_data.quota_key.clone(),
@@ -1136,56 +1140,59 @@ impl Handler for ServerHandler {
                             port: *port,
                         }),
                     ) {
-                        // Adding to connection map failed.
-                        info!(
-                            "Rejecting HTTP for {} ({}) - {}",
-                            &assigned_host, self.peer, err
-                        );
-                        self.tx.send(
-                            format!(
-                                "Cannot listen to HTTP on http://{}{} for {} ({})\r\n",
-                                &assigned_host,
-                                match self.server.http_port {
-                                    80 => "".into(),
-                                    port => format!(":{}", port),
-                                },
-                                address,
-                                err,
-                            )
-                            .into_bytes(),
-                        );
-                        Ok(false)
-                    } else {
-                        // Adding to connection map succeeded.
-                        info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
-                        self.tx.send(
-                            format!(
-                                "Serving HTTP on http://{}{} for {}\r\n",
-                                &assigned_host,
-                                match self.server.http_port {
-                                    80 => "".into(),
-                                    port => format!(":{}", port),
-                                },
-                                address,
-                            )
-                            .into_bytes(),
-                        );
-                        self.tx.send(
-                            format!(
-                                "Serving HTTPS on https://{}{} for {}\r\n",
-                                &assigned_host,
-                                match self.server.https_port {
-                                    443 => "".into(),
-                                    port => format!(":{}", port),
-                                },
-                                address,
-                            )
-                            .into_bytes(),
-                        );
-                        user_data
-                            .host_addressing
-                            .insert(TcpAlias(address.to_string(), *port as u16), assigned_host);
-                        Ok(true)
+                        Err(err) => {
+                            // Adding to connection map failed.
+                            info!(
+                                "Rejecting HTTP for {} ({}) - {}",
+                                &assigned_host, self.peer, err
+                            );
+                            self.tx.send(
+                                format!(
+                                    "Cannot listen to HTTP on http://{}{} for {} ({})\r\n",
+                                    &assigned_host,
+                                    match self.server.http_port {
+                                        80 => "".into(),
+                                        port => format!(":{}", port),
+                                    },
+                                    address,
+                                    err,
+                                )
+                                .into_bytes(),
+                            );
+                            Ok(false)
+                        }
+                        _ => {
+                            // Adding to connection map succeeded.
+                            info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
+                            self.tx.send(
+                                format!(
+                                    "Serving HTTP on http://{}{} for {}\r\n",
+                                    &assigned_host,
+                                    match self.server.http_port {
+                                        80 => "".into(),
+                                        port => format!(":{}", port),
+                                    },
+                                    address,
+                                )
+                                .into_bytes(),
+                            );
+                            self.tx.send(
+                                format!(
+                                    "Serving HTTPS on https://{}{} for {}\r\n",
+                                    &assigned_host,
+                                    match self.server.https_port {
+                                        443 => "".into(),
+                                        port => format!(":{}", port),
+                                    },
+                                    address,
+                                )
+                                .into_bytes(),
+                            );
+                            user_data
+                                .host_addressing
+                                .insert(TcpAlias(address.to_string(), *port as u16), assigned_host);
+                            Ok(true)
+                        }
                     }
                 }
             }
@@ -1275,7 +1282,7 @@ impl Handler for ServerHandler {
                         *port as u16
                     };
                     // Add handler to TCP connection map
-                    if let Err(err) = self.server.tcp.insert(
+                    match self.server.tcp.insert(
                         assigned_port,
                         self.peer,
                         user_data.quota_key.clone(),
@@ -1290,36 +1297,39 @@ impl Handler for ServerHandler {
                             port: *port,
                         }),
                     ) {
-                        // Adding to connection map failed.
-                        info!(
-                            "Rejecting TCP for localhost:{} ({}) - {}",
-                            &assigned_port, self.peer, err,
-                        );
-                        self.tx.send(
-                            format!(
-                                "Cannot listen to TCP on {}:{} ({})\r\n",
-                                self.server.domain, &assigned_port, err,
-                            )
-                            .into_bytes(),
-                        );
-                        Ok(false)
-                    } else {
-                        // Adding to connection map succeeded.
-                        user_data
-                            .port_addressing
-                            .insert(TcpAlias(address.to_string(), *port as u16), assigned_port);
-                        info!(
-                            "Serving TCP for localhost:{} ({})",
-                            &assigned_port, self.peer
-                        );
-                        self.tx.send(
-                            format!(
-                                "Serving TCP port on {}:{}\r\n",
-                                self.server.domain, &assigned_port,
-                            )
-                            .into_bytes(),
-                        );
-                        Ok(true)
+                        Err(err) => {
+                            // Adding to connection map failed.
+                            info!(
+                                "Rejecting TCP for localhost:{} ({}) - {}",
+                                &assigned_port, self.peer, err,
+                            );
+                            self.tx.send(
+                                format!(
+                                    "Cannot listen to TCP on {}:{} ({})\r\n",
+                                    self.server.domain, &assigned_port, err,
+                                )
+                                .into_bytes(),
+                            );
+                            Ok(false)
+                        }
+                        _ => {
+                            // Adding to connection map succeeded.
+                            user_data
+                                .port_addressing
+                                .insert(TcpAlias(address.to_string(), *port as u16), assigned_port);
+                            info!(
+                                "Serving TCP for localhost:{} ({})",
+                                &assigned_port, self.peer
+                            );
+                            self.tx.send(
+                                format!(
+                                    "Serving TCP port on {}:{}\r\n",
+                                    self.server.domain, &assigned_port,
+                                )
+                                .into_bytes(),
+                            );
+                            Ok(true)
+                        }
                     }
                 }
             }
@@ -1349,7 +1359,7 @@ impl Handler for ServerHandler {
                     *port as u16
                 };
                 // Add handler to alias connection map
-                if let Err(err) = self.server.alias.insert(
+                match self.server.alias.insert(
                     TcpAlias(address.to_string(), assigned_port),
                     self.peer,
                     user_data.quota_key.clone(),
@@ -1364,37 +1374,40 @@ impl Handler for ServerHandler {
                         port: *port,
                     }),
                 ) {
-                    // Adding to connection map failed.
-                    info!(
-                        "Rejecting TCP port {} for alias {} ({}) - {}",
-                        &assigned_port, address, self.peer, err,
-                    );
-                    self.tx.send(
-                        format!(
-                            "Cannot listen to TCP on port {} for alias {} ({})\r\n",
-                            &assigned_port, address, err,
-                        )
-                        .into_bytes(),
-                    );
-                    Ok(false)
-                } else {
-                    // Adding to connection map succeeded.
-                    user_data.alias_addressing.insert(
-                        TcpAlias(address.to_string(), *port as u16),
-                        TcpAlias(address.to_string(), assigned_port),
-                    );
-                    info!(
-                        "Tunneling TCP port {} for alias {} ({})",
-                        &assigned_port, address, self.peer
-                    );
-                    self.tx.send(
-                        format!(
-                            "Tunneling TCP port {} for alias {}\r\n",
-                            &assigned_port, address,
-                        )
-                        .into_bytes(),
-                    );
-                    Ok(true)
+                    Err(err) => {
+                        // Adding to connection map failed.
+                        info!(
+                            "Rejecting TCP port {} for alias {} ({}) - {}",
+                            &assigned_port, address, self.peer, err,
+                        );
+                        self.tx.send(
+                            format!(
+                                "Cannot listen to TCP on port {} for alias {} ({})\r\n",
+                                &assigned_port, address, err,
+                            )
+                            .into_bytes(),
+                        );
+                        Ok(false)
+                    }
+                    _ => {
+                        // Adding to connection map succeeded.
+                        user_data.alias_addressing.insert(
+                            TcpAlias(address.to_string(), *port as u16),
+                            TcpAlias(address.to_string(), assigned_port),
+                        );
+                        info!(
+                            "Tunneling TCP port {} for alias {} ({})",
+                            &assigned_port, address, self.peer
+                        );
+                        self.tx.send(
+                            format!(
+                                "Tunneling TCP port {} for alias {}\r\n",
+                                &assigned_port, address,
+                            )
+                            .into_bytes(),
+                        );
+                        Ok(true)
+                    }
                 }
             }
         }

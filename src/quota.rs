@@ -3,7 +3,7 @@ use std::{hash::Hash, num::NonZero, sync::Arc};
 use dashmap::DashMap;
 #[cfg(test)]
 use mockall::automock;
-use ssh_key::Fingerprint;
+use russh::keys::ssh_key::Fingerprint;
 
 // The unique identifications for each user, to discriminate across multiple sessions.
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -133,7 +133,7 @@ mod quota_map_tests {
     use std::sync::Arc;
 
     use rand::rngs::OsRng;
-    use ssh_key::HashAlg;
+    use russh::keys::HashAlg;
 
     use super::{QuotaHandler, QuotaMap, TokenHolder, UserIdentification};
 
@@ -159,7 +159,7 @@ mod quota_map_tests {
     #[test]
     fn returns_unlimited_tokens_for_admin_holder() {
         let key =
-            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
+            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
         let map = Arc::new(QuotaMap::new(3.try_into().unwrap()));
         let mut tokens = Vec::with_capacity(5);
         for _ in 0..5 {
@@ -175,7 +175,7 @@ mod quota_map_tests {
     #[test]
     fn returns_tokens_for_different_holders() {
         let key =
-            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
+            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
         let fingerprint = key.fingerprint(HashAlg::Sha256);
         let user_a = UserIdentification::Username("a".into());
         let user_b = UserIdentification::PublicKey(fingerprint);

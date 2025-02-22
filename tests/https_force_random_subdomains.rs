@@ -1,6 +1,5 @@
 use std::{sync::Arc, time::Duration};
 
-use async_trait::async_trait;
 use axum::{extract::Request, routing::get, Router};
 use clap::Parser;
 use http_body_util::BodyExt;
@@ -10,11 +9,11 @@ use hyper_util::{
     server::conn::auto::Builder,
 };
 use regex::Regex;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
     Channel,
 };
-use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use rustls::{
     pki_types::{pem::PemObject, CertificateDer},
     RootCertStore,
@@ -81,10 +80,14 @@ async fn https_force_random_subdomains() {
         session
             .authenticate_publickey(
                 "user",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     let mut channel = session
@@ -194,11 +197,13 @@ async fn https_force_random_subdomains() {
 
 struct SshClient;
 
-#[async_trait]
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 
@@ -212,7 +217,10 @@ impl russh::client::Handler for SshClient {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let router = Router::new()
-            .route("/", get(|| async move { format!("This was a triumph.") }))
+            .route(
+                "/",
+                get(|| async move { "This was a triumph.".to_string() }),
+            )
             .into_service();
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {

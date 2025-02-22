@@ -21,7 +21,7 @@ use ratatui::{
     },
     Terminal, TerminalOptions, Viewport,
 };
-use ssh_key::Fingerprint;
+use russh::keys::ssh_key::Fingerprint;
 use tokio::{
     sync::{mpsc::UnboundedSender, watch},
     time::sleep,
@@ -582,10 +582,7 @@ impl AdminInterface {
             loop {
                 {
                     let mut interface = interface.lock().unwrap();
-                    let AdminTerminal {
-                        ref mut terminal,
-                        ref mut state,
-                    } = interface.deref_mut();
+                    let AdminTerminal { terminal, state } = interface.deref_mut();
                     terminal
                         .draw(|frame| {
                             // Render the terminal
@@ -800,8 +797,8 @@ impl AdminInterface {
                     false
                 }
                 // No prompt, select from table
-                None => {
-                    if let Some(row) = interface.state.table_state.selected() {
+                None => match interface.state.table_state.selected() {
+                    Some(row) => {
                         let users: Option<Vec<String>> = match interface.state.tab.current_tab() {
                             Tab::Http => interface
                                 .state
@@ -868,12 +865,13 @@ impl AdminInterface {
                             }
                         }
                         true
-                    } else {
+                    }
+                    _ => {
                         interface.state.prompt =
                             Some(AdminPrompt::Infobox("No row selected!".into()));
                         true
                     }
-                }
+                },
             }
         };
         if notify {

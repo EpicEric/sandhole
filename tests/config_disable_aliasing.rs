@@ -1,6 +1,5 @@
 use std::{sync::Arc, time::Duration};
 
-use async_trait::async_trait;
 use axum::{routing::get, Router};
 use clap::Parser;
 use http::{Request, StatusCode};
@@ -10,11 +9,11 @@ use hyper_util::{
     server::conn::auto::Builder,
 };
 use rand::rngs::OsRng;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
     Channel, ChannelId,
 };
-use russh_keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
@@ -77,11 +76,19 @@ async fn config_disable_aliasing() {
     assert!(
         session_one
             .authenticate_publickey(
-                "user1",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                "user",
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session_one
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     assert!(
@@ -150,11 +157,19 @@ async fn config_disable_aliasing() {
     assert!(
         session_two
             .authenticate_publickey(
-                "user2",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                "user",
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session_two
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "authentication didn't succeed"
     );
     assert!(
@@ -166,7 +181,7 @@ async fn config_disable_aliasing() {
     );
 
     // 4. Reject anonymous users if aliasing is disabled
-    let key = russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
     let ssh_client = SshClientTwo;
     let mut session_three =
         russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
@@ -176,21 +191,31 @@ async fn config_disable_aliasing() {
         !session_three
             .authenticate_publickey(
                 "user3",
-                PrivateKeyWithHashAlg::new(Arc::new(key), None).unwrap()
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session_three
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
             )
             .await
-            .expect("SSH authentication failed"),
+            .expect("SSH authentication failed")
+            .success(),
         "mustn't authenticate anonymously if aliasing is disabled"
     );
 }
 
 struct SshClientOne(mpsc::UnboundedSender<ChannelId>);
 
-#[async_trait]
 impl russh::client::Handler for SshClientOne {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 
@@ -228,11 +253,13 @@ impl russh::client::Handler for SshClientOne {
 
 struct SshClientTwo;
 
-#[async_trait]
 impl russh::client::Handler for SshClientTwo {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 }

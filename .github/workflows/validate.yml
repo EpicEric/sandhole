@@ -53,14 +53,20 @@ jobs:
   tests:
     name: Run tests
     runs-on: ubuntu-latest
+    env:
+      CARGO_LLVM_COV_VERSION: 0.6.16
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        run: |
+          wget https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${CARGO_LLVM_COV_VERSION}/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz \
+            -O /tmp/cargo-llvm-cov.tar.gz
+          tar -xvzf /tmp/cargo-llvm-cov.tar.gz -C ${HOME}/.cargo/bin
       - name: Test
         run: |
-          cargo install cargo-llvm-cov
           cargo llvm-cov --verbose --codecov --locked --output-path codecov.json
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5

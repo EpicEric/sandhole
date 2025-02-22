@@ -28,14 +28,16 @@ use quota::{DummyQuotaHandler, QuotaHandler, QuotaMap};
 use rand::rngs::OsRng;
 use reactor::{AliasReactor, HttpReactor, SshReactor, TcpReactor};
 use russh::{
+    keys::{
+        decode_secret_key,
+        ssh_key::{Fingerprint, LineEnding},
+    },
     server::{Config, Msg},
     ChannelStream,
 };
-use russh_keys::decode_secret_key;
 use rustls::ServerConfig;
 use rustls_acme::is_tls_alpn_challenge;
 use rustrict::CensorStr;
-use ssh_key::Fingerprint;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
 use tcp::TcpHandler;
 use tcp_alias::TcpAlias;
@@ -192,7 +194,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         Ok(key) => decode_secret_key(&key, None).with_context(|| "Error decoding secret key")?,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             info!("Key file not found. Creating...");
-            let key = ssh_key::PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
+            let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
                 .with_context(|| "Error creating secret key")?;
             if !config.disable_directory_creation {
                 fs::create_dir_all(
@@ -206,7 +208,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 .await
                 .with_context(|| "Error creating secret key directory")?;
             }
-            let key_string = key.to_openssh(ssh_key::LineEnding::LF)?;
+            let key_string = key.to_openssh(LineEnding::LF)?;
             let key = decode_secret_key(&key_string, None)
                 .with_context(|| "Error decoding secret key")?;
             fs::write(config.private_key_file.as_path(), key_string)
