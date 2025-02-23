@@ -99,11 +99,13 @@ impl client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        channel
-            .data(&b"This shouldn't be invoked..."[..])
-            .await
-            .unwrap();
-        channel.eof().await.unwrap();
+        tokio::spawn(async move {
+            channel
+                .data(&b"This shouldn't be invoked..."[..])
+                .await
+                .unwrap();
+            channel.eof().await.unwrap();
+        });
         Ok(())
     }
 }

@@ -1,7 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
-use rand::rngs::OsRng;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha20Rng;
+use russh::keys::ssh_key::private::Ed25519Keypair;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{self, Msg, Session},
@@ -93,7 +95,9 @@ async fn auth_prevent_unauthorized_actions() {
         .expect("tcpip_forward failed");
 
     // 3a. Try to port forward without credentials
-    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+    ));
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -119,7 +123,9 @@ async fn auth_prevent_unauthorized_actions() {
     assert!(session.is_closed(), "didn't disconnect unauthed user");
 
     // 3b. Try to close port forward without credentials
-    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+    ));
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -148,7 +154,9 @@ async fn auth_prevent_unauthorized_actions() {
     assert!(session.is_closed(), "didn't disconnect unauthed user");
 
     // 3c. Try to local-forward with an inexistent alias
-    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+    ));
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -177,7 +185,9 @@ async fn auth_prevent_unauthorized_actions() {
     assert!(session.is_closed(), "didn't disconnect unauthed user");
 
     // 3d. Try to open multiple sessions without credentials
-    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+    ));
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -208,7 +218,9 @@ async fn auth_prevent_unauthorized_actions() {
     assert!(session.is_closed(), "didn't disconnect unauthed user");
 
     // 3e. Local-forward with HTTP proxy, then try to port forward
-    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+    ));
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -245,7 +257,9 @@ async fn auth_prevent_unauthorized_actions() {
     assert!(session.is_closed(), "didn't disconnect unauthed user");
 
     // 3f. Local-forward with TCP proxy, then try to port forward
-    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+    ));
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -285,7 +299,9 @@ async fn auth_prevent_unauthorized_actions() {
     assert!(session.is_closed(), "didn't disconnect unauthed user");
 
     // 3g. Try to idle longer than the idle_connection_timeout configuration
-    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+    ));
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -315,7 +331,9 @@ async fn auth_prevent_unauthorized_actions() {
     );
 
     // 3h. Local-forward, then idle
-    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+    ));
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -374,8 +392,10 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        channel.data(&b"Hello, world!"[..]).await.unwrap();
-        channel.eof().await.unwrap();
+        tokio::spawn(async move {
+            channel.data(&b"Hello, world!"[..]).await.unwrap();
+            channel.eof().await.unwrap();
+        });
         Ok(())
     }
 }

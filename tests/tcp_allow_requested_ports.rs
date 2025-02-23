@@ -1,7 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
-use rand::rngs::OsRng;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha20Rng;
+use russh::keys::ssh_key::private::Ed25519Keypair;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
@@ -96,7 +98,9 @@ async fn tcp_allow_requested_ports() {
     assert_eq!(&buf, b"Hello, world!");
 
     // 4. Local-forward the TCP port for random user
-    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+    ));
     let ssh_client = SshClient;
     let mut session_two = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -212,8 +216,10 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        channel.data(&b"Hello, world!"[..]).await.unwrap();
-        channel.eof().await.unwrap();
+        tokio::spawn(async move {
+            channel.data(&b"Hello, world!"[..]).await.unwrap();
+            channel.eof().await.unwrap();
+        });
         Ok(())
     }
 }

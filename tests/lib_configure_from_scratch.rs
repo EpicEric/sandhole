@@ -1,7 +1,7 @@
 use std::{fs, sync::Arc, time::Duration};
 
 use clap::Parser;
-use rand::{seq::SliceRandom, thread_rng};
+use rand::{rng, seq::IndexedRandom};
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
@@ -21,7 +21,7 @@ async fn lib_configure_from_scratch() {
             .flat_map(|_| {
                 "0123456789abcdefghijklmnopqrstuvwxyz"
                     .as_bytes()
-                    .choose(&mut thread_rng())
+                    .choose(&mut rng())
                     .copied()
             })
             .collect(),
@@ -174,8 +174,10 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        channel.data(&b"Hello, world!"[..]).await.unwrap();
-        channel.eof().await.unwrap();
+        tokio::spawn(async move {
+            channel.data(&b"Hello, world!"[..]).await.unwrap();
+            channel.eof().await.unwrap();
+        });
         Ok(())
     }
 }

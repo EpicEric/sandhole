@@ -1,6 +1,17 @@
 use std::{sync::Arc, time::Duration};
 
+use axum::extract::ws::Message;
+use axum::extract::{Request, WebSocketUpgrade};
+use axum::routing::any;
+use axum::Router;
 use clap::Parser;
+use futures_util::stream::FusedStream;
+use futures_util::{SinkExt, StreamExt};
+use http::StatusCode;
+use hyper::body::Incoming;
+use hyper::service::service_fn;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto::Builder;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
@@ -8,13 +19,14 @@ use russh::{
 };
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
-    io::AsyncReadExt,
     net::TcpStream,
     time::{sleep, timeout},
 };
+use tokio_tungstenite::client_async;
+use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn tcp_assign_random_port_0() {
+async fn websocket_timeout() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -35,11 +47,10 @@ async fn tcp_assign_random_port_0() {
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
-        "--bind-hostnames=none",
-        "--allow-requested-ports",
+        "--bind-hostnames=all",
         "--idle-connection-timeout=1s",
-        "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
+        "--tcp-connection-timeout=500ms",
     ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
@@ -77,21 +88,32 @@ async fn tcp_assign_random_port_0() {
             .success(),
         "authentication didn't succeed"
     );
-    let Ok(port) = session.tcpip_forward("*", 0).await else {
-        panic!("tcpip_forward failed");
-    };
-    assert!(
-        <u16>::try_from(port).expect("should be a valid port number") >= 1024,
-        "random port must be greater than or equal to 1024"
-    );
+    session
+        .tcpip_forward("foobar.tld", 80)
+        .await
+        .expect("tcpip_forward failed");
 
-    // 3. Connect to the TCP port of our proxy
-    let mut tcp_stream = TcpStream::connect(format!("127.0.0.1:{port}"))
+    // 3. Connect to the HTTP port of our proxy and get timed out from WebSocket
+    let tcp_stream = TcpStream::connect("127.0.0.1:18080")
         .await
         .expect("TCP connection failed");
-    let mut buf = String::with_capacity(25);
-    tcp_stream.read_to_string(&mut buf).await.unwrap();
-    assert_eq!(buf, "Hello from a random port!");
+    let (mut websocket, response) = client_async("ws://foobar.tld/ws", tcp_stream)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    if timeout(Duration::from_secs(2), async {
+        assert_eq!(
+            websocket.next().await.unwrap().unwrap().to_text().unwrap(),
+            "One"
+        );
+        assert!(websocket.next().await.unwrap().is_err());
+        assert!(websocket.is_terminated());
+    })
+    .await
+    .is_err()
+    {
+        panic!("Timeout waiting for WebSocket stream to reply.")
+    };
 }
 
 struct SshClient;
@@ -115,12 +137,25 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
+        let router = Router::new()
+            .route(
+                "/ws",
+                any(|ws: WebSocketUpgrade| async move {
+                    ws.on_upgrade(|mut socket| async move {
+                        socket.send(Message::Text("One".into())).await.unwrap();
+                        sleep(Duration::from_secs(5)).await;
+                        socket.send(Message::Text("Two".into())).await.unwrap();
+                        socket.close().await.unwrap();
+                    })
+                }),
+            )
+            .into_service();
+        let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {
-            channel
-                .data(&b"Hello from a random port!"[..])
+            Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(TokioIo::new(channel.into_stream()), service)
                 .await
-                .unwrap();
-            channel.eof().await.unwrap();
+                .expect("Invalid request");
         });
         Ok(())
     }

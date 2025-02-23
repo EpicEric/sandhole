@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{collections::HashSet, net::IpAddr, sync::Arc, time::Duration};
 
 use crate::{
     connection_handler::ConnectionHandler, connections::ConnectionMap,
@@ -13,7 +13,7 @@ use tokio::{io::copy_bidirectional, net::TcpListener, time::timeout};
 // Service that handles creating TCP sockets for reverse forwarding connections.
 pub(crate) struct TcpHandler {
     // Address to listen to when creating sockets.
-    listen_address: String,
+    listen_address: IpAddr,
     // Map containing spawned tasks of connections for each socket.
     sockets: DashMap<u16, DroppableHandle<()>>,
     // Connection map to assign a tunneling service for each incoming connection.
@@ -29,7 +29,7 @@ pub(crate) struct TcpHandler {
 
 impl TcpHandler {
     pub(crate) fn new(
-        listen_address: String,
+        listen_address: IpAddr,
         conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
         telemetry: Arc<Telemetry>,
         ip_filter: Arc<IpFilter>,
@@ -58,7 +58,7 @@ impl PortHandler for Arc<TcpHandler> {
     // Create a TCP listener on the given port.
     async fn create_port_listener(&self, port: u16) -> anyhow::Result<u16> {
         // Check if we're able to bind to the given address and port.
-        let listener = match TcpListener::bind((self.listen_address.as_ref(), port)).await {
+        let listener = match TcpListener::bind((self.listen_address, port)).await {
             Ok(listener) => listener,
             Err(err) => return Err(err.into()),
         };

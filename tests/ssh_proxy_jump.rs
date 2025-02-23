@@ -6,9 +6,11 @@ use std::{
 };
 
 use clap::Parser;
-use rand::rngs::OsRng;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 use russh::{
     client::{self, Msg},
+    keys::ssh_key::private::Ed25519Keypair,
     server::{self, Auth, Server},
     Channel, MethodSet,
 };
@@ -95,7 +97,9 @@ async fn ssh_proxy_jump() {
         .expect("tcpip_forward failed");
 
     // 3. Connect to the SSH port of our proxy with anonymous user
-    let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap();
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+    ));
     let ssh_client = ProxyClient;
     let mut session_two = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -255,11 +259,9 @@ impl client::Handler for SshClient {
         tokio::spawn(async move {
             let session = match server::run_stream(
                 Arc::new(server::Config {
-                    keys: vec![russh::keys::PrivateKey::random(
-                        &mut OsRng,
-                        russh::keys::Algorithm::Ed25519,
-                    )
-                    .unwrap()],
+                    keys: vec![russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+                        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+                    ))],
                     ..Default::default()
                 }),
                 stream,
@@ -324,8 +326,10 @@ impl server::Handler for HoneypotHandler {
         channel: russh::Channel<server::Msg>,
         _session: &mut server::Session,
     ) -> Result<bool, Self::Error> {
-        let _ = channel.data(&b"Hello, world!"[..]).await;
-        let _ = channel.eof().await;
+        tokio::spawn(async move {
+            channel.data(&b"Hello, world!"[..]).await.unwrap();
+            channel.eof().await.unwrap();
+        });
         Ok(true)
     }
 }

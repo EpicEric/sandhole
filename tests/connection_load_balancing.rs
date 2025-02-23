@@ -144,8 +144,10 @@ impl russh::client::Handler for SshClientA {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        channel.data(&b"A"[..]).await.unwrap();
-        channel.eof().await.unwrap();
+        tokio::spawn(async move {
+            channel.data(&b"A"[..]).await.unwrap();
+            channel.eof().await.unwrap();
+        });
         Ok(())
     }
 }
@@ -171,8 +173,10 @@ impl russh::client::Handler for SshClientB {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        channel.data(&b"B"[..]).await.unwrap();
-        channel.eof().await.unwrap();
+        tokio::spawn(async move {
+            channel.data(&b"B"[..]).await.unwrap();
+            channel.eof().await.unwrap();
+        });
         Ok(())
     }
 }

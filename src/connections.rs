@@ -7,7 +7,7 @@ use std::{
 };
 
 use dashmap::DashMap;
-use rand::{seq::SliceRandom, thread_rng};
+use rand::{rng, seq::IndexedRandom};
 
 use crate::{
     config::LoadBalancing,
@@ -138,7 +138,7 @@ where
             handler
                 .value()
                 .as_slice()
-                .choose(&mut thread_rng())
+                .choose(&mut rng())
                 .map(|ConnectionMapEntry { handler, .. }| Clone::clone(handler))
         })
     }

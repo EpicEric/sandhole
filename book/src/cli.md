@@ -148,7 +148,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           In other words, valid records will be of the form:
 
-          TXT prefix.custom-domain SHA256:...
+          TXT &lt;PREFIX&gt;.&lt;DOMAIN&gt; SHA256:...
 
           [default: _sandhole]
 

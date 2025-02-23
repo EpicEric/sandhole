@@ -14,7 +14,7 @@ use tokio::{
 };
 
 #[tokio::test(flavor = "multi_thread")]
-async fn tcp_assign_random_port_0() {
+async fn tcp_timeout() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -38,8 +38,8 @@ async fn tcp_assign_random_port_0() {
         "--bind-hostnames=none",
         "--allow-requested-ports",
         "--idle-connection-timeout=1s",
-        "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
+        "--tcp-connection-timeout=500ms",
     ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
@@ -77,21 +77,26 @@ async fn tcp_assign_random_port_0() {
             .success(),
         "authentication didn't succeed"
     );
-    let Ok(port) = session.tcpip_forward("*", 0).await else {
-        panic!("tcpip_forward failed");
-    };
-    assert!(
-        <u16>::try_from(port).expect("should be a valid port number") >= 1024,
-        "random port must be greater than or equal to 1024"
-    );
+    session
+        .tcpip_forward("foobar.tld", 12345)
+        .await
+        .expect("tcpip_forward failed");
 
-    // 3. Connect to the TCP port of our proxy
-    let mut tcp_stream = TcpStream::connect(format!("127.0.0.1:{port}"))
+    // 3. Connect to the TCP port of our proxy and get timed out
+    let mut tcp_stream = TcpStream::connect("127.0.0.1:12345")
         .await
         .expect("TCP connection failed");
-    let mut buf = String::with_capacity(25);
-    tcp_stream.read_to_string(&mut buf).await.unwrap();
-    assert_eq!(buf, "Hello from a random port!");
+    if timeout(Duration::from_secs(2), async {
+        let mut buf = [0u8; 4];
+        tcp_stream.read(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"One\n");
+        assert_eq!(tcp_stream.read(&mut buf).await.unwrap(), 0);
+    })
+    .await
+    .is_err()
+    {
+        panic!("Timeout waiting for TCP stream to reply.")
+    };
 }
 
 struct SshClient;
@@ -116,10 +121,9 @@ impl russh::client::Handler for SshClient {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
-            channel
-                .data(&b"Hello from a random port!"[..])
-                .await
-                .unwrap();
+            channel.data(&b"One\n"[..]).await.unwrap();
+            sleep(Duration::from_secs(5)).await;
+            channel.data(&b"Two\n"[..]).await.unwrap();
             channel.eof().await.unwrap();
         });
         Ok(())

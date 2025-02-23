@@ -44,8 +44,11 @@ impl AcmeResolver {
 impl AlpnChallengeResolver for AcmeResolver {
     // Handle the new list of domains to manage certificates for with TLS-ALPN-01 challenges.
     fn update_domains(&mut self, domains: Vec<String>) {
-        // Don't do anything if the list is empty.
+        // Clear config variables if the list is empty.
         if domains.is_empty() {
+            self.config = None;
+            self.resolver = None;
+            self.join_handle = None;
             return;
         }
         info!(

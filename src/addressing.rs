@@ -6,7 +6,7 @@ use itertools::Itertools;
 use log::{debug, warn};
 #[cfg(test)]
 use mockall::automock;
-use rand::{self, seq::SliceRandom, Rng, SeedableRng};
+use rand::{self, seq::IndexedRandom, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rand_seeder::SipHasher;
 use russh::keys::ssh_key::Fingerprint;
@@ -157,7 +157,7 @@ impl<R: Resolver> AddressDelegator<R> {
         } = data;
         debug_assert!(!txt_record_prefix.is_empty());
         debug_assert!(!root_domain.is_empty());
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         AddressDelegator {
             resolver,
             txt_record_prefix,
@@ -168,10 +168,10 @@ impl<R: Resolver> AddressDelegator<R> {
             random_subdomain_length: <usize>::from(<u8>::from(random_subdomain_length)),
             random_subdomain_filter_profanities,
             requested_domain_filter,
-            seed: rng.r#gen(),
+            seed: rng.random(),
             block_id: BlockId::new(
                 Alphabet::lowercase_alphanumeric(),
-                rng.r#gen(),
+                rng.random(),
                 random_subdomain_length.into(),
             ),
             block_rng: Mutex::new(0),
@@ -367,9 +367,10 @@ mod address_delegator_tests {
     use std::{collections::HashSet, net::SocketAddr};
 
     use mockall::predicate::*;
-    use rand::rngs::OsRng;
+    use rand::{Rng, SeedableRng};
+    use rand_chacha::ChaCha20Rng;
     use regex::Regex;
-    use russh::keys::HashAlg;
+    use russh::keys::{ssh_key::private::Ed25519Keypair, HashAlg};
     use webpki::types::DnsName;
 
     use crate::config::{BindHostnames, RandomSubdomainSeed};
@@ -474,10 +475,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_provided_address_if_cname_matches_fingerprint() {
-        let fingerprint =
-            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
-                .unwrap()
-                .fingerprint(HashAlg::Sha256);
+        let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        ))
+        .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .with(
@@ -518,10 +519,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_provided_address_if_txt_record_matches_fingerprint() {
-        let fingerprint =
-            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
-                .unwrap()
-                .fingerprint(HashAlg::Sha256);
+        let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        ))
+        .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .with(
@@ -592,10 +593,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_subdomain_if_no_txt_record_matches_fingerprint() {
-        let fingerprint =
-            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
-                .unwrap()
-                .fingerprint(HashAlg::Sha256);
+        let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        ))
+        .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .with(eq("_some_prefix"), eq("something"), eq(fingerprint.clone()))
@@ -660,10 +661,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_host_domain_if_address_equals_host_domain_and_has_fingerprint() {
-        let fingerprint =
-            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
-                .unwrap()
-                .fingerprint(HashAlg::Sha256);
+        let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        ))
+        .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .once()
@@ -697,10 +698,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_random_subdomain_if_address_equals_host_domain_and_doesnt_have_fingerprint() {
-        let fingerprint =
-            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
-                .unwrap()
-                .fingerprint(HashAlg::Sha256);
+        let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        ))
+        .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .once()
@@ -740,10 +741,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_random_subdomain_if_requested_address_is_not_direct_subdomain() {
-        let fingerprint =
-            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
-                .unwrap()
-                .fingerprint(HashAlg::Sha256);
+        let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        ))
+        .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
             .once()
@@ -783,10 +784,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_random_subdomain_if_invalid_address() {
-        let fingerprint =
-            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
-                .unwrap()
-                .fingerprint(HashAlg::Sha256);
+        let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        ))
+        .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(AddressDelegatorData {
@@ -824,10 +825,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_unique_random_subdomains_if_forced() {
-        let fingerprint =
-            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
-                .unwrap()
-                .fingerprint(HashAlg::Sha256);
+        let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        ))
+        .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(AddressDelegatorData {
@@ -874,10 +875,10 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_unique_random_subdomains_with_different_size_and_no_profanities() {
-        let fingerprint =
-            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
-                .unwrap()
-                .fingerprint(HashAlg::Sha256);
+        let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        ))
+        .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(AddressDelegatorData {
@@ -1041,12 +1042,14 @@ mod address_delegator_tests {
 
     #[tokio::test]
     async fn returns_unique_random_subdomains_per_fingerprint_user_and_address_if_forced() {
-        let f1 = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
-            .unwrap()
-            .fingerprint(HashAlg::Sha256);
-        let f2 = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
-            .unwrap()
-            .fingerprint(HashAlg::Sha256);
+        let f1: russh::keys::ssh_key::Fingerprint = russh::keys::PrivateKey::from(
+            Ed25519Keypair::from_seed(&ChaCha20Rng::try_from_os_rng().unwrap().random()),
+        )
+        .fingerprint(HashAlg::Sha256);
+        let f2 = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        ))
+        .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
         let delegator = AddressDelegator::new(AddressDelegatorData {

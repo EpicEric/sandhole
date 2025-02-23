@@ -1,4 +1,8 @@
-use std::{num::NonZero, path::PathBuf};
+use std::{
+    net::{IpAddr, Ipv6Addr},
+    num::NonZero,
+    path::PathBuf,
+};
 
 use clap::{command, Parser, ValueEnum};
 use humantime::Duration;
@@ -121,10 +125,10 @@ pub struct ApplicationConfig {
     /// Address to listen for all client connections.
     #[arg(
         long,
-        default_value_t = String::from("::"),
+        default_value_t = IpAddr::V6(Ipv6Addr::UNSPECIFIED),
         value_name = "ADDRESS"
     )]
-    pub listen_address: String,
+    pub listen_address: IpAddr,
 
     /// Port to listen for SSH connections.
     #[arg(long, default_value_t = NonZero::new(2222).unwrap(), value_name = "PORT")]
@@ -201,7 +205,7 @@ pub struct ApplicationConfig {
     ///
     /// In other words, valid records will be of the form:
     ///
-    /// TXT prefix.custom-domain SHA256:...
+    /// TXT <PREFIX>.<DOMAIN> SHA256:...
     #[arg(
         long,
         default_value_t = String::from("_sandhole"),
@@ -345,7 +349,7 @@ mod application_config_tests {
                 acme_cache_directory: "./deploy/acme_cache/".into(),
                 private_key_file: "./deploy/server_keys/ssh".into(),
                 disable_directory_creation: false,
-                listen_address: "::".into(),
+                listen_address: "::".parse().unwrap(),
                 ssh_port: 2222.try_into().unwrap(),
                 http_port: 80.try_into().unwrap(),
                 https_port: 443.try_into().unwrap(),
@@ -435,7 +439,7 @@ mod application_config_tests {
                 acme_cache_directory: "/etc/acme_cache/".into(),
                 private_key_file: "/etc/private_key.pem".into(),
                 disable_directory_creation: true,
-                listen_address: "127.0.0.1".into(),
+                listen_address: "127.0.0.1".parse().unwrap(),
                 ssh_port: 18022.try_into().unwrap(),
                 http_port: 18080.try_into().unwrap(),
                 https_port: 18443.try_into().unwrap(),
@@ -471,5 +475,20 @@ mod application_config_tests {
                 tcp_connection_timeout: Some(Duration::from_str("30s").unwrap())
             }
         )
+    }
+
+    #[test]
+    fn fails_to_parse_if_invalid_domain() {
+        assert!(ApplicationConfig::try_parse_from(["sandhole", "--domain=.foobar.tld"]).is_err());
+    }
+
+    #[test]
+    fn fails_to_parse_if_invalid_txt_record_prefix() {
+        assert!(ApplicationConfig::try_parse_from([
+            "sandhole",
+            "--domain=foobar.tld",
+            "--txt-record-prefix=hello.world"
+        ])
+        .is_err());
     }
 }

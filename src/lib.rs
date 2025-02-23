@@ -6,7 +6,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     future,
     marker::PhantomData,
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     num::NonZero,
     sync::{atomic::AtomicUsize, Arc, Mutex, RwLock},
     time::Duration,
@@ -25,12 +25,13 @@ use ip::{IpFilter, IpFilterConfig};
 use log::{debug, error, info, warn};
 use login::ApiLogin;
 use quota::{DummyQuotaHandler, QuotaHandler, QuotaMap};
-use rand::rngs::OsRng;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 use reactor::{AliasReactor, HttpReactor, SshReactor, TcpReactor};
 use russh::{
     keys::{
         decode_secret_key,
-        ssh_key::{Fingerprint, LineEnding},
+        ssh_key::{private::Ed25519Keypair, Fingerprint, LineEnding},
     },
     server::{Config, Msg},
     ChannelStream,
@@ -194,8 +195,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         Ok(key) => decode_secret_key(&key, None).with_context(|| "Error decoding secret key")?,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             info!("Key file not found. Creating...");
-            let key = russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
-                .with_context(|| "Error creating secret key")?;
+            let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+                &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+            ));
             if !config.disable_directory_creation {
                 fs::create_dir_all(
                     config
@@ -218,10 +220,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         }
         Err(err) => return Err(err).with_context(|| "Error reading secret key"),
     };
-    let listen_address: IpAddr = config
-        .listen_address
-        .parse()
-        .with_context(|| "Couldn't parse listen address")?;
 
     // Initialize modules
     if !config.disable_directory_creation {
@@ -539,7 +537,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let mut join_handle_http = if config.disable_http {
         tokio::spawn(future::pending())
     } else {
-        let http_listener = TcpListener::bind((listen_address, config.http_port.into()))
+        let http_listener = TcpListener::bind((config.listen_address, config.http_port.into()))
             .await
             .with_context(|| "Error listening to HTTP port")?;
         info!(
@@ -605,7 +603,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let mut join_handle_https = if config.disable_http {
         tokio::spawn(future::pending())
     } else {
-        let https_listener = TcpListener::bind((listen_address, config.https_port.into()))
+        let https_listener = TcpListener::bind((config.listen_address, config.https_port.into()))
             .await
             .with_context(|| "Error listening to HTTPS port")?;
         info!(
@@ -678,8 +676,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     tokio::pin!(acceptor);
                     match acceptor.as_mut().await {
                         Ok(handshake) => {
-                            // Handle ALPN challenges with the ACME resolver.
                             if is_tls_alpn_challenge(&handshake.client_hello()) {
+                                // Handle ALPN challenges with the ACME resolver.
                                 if let Some(challenge_config) =
                                     certificates.challenge_rustls_config()
                                 {
@@ -688,6 +686,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                                     tls.shutdown().await.unwrap();
                                 }
                             } else {
+                                // Handle regular HTTPS TLS stream.
                                 match handshake.into_stream(server_config).await {
                                     Ok(stream) => {
                                         let server = auto::Builder::new(TokioExecutor::new());
@@ -719,7 +718,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     };
 
     // Start Sandhole on SSH port
-    let ssh_listener = TcpListener::bind((listen_address, config.ssh_port.into()))
+    let ssh_listener = TcpListener::bind((config.listen_address, config.ssh_port.into()))
         .await
         .with_context(|| "Error listening to SSH port")?;
     info!("Listening for SSH connections on port {}.", config.ssh_port);
