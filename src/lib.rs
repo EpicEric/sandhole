@@ -23,7 +23,7 @@ use hyper_util::{
 };
 use ip::{IpFilter, IpFilterConfig};
 use log::{debug, error, info, warn};
-use login::ApiLogin;
+use login::{ApiLogin, PlatformVerifierConfigurer};
 use quota::{DummyQuotaHandler, QuotaHandler, QuotaMap};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -137,7 +137,7 @@ pub(crate) struct SandholeServer {
     // Service for validating fingerprint authentications and automatically update its data when the filesystem changes.
     pub(crate) fingerprints_validator: FingerprintsValidator,
     // Service for user+password authentication via a login API via a config-provided URL.
-    pub(crate) api_login: Option<ApiLogin>,
+    pub(crate) api_login: Option<ApiLogin<PlatformVerifierConfigurer>>,
     // Service for assigning automatic addresses according to the addressing policies.
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
     // Service for handling opening and closing TCP sockets for non-aliased services.
@@ -239,7 +239,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let api_login = config
         .password_authentication_url
         .as_ref()
-        .map(|url| ApiLogin::new(url))
+        .map(|url| ApiLogin::new(url, PlatformVerifierConfigurer))
         .transpose()
         .with_context(|| "Error intializing login API")?;
     // Initialize the ACME ALPN service if a contact email has been provided.
@@ -272,7 +272,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             .with_context(|| "Error setting up certificates watcher")?,
     );
     // Initialize the IP address allowlist/blocklist service.
-    let ip_filter = Arc::new(IpFilter::new(IpFilterConfig {
+    let ip_filter = Arc::new(IpFilter::from(IpFilterConfig {
         allowlist: config.ip_allowlist,
         blocklist: config.ip_blocklist,
     })?);

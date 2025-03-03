@@ -184,7 +184,7 @@ async fn admin_remove_user() {
             r"HTTP services",
             r"aaa\.foobar\.tld",
             r"custom_user",
-            r"127.0.0.1:\d{4,5}",
+            r"127\.0\.0\.1:\d{4,5}",
         ]
         .into_iter()
         .map(|re| Regex::new(re).expect("Invalid regex"))
@@ -287,7 +287,7 @@ async fn admin_remove_user() {
             r"TCP services",
             r"38080",
             r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
-            r"127.0.0.1:\d{4,5}",
+            r"127\.0\.0\.1:\d{4,5}",
         ]
         .into_iter()
         .map(|re| Regex::new(re).expect("Invalid regex"))
@@ -380,9 +380,7 @@ impl russh::client::Handler for SshClient {
                 StatusCode::FORBIDDEN
             }
         }
-        let router = Router::new()
-            .route("/authenticate", post(authentication_route))
-            .into_service();
+        let router = Router::new().route("/authenticate", post(authentication_route));
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {
             Builder::new(TokioExecutor::new())

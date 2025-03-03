@@ -179,12 +179,10 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let router = Router::new()
-            .route(
-                "/",
-                get(|| async move { "Hello from foobar.tld!".to_string() }),
-            )
-            .into_service();
+        let router = Router::new().route(
+            "/",
+            get(|| async move { "Hello from foobar.tld!".to_string() }),
+        );
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {
             Builder::new(TokioExecutor::new())

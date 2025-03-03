@@ -2,11 +2,13 @@ use std::{fs, sync::Arc, time::Duration};
 
 use clap::Parser;
 use rand::{rng, seq::IndexedRandom};
+use russh::client::AuthResult;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
     Channel,
 };
+use russh::{MethodKind, MethodSet};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
@@ -84,7 +86,22 @@ async fn lib_configure_from_scratch() {
         "missing server_keys/ssh file"
     );
 
-    // 2. Start SSH client that is not recognized
+    // 2. Get authentication methods via authenticate_none
+    let ssh_client = SshClient;
+    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
+    match session.authenticate_none("user").await.unwrap() {
+        AuthResult::Failure { remaining_methods } => {
+            assert_eq!(
+                remaining_methods,
+                MethodSet::from([MethodKind::PublicKey].as_slice())
+            );
+        }
+        _ => panic!("unexpected AuthResult from authenticate_none"),
+    }
+
+    // 3. Start SSH client that is not recognized
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
@@ -113,7 +130,7 @@ async fn lib_configure_from_scratch() {
         "shouldn't allow unknown user to remote forward"
     );
 
-    // 3. Add key for SSH client that will be recognized
+    // 4. Add key for SSH client that will be recognized
     fs::copy(
         concat!(
             env!("CARGO_MANIFEST_DIR"),

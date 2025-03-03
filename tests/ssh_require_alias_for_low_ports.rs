@@ -1,8 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
+use russh::client;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use russh::{client, Channel};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
@@ -10,7 +10,7 @@ use tokio::{
 };
 
 #[tokio::test(flavor = "multi_thread")]
-async fn ssh_require_alias() {
+async fn ssh_require_alias_for_low_ports() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -76,6 +76,10 @@ async fn ssh_require_alias() {
         session.tcpip_forward("localhost", 22).await.is_err(),
         "shouldn't allow binding on localhost:22"
     );
+    assert!(
+        session.tcpip_forward("localhost", 32).await.is_err(),
+        "shouldn't allow binding on localhost:32"
+    );
 }
 
 struct SshClient;
@@ -88,24 +92,5 @@ impl client::Handler for SshClient {
         _key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
-    }
-
-    async fn server_channel_open_forwarded_tcpip(
-        &mut self,
-        channel: Channel<client::Msg>,
-        _connected_address: &str,
-        _connected_port: u32,
-        _originator_address: &str,
-        _originator_port: u32,
-        _session: &mut client::Session,
-    ) -> Result<(), Self::Error> {
-        tokio::spawn(async move {
-            channel
-                .data(&b"This shouldn't be invoked..."[..])
-                .await
-                .unwrap();
-            channel.eof().await.unwrap();
-        });
-        Ok(())
     }
 }

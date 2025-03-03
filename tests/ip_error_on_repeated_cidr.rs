@@ -1,32 +1,17 @@
 use std::{sync::Arc, time::Duration};
 
-use axum::extract::ws::Message;
-use axum::extract::{Request, WebSocketUpgrade};
-use axum::routing::any;
-use axum::Router;
 use clap::Parser;
-use futures_util::stream::FusedStream;
-use futures_util::{SinkExt, StreamExt};
-use http::StatusCode;
-use hyper::body::Incoming;
-use hyper::service::service_fn;
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use hyper_util::server::conn::auto::Builder;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use russh::{
-    client::{Msg, Session},
-    Channel,
-};
+use russh::{client::Session, ChannelId};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
+    sync::mpsc,
     time::{sleep, timeout},
 };
-use tokio_tungstenite::client_async;
-use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn websocket_timeout() {
+async fn ip_error_on_repeated_cidr() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -42,15 +27,15 @@ async fn websocket_timeout() {
         "--acme-cache-directory",
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
         "--disable-directory-creation",
-        "--listen-address=127.0.0.1",
+        "--listen-address=::",
         "--ssh-port=18022",
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
         "--bind-hostnames=all",
         "--idle-connection-timeout=1s",
+        "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
-        "--tcp-connection-timeout=500ms",
     ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
@@ -64,20 +49,21 @@ async fn websocket_timeout() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied
+    // 2. Start SSH client that will fail to set the same IP allowlist and blocklist
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
-    let ssh_client = SshClient;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let ssh_client = SshClient(tx);
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(
         session
             .authenticate_publickey(
-                "user",
+                "user1",
                 PrivateKeyWithHashAlg::new(
                     Arc::new(key),
                     session.best_supported_rsa_hash().await.unwrap().flatten()
@@ -88,35 +74,22 @@ async fn websocket_timeout() {
             .success(),
         "authentication didn't succeed"
     );
-    session
-        .tcpip_forward("foobar.tld", 80)
+    let channel = session
+        .channel_open_session()
         .await
-        .expect("tcpip_forward failed");
-
-    // 3. Connect to the HTTP port of our proxy and get timed out from WebSocket
-    let tcp_stream = TcpStream::connect("127.0.0.1:18080")
+        .expect("channel_open_session_failed");
+    channel
+        .exec(true, "ip-allowlist=127.0.0.0/8 ip-blocklist=127.0.0.0/8")
         .await
-        .expect("TCP connection failed");
-    let (mut websocket, response) = client_async("ws://foobar.tld/ws", tcp_stream)
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
-    if timeout(Duration::from_secs(2), async {
-        assert_eq!(
-            websocket.next().await.unwrap().unwrap().to_text().unwrap(),
-            "One"
-        );
-        assert!(websocket.next().await.unwrap().is_err());
-        assert!(websocket.is_terminated());
-    })
-    .await
-    .is_err()
-    {
-        panic!("Timeout waiting for WebSocket stream to reply.")
+        .expect("exec failed");
+    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+    else {
+        panic!("Timeout waiting for server to reply.");
     };
+    assert_eq!(channel_id, channel.id());
 }
 
-struct SshClient;
+struct SshClient(mpsc::UnboundedSender<ChannelId>);
 
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
@@ -128,33 +101,12 @@ impl russh::client::Handler for SshClient {
         Ok(true)
     }
 
-    async fn server_channel_open_forwarded_tcpip(
+    async fn channel_failure(
         &mut self,
-        channel: Channel<Msg>,
-        _connected_address: &str,
-        _connected_port: u32,
-        _originator_address: &str,
-        _originator_port: u32,
+        channel: ChannelId,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let router = Router::new().route(
-            "/ws",
-            any(|ws: WebSocketUpgrade| async move {
-                ws.on_upgrade(|mut socket| async move {
-                    socket.send(Message::Text("One".into())).await.unwrap();
-                    sleep(Duration::from_secs(5)).await;
-                    socket.send(Message::Text("Two".into())).await.unwrap();
-                    socket.close().await.unwrap();
-                })
-            }),
-        );
-        let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
-        tokio::spawn(async move {
-            Builder::new(TokioExecutor::new())
-                .serve_connection_with_upgrades(TokioIo::new(channel.into_stream()), service)
-                .await
-                .expect("Invalid request");
-        });
+        self.0.send(channel).unwrap();
         Ok(())
     }
 }

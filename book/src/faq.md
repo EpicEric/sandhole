@@ -47,3 +47,16 @@ With the `--ip-allowlist` and `--ip-blocklist` [CLI flags](./cli.md) respectivel
 ```bash
 ssh -R website.com:80:localhost:3000 sandhole.com -p 2222 ip-allowlist=10.0.0.0/8 ip-blocklist=10.1.0.0/16
 ```
+
+## How do I run the Docker container without mounting root certificates from the host?
+
+Simply build an Alpine image with `ca-certificates` and `sandhole` installed, for example:
+
+```dockerfile
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates
+COPY --from=epiceric/sandhole:latest /sandhole /sandhole
+ENTRYPOINT [ "/sandhole" ]
+```
+
+If you don't need the [HTTPS login API functionality](./configuration.md#alternative-authentication-with-password), you can skip mounting the certificates directory, and just use the plain Docker image.

@@ -26,7 +26,7 @@ pub(crate) struct IpFilterConfig {
 }
 
 impl IpFilter {
-    pub(crate) fn new(config: IpFilterConfig) -> anyhow::Result<Self> {
+    pub(crate) fn from(config: IpFilterConfig) -> anyhow::Result<Self> {
         let IpFilterConfig {
             allowlist,
             blocklist,
@@ -75,7 +75,7 @@ mod ip_filter_tests {
 
     #[test]
     fn should_allow_anyone_if_no_lists() {
-        let filter = IpFilter::new(IpFilterConfig {
+        let filter = IpFilter::from(IpFilterConfig {
             allowlist: None,
             blocklist: None,
         })
@@ -88,7 +88,7 @@ mod ip_filter_tests {
 
     #[test]
     fn should_allow_anyone_if_empty_lists() {
-        let filter = IpFilter::new(IpFilterConfig {
+        let filter = IpFilter::from(IpFilterConfig {
             allowlist: Some(vec![]),
             blocklist: Some(vec![]),
         })
@@ -101,7 +101,7 @@ mod ip_filter_tests {
 
     #[test]
     fn should_allow_addresses_not_in_blocklist() {
-        let filter = IpFilter::new(IpFilterConfig {
+        let filter = IpFilter::from(IpFilterConfig {
             allowlist: None,
             blocklist: Some(vec![
                 IpNet::from_str("10.0.0.0/20").unwrap(),
@@ -117,7 +117,7 @@ mod ip_filter_tests {
 
     #[test]
     fn should_reject_addresses_not_in_allowlist() {
-        let filter = IpFilter::new(IpFilterConfig {
+        let filter = IpFilter::from(IpFilterConfig {
             allowlist: Some(vec![
                 IpNet::from_str("127.0.0.0/24").unwrap(),
                 IpNet::from_str("10.0.0.0/18").unwrap(),
@@ -133,7 +133,7 @@ mod ip_filter_tests {
 
     #[test]
     fn should_only_accept_allowlist() {
-        let filter = IpFilter::new(IpFilterConfig {
+        let filter = IpFilter::from(IpFilterConfig {
             allowlist: Some(vec![
                 IpNet::from_str("127.0.0.0/24").unwrap(),
                 IpNet::from_str("10.0.0.0/18").unwrap(),
@@ -153,7 +153,7 @@ mod ip_filter_tests {
     #[test]
     fn should_fail_if_duplicated_network() {
         assert!(
-            IpFilter::new(IpFilterConfig {
+            IpFilter::from(IpFilterConfig {
                 allowlist: Some(vec![IpNet::from_str("127.0.0.0/24").unwrap()]),
                 blocklist: Some(vec![IpNet::from_str("127.0.0.0/24").unwrap()]),
             })
@@ -161,7 +161,7 @@ mod ip_filter_tests {
             "shouldn't allow same network in both allowlist and blocklist"
         );
         assert!(
-            IpFilter::new(IpFilterConfig {
+            IpFilter::from(IpFilterConfig {
                 allowlist: Some(vec![
                     IpNet::from_str("127.0.0.0/24").unwrap(),
                     IpNet::from_str("127.0.0.0/24").unwrap()
@@ -172,7 +172,7 @@ mod ip_filter_tests {
             "shouldn't allow same network in allowlist twice"
         );
         assert!(
-            IpFilter::new(IpFilterConfig {
+            IpFilter::from(IpFilterConfig {
                 allowlist: None,
                 blocklist: Some(vec![
                     IpNet::from_str("127.0.0.0/24").unwrap(),

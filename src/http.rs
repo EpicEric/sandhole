@@ -858,15 +858,13 @@ mod proxy_handler_tests {
             .header("host", "slow.handler")
             .body(Empty::<Bytes>::new())
             .unwrap();
-        let router = axum::Router::new()
-            .route(
-                "/slow_endpoint",
-                axum::routing::get(|| async move {
-                    sleep(Duration::from_secs(1)).await;
-                    "Slow hello."
-                }),
-            )
-            .into_service();
+        let router = axum::Router::new().route(
+            "/slow_endpoint",
+            axum::routing::get(|| async move {
+                sleep(Duration::from_secs(1)).await;
+                "Slow hello."
+            }),
+        );
         let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         let jh = tokio::spawn(async move {
             hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
@@ -953,21 +951,19 @@ mod proxy_handler_tests {
             .header("host", "with.handler")
             .body(String::from("Hello world"))
             .unwrap();
-        let router = axum::Router::new()
-            .route(
-                "/api/endpoint",
-                axum::routing::post(|headers: HeaderMap, body: String| async move {
-                    if headers.get("X-Forwarded-For").unwrap() == "127.0.0.1"
-                        && headers.get("X-Forwarded-Host").unwrap() == "with.handler"
-                        && body == "Hello world"
-                    {
-                        "Success."
-                    } else {
-                        "Failure."
-                    }
-                }),
-            )
-            .into_service();
+        let router = axum::Router::new().route(
+            "/api/endpoint",
+            axum::routing::post(|headers: HeaderMap, body: String| async move {
+                if headers.get("X-Forwarded-For").unwrap() == "127.0.0.1"
+                    && headers.get("X-Forwarded-Host").unwrap() == "with.handler"
+                    && body == "Hello world"
+                {
+                    "Success."
+                } else {
+                    "Failure."
+                }
+            }),
+        );
         let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         let jh = tokio::spawn(async move {
             hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
@@ -1051,21 +1047,19 @@ mod proxy_handler_tests {
             .header("host", "with.handler")
             .body(String::from("Hello world"))
             .unwrap();
-        let router = axum::Router::new()
-            .route(
-                "/api/endpoint",
-                axum::routing::post(|headers: HeaderMap, body: String| async move {
-                    if headers.get("X-Forwarded-For").unwrap() == "127.0.0.1"
-                        && headers.get("X-Forwarded-Host").unwrap() == "with.handler"
-                        && body == "Hello world"
-                    {
-                        "Success."
-                    } else {
-                        "Failure."
-                    }
-                }),
-            )
-            .into_service();
+        let router = axum::Router::new().route(
+            "/api/endpoint",
+            axum::routing::post(|headers: HeaderMap, body: String| async move {
+                if headers.get("X-Forwarded-For").unwrap() == "127.0.0.1"
+                    && headers.get("X-Forwarded-Host").unwrap() == "with.handler"
+                    && body == "Hello world"
+                {
+                    "Success."
+                } else {
+                    "Failure."
+                }
+            }),
+        );
         let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         let jh = tokio::spawn(async move {
             hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
@@ -1149,21 +1143,19 @@ mod proxy_handler_tests {
             .header("host", "root.domain")
             .body(String::from("My body"))
             .unwrap();
-        let router = axum::Router::new()
-            .route(
-                "/test",
-                axum::routing::post(|headers: HeaderMap, body: String| async move {
-                    if headers.get("X-Forwarded-For").unwrap() == "192.168.0.1"
-                        && headers.get("X-Forwarded-Host").unwrap() == "root.domain"
-                        && body == "My body"
-                    {
-                        "Success."
-                    } else {
-                        "Failure."
-                    }
-                }),
-            )
-            .into_service();
+        let router = axum::Router::new().route(
+            "/test",
+            axum::routing::post(|headers: HeaderMap, body: String| async move {
+                if headers.get("X-Forwarded-For").unwrap() == "192.168.0.1"
+                    && headers.get("X-Forwarded-Host").unwrap() == "root.domain"
+                    && body == "My body"
+                {
+                    "Success."
+                } else {
+                    "Failure."
+                }
+            }),
+        );
         let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         let jh = tokio::spawn(async move {
             hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
@@ -1245,19 +1237,17 @@ mod proxy_handler_tests {
             )
             .unwrap();
         let (socket, stream) = tokio::io::duplex(1024);
-        let router = axum::Router::new()
-            .route(
-                "/ws",
-                axum::routing::any(|ws: axum::extract::WebSocketUpgrade| async move {
-                    ws.on_upgrade(|mut socket| async move {
-                        let _ = socket
-                            .send(axum::extract::ws::Message::Text("Success.".into()))
-                            .await;
-                        let _ = socket.close().await;
-                    })
-                }),
-            )
-            .into_service();
+        let router = axum::Router::new().route(
+            "/ws",
+            axum::routing::any(|ws: axum::extract::WebSocketUpgrade| async move {
+                ws.on_upgrade(|mut socket| async move {
+                    let _ = socket
+                        .send(axum::extract::ws::Message::Text("Success.".into()))
+                        .await;
+                    let _ = socket.close().await;
+                })
+            }),
+        );
         let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         let jh = tokio::spawn(async move {
             hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())

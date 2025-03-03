@@ -167,7 +167,7 @@ async fn admin_missing_pty() {
                 break;
             }
         }
-        // 4f. Quit the admin interface with Ctrl-C (ETX)
+        // 4b. Quit the admin interface with Ctrl-C (ETX)
         writer
             .write(&b"\x03"[..])
             .await

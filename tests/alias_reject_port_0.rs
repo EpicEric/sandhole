@@ -1,27 +1,15 @@
 use std::{sync::Arc, time::Duration};
 
-use axum::{routing::get, Router};
 use clap::Parser;
-use http::{Request, StatusCode};
-use hyper::{body::Incoming, service::service_fn};
-use hyper_util::{
-    rt::{TokioExecutor, TokioIo},
-    server::conn::auto::Builder,
-};
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use russh::{
-    client::{Msg, Session},
-    Channel,
-};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
 };
-use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn config_disable_tcp() {
+async fn alias_reject_port_0() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -42,8 +30,7 @@ async fn config_disable_tcp() {
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
-        "--bind-hostnames=all",
-        "--disable-tcp",
+        "--bind-hostnames=none",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
@@ -60,23 +47,28 @@ async fn config_disable_tcp() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will fail to bind TCP
+    // 2. Start SSH client that will fail to proxy on port 0
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
+    let mut proxy_session =
+        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+            .await
+            .expect("Failed to connect to SSH server");
     assert!(
-        session
+        proxy_session
             .authenticate_publickey(
                 "user",
                 PrivateKeyWithHashAlg::new(
                     Arc::new(key),
-                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                    proxy_session
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
                 )
             )
             .await
@@ -85,21 +77,8 @@ async fn config_disable_tcp() {
         "authentication didn't succeed"
     );
     assert!(
-        session.tcpip_forward("localhost", 12345).await.is_err(),
-        "should've failed to bind TCP"
-    );
-    assert!(!session.is_closed(), "shouldn't have closed connection");
-    assert!(
-        TcpStream::connect("127.0.0.1:12345").await.is_err(),
-        "shouldn't listen on TCP port"
-    );
-    assert!(
-        session.tcpip_forward("test.foobar.tld", 80).await.is_ok(),
-        "shouldn't have failed to bind HTTP"
-    );
-    assert!(
-        session.tcpip_forward("some.alias", 12345).await.is_ok(),
-        "shouldn't have failed to bind alias"
+        proxy_session.tcpip_forward("my.tunnel", 0).await.is_err(),
+        "shouldn't alias on port 0"
     );
 }
 
@@ -113,25 +92,5 @@ impl russh::client::Handler for SshClient {
         _key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
-    }
-
-    async fn server_channel_open_forwarded_tcpip(
-        &mut self,
-        channel: Channel<Msg>,
-        _connected_address: &str,
-        _connected_port: u32,
-        _originator_address: &str,
-        _originator_port: u32,
-        _session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        let router = Router::new().route("/", get(|| async move { StatusCode::NO_CONTENT }));
-        let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
-        tokio::spawn(async move {
-            Builder::new(TokioExecutor::new())
-                .serve_connection_with_upgrades(TokioIo::new(channel.into_stream()), service)
-                .await
-                .expect("Invalid request");
-        });
-        Ok(())
     }
 }

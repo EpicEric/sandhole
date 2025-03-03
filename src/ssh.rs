@@ -32,7 +32,7 @@ use hyper_util::{
     server::conn::auto,
 };
 use ipnet::IpNet;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use russh::{
     keys::{ssh_key::Fingerprint, HashAlg, PublicKey},
     server::{Auth, Handler, Msg, Session},
@@ -178,6 +178,8 @@ struct UserData {
     port_addressing: HashMap<TcpAlias, u16>,
     // Map to keep track of opened alias-based connections (aliases), to clean up when the forwarding is canceled.
     alias_addressing: HashMap<TcpAlias, TcpAlias>,
+    allowlist: Option<Vec<IpNet>>,
+    blocklist: Option<Vec<IpNet>>,
 }
 
 impl UserData {
@@ -194,6 +196,8 @@ impl UserData {
             host_addressing: Default::default(),
             port_addressing: Default::default(),
             alias_addressing: Default::default(),
+            allowlist: Default::default(),
+            blocklist: Default::default(),
         }
     }
 }
@@ -281,6 +285,8 @@ pub(crate) struct ServerHandler {
     cancellation_token: CancellationToken,
     // User-specific data, set after authentication.
     auth_data: AuthenticatedData,
+    // Commands running on the open session channel.
+    commands: HashSet<String>,
     // Sender for data session messages, used for sending logs and TUI state to the client.
     tx: OptionalSender,
     // Handle for the opened data session task. Initially None.
@@ -316,6 +322,7 @@ impl Server for Arc<SandholeServer> {
             auth_data: AuthenticatedData::None {
                 proxy_count: Arc::new(AtomicUsize::new(0)),
             },
+            commands: Default::default(),
             tx: OptionalSender(None),
             open_session_join_handle: None,
             server: Arc::clone(self),
@@ -376,7 +383,7 @@ impl Handler for ServerHandler {
             })
             .await
             {
-                Ok(is_authenticated) => {
+                Ok(Ok(is_authenticated)) => {
                     // Check if authentication succeeded.
                     if is_authenticated {
                         // Add this session to the password sessions, allowing it to be canceled via the admin TUI.
@@ -402,6 +409,9 @@ impl Handler for ServerHandler {
                     } else {
                         warn!("{} ({}) failed password authentication", user, self.peer);
                     }
+                }
+                Ok(Err(err)) => {
+                    error!("Error authenticating {} ({}): {}", user, self.peer, err);
                 }
                 _ => {
                     warn!("Authentication request timed out");
@@ -533,20 +543,16 @@ impl Handler for ServerHandler {
         let mut success = true;
         let cmd = String::from_utf8_lossy(data);
         // Split commands by whitespace and handle each.
-        let mut commands = HashSet::<String>::new();
-        let mut allowlist = None;
-        let mut blocklist = None;
         for command in cmd.split_whitespace() {
             match (command, &mut self.auth_data) {
                 // - `admin` command creates an admin interface if the user is an admin
                 ("admin", AuthenticatedData::Admin { admin_data, .. }) => {
-                    if commands.contains("admin") {
+                    if self.commands.contains("admin") {
                         self.tx
                             .send(b"Invalid option \"admin\": duplicated command\r\n".to_vec());
                         success = false;
                         break;
                     }
-                    commands.insert("admin".into());
                     if admin_data.is_forwarding {
                         self.tx.send(
                             b"Invalid option \"admin\": cannot open admin interface while forwarding\r\n"
@@ -566,6 +572,7 @@ impl Handler for ServerHandler {
                         let _ = admin_interface.resize(col_width as u16, row_height as u16);
                     }
                     admin_data.admin_interface = Some(admin_interface);
+                    self.commands.insert("admin".into());
                 }
                 // - `allowed-fingerprints` sets this connection as alias-only,
                 //   and requires local forwardings to have one of the specified key fingerprints.
@@ -582,7 +589,7 @@ impl Handler for ServerHandler {
                         success = false;
                         break;
                     }
-                    if commands.contains("allowed-fingerprints") {
+                    if self.commands.contains("allowed-fingerprints") {
                         self.tx.send(
                             b"Invalid option \"allowed-fingerprints\": duplicated command\r\n"
                                 .to_vec(),
@@ -590,27 +597,29 @@ impl Handler for ServerHandler {
                         success = false;
                         break;
                     }
-                    commands.insert("allowed-fingerprints".into());
                     user_data.tcp_alias_only = true;
                     user_data.http_data.write().await.is_aliasing = true;
                     // Create a set from the provided list of fingerprints
-                    let set: BTreeSet<Fingerprint> = command
+                    let set: Result<BTreeSet<Fingerprint>, _> = command
                         .trim_start_matches("allowed-fingerprints=")
                         .split(',')
-                        .filter_map(|key| match key.parse::<Fingerprint>() {
-                            Ok(fingerprint) => Some(fingerprint),
-                            Err(err) => {
-                                self.tx.send(
-                                    format!(
-                                        "Failed to parse fingerprint {}, ignoring ({})\r\n",
-                                        key, err
-                                    )
-                                    .into_bytes(),
-                                );
-                                None
-                            }
-                        })
+                        .map(|key| key.parse::<Fingerprint>())
                         .collect();
+                    let set = match set {
+                        Ok(set) => set,
+                        Err(err) => {
+                            self.tx.send(
+                                format!("Error parsing fingerprints: {}\r\n", err).into_bytes(),
+                            );
+                            success = false;
+                            break;
+                        }
+                    };
+                    if set.is_empty() {
+                        self.tx.send(b"No fingerprints provided\r\n".to_vec());
+                        success = false;
+                        break;
+                    }
                     // Create a validation closure that verifies that the fingerprint is in our new set
                     *user_data.allow_fingerprint.write().await =
                         Box::new(move |fingerprint| fingerprint.is_some_and(|fp| set.contains(fp)));
@@ -662,6 +671,7 @@ impl Handler for ServerHandler {
                             break;
                         }
                     }
+                    self.commands.insert("allowed-fingerprints".into());
                 }
                 // - `tcp-alias` sets this connection as alias-only.
                 (
@@ -676,13 +686,12 @@ impl Handler for ServerHandler {
                         success = false;
                         break;
                     }
-                    if commands.contains("tcp-alias") {
+                    if self.commands.contains("tcp-alias") {
                         self.tx
                             .send(b"Invalid option \"tcp-alias\": duplicated command\r\n".to_vec());
                         success = false;
                         break;
                     }
-                    commands.insert("tcp-alias".into());
                     user_data.tcp_alias_only = true;
                     user_data.http_data.write().await.is_aliasing = true;
                     // Reject TCP ports
@@ -733,6 +742,7 @@ impl Handler for ServerHandler {
                             break;
                         }
                     }
+                    self.commands.insert("tcp-alias".into());
                 }
                 // - `force-https` causes tunneled HTTP requests to be redirected to HTTPS.
                 (
@@ -740,85 +750,95 @@ impl Handler for ServerHandler {
                     AuthenticatedData::User { user_data, .. }
                     | AuthenticatedData::Admin { user_data, .. },
                 ) => {
-                    if commands.contains("force-https") {
+                    if self.commands.contains("force-https") {
                         self.tx.send(
                             b"Invalid option \"force-https\": duplicated command\r\n".to_vec(),
                         );
                         success = false;
                         break;
                     }
-                    commands.insert("force-https".into());
                     user_data
                         .http_data
                         .write()
                         .await
                         .redirect_http_to_https_port = Some(self.server.https_port);
+                    self.commands.insert("force-https".into());
                 }
                 // - `ip-allowlist` requires tunneling/aliasing connections to come from
                 //   specific IP ranges.
-                (command, AuthenticatedData::User { .. } | AuthenticatedData::Admin { .. })
-                    if command.starts_with("ip-allowlist=") =>
-                {
-                    if commands.contains("ip-allowlist") {
+                (
+                    command,
+                    AuthenticatedData::User { user_data, .. }
+                    | AuthenticatedData::Admin { user_data, .. },
+                ) if command.starts_with("ip-allowlist=") => {
+                    if self.commands.contains("ip-allowlist") || user_data.allowlist.is_some() {
                         self.tx.send(
                             b"Invalid option \"ip-allowlist\": duplicated command\r\n".to_vec(),
                         );
                         success = false;
                         break;
                     }
-                    commands.insert("ip-allowlist".into());
-                    allowlist = Some(
-                        command
-                            .trim_start_matches("ip-allowlist=")
-                            .split(',')
-                            .filter_map(|network| match network.parse::<IpNet>() {
-                                Ok(ip_net) => Some(ip_net),
-                                Err(err) => {
-                                    self.tx.send(
-                                        format!(
-                                            "Failed to parse IP network {}, ignoring ({})\r\n",
-                                            network, err
-                                        )
-                                        .into_bytes(),
-                                    );
-                                    None
-                                }
-                            })
-                            .collect(),
-                    );
+                    let list: Result<Vec<IpNet>, _> = command
+                        .trim_start_matches("ip-allowlist=")
+                        .split(',')
+                        .map(|network| network.parse::<IpNet>())
+                        .collect();
+                    let list = match list {
+                        Ok(list) => list,
+                        Err(err) => {
+                            self.tx.send(
+                                format!("Error parsing allowlist networks: {}\r\n", err)
+                                    .into_bytes(),
+                            );
+                            success = false;
+                            break;
+                        }
+                    };
+                    if list.is_empty() {
+                        self.tx.send(b"No allowlist networks provided\r\n".to_vec());
+                        success = false;
+                        break;
+                    }
+                    user_data.allowlist = Some(list);
+                    self.commands.insert("ip-allowlist".into());
                 }
                 // - `ip-blocklist` requires tunneling/aliasing connections to come from
                 //   specific IP ranges.
-                (command, AuthenticatedData::User { .. } | AuthenticatedData::Admin { .. })
-                    if command.starts_with("ip-blocklist=") =>
-                {
-                    if commands.contains("ip-blocklist") {
+                (
+                    command,
+                    AuthenticatedData::User { user_data, .. }
+                    | AuthenticatedData::Admin { user_data, .. },
+                ) if command.starts_with("ip-blocklist=") => {
+                    if self.commands.contains("ip-blocklist") || user_data.blocklist.is_some() {
                         self.tx.send(
                             b"Invalid option \"ip-blocklist\": duplicated command\r\n".to_vec(),
                         );
                         success = false;
                         break;
                     }
-                    commands.insert("ip-blocklist".into());
-                    blocklist = Some(
-                        command
-                            .trim_start_matches("ip-blocklist=")
-                            .split(',')
-                            .filter_map(|network| match network.parse::<IpNet>() {
-                                Ok(ip_net) => Some(ip_net),
-                                Err(err) => {
-                                    self.tx.send(
-                                        format!(
-                                            "Failed to parse IP network {}, ignoring ({})\r\n",
-                                            network, err
-                                        )
-                                        .into_bytes(),
-                                    );
-                                    None
-                                }
-                            })
-                            .collect(),
-                    );
+                    let list: Result<Vec<IpNet>, _> = command
+                        .trim_start_matches("ip-blocklist=")
+                        .split(',')
+                        .map(|network| network.parse::<IpNet>())
+                        .collect();
+                    let list = match list {
+                        Ok(list) => list,
+                        Err(err) => {
+                            self.tx.send(
+                                format!("Error parsing blocklist networks: {}\r\n", err)
+                                    .into_bytes(),
+                            );
+                            success = false;
+                            break;
+                        }
+                    };
+                    if list.is_empty() {
+                        self.tx.send(b"No blocklist networks provided\r\n".to_vec());
+                        success = false;
+                        break;
+                    }
+                    user_data.blocklist = Some(list);
+                    self.commands.insert("ip-blocklist".into());
                 }
                 // - Unknown command
                 (command, _) => {
@@ -832,25 +852,29 @@ impl Handler for ServerHandler {
                 }
             }
         }
+        let user_data = match self.auth_data {
+            AuthenticatedData::User {
+                ref mut user_data, ..
+            }
+            | AuthenticatedData::Admin {
+                ref mut user_data, ..
+            } => Some(user_data),
+            _ => None,
+        };
+        let allowlist = user_data.as_ref().map(|data| &data.allowlist);
+        let blocklist = user_data.as_ref().map(|data| &data.blocklist);
         if success && (allowlist.is_some() || blocklist.is_some()) {
+            let allowlist = allowlist.unwrap().clone();
+            let blocklist = blocklist.unwrap().clone();
             match &mut self.auth_data {
                 AuthenticatedData::User { user_data, .. }
                 | AuthenticatedData::Admin { user_data, .. } => {
-                    match IpFilter::new(IpFilterConfig {
+                    match IpFilter::from(IpFilterConfig {
                         allowlist,
                         blocklist,
                     }) {
                         Ok(ip_filter) => {
-                            let mut guard = user_data.ip_filter.write().await;
-                            if guard.is_none() {
-                                *guard = Some(ip_filter);
-                            } else {
-                                self.tx.send(
-                                    b"Failed to create IP filter for connection (already created)\r\n"
-                                        .to_vec(),
-                                );
-                                success = false;
-                            }
+                            *user_data.ip_filter.write().await = Some(ip_filter);
                         }
                         Err(err) => {
                             self.tx.send(

@@ -16,7 +16,7 @@ use tokio::{
 };
 
 #[tokio::test(flavor = "multi_thread")]
-async fn admin_interface() {
+async fn admin_window_change() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -57,7 +57,7 @@ async fn admin_interface() {
 
     // 2. Start SSH client that will be proxied
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
         None,
     )
     .expect("Missing file key1");
@@ -127,13 +127,17 @@ async fn admin_interface() {
         .await
         .expect("channel_open_session failed");
     channel
-        .request_pty(false, "xterm", 140, 30, 640, 480, &[])
+        .request_pty(false, "xterm", 10, 10, 640, 480, &[])
         .await
         .expect("request_pty failed");
     channel
         .exec(false, "admin")
         .await
         .expect("exec admin failed");
+    channel
+        .window_change(140, 30, 640, 480)
+        .await
+        .expect("window_change failed");
 
     // 4. Interact with the admin interface and verify displayed data
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -167,7 +171,7 @@ async fn admin_interface() {
             r"   RX   ",
             r"HTTP services",
             r"http\.aaa",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"SHA256:F7r4labRQQM1G0pbnxFNDZwd1BB5N/NlHHRca3jM0fo",
             r"127\.0\.0\.1:\d{4,5}",
         ]
         .into_iter()
@@ -179,166 +183,7 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4b. Switch tabs and validate SSH tab data
-        writer
-            .write(&b"\t"[..])
-            .await
-            .expect("channel write failed");
-        let search_strings: Vec<Regex> = [
-            r"Sandhole admin v\d+\.\d+\.\d+",
-            r"System information",
-            r"  CPU%  ",
-            r" Memory ",
-            r"   TX   ",
-            r"   RX   ",
-            r"SSH services",
-            r"ssh\.bbb",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
-            r"127\.0\.0\.1:\d{4,5}",
-        ]
-        .into_iter()
-        .map(|re| Regex::new(re).expect("Invalid regex"))
-        .collect();
-        loop {
-            let screen = rx.recv().await.unwrap();
-            if search_strings.iter().all(|re| re.is_match(&screen)) {
-                break;
-            }
-        }
-        // 4c. Switch tabs again and validate TCP tab data
-        writer
-            .write(&b"\t"[..])
-            .await
-            .expect("channel write failed");
-        let search_strings: Vec<Regex> = [
-            r"Sandhole admin v\d+\.\d+\.\d+",
-            r"System information",
-            r"  CPU%  ",
-            r" Memory ",
-            r"   TX   ",
-            r"   RX   ",
-            r"TCP services",
-            r"23456",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
-            r"127\.0\.0\.1:\d{4,5}",
-        ]
-        .into_iter()
-        .map(|re| Regex::new(re).expect("Invalid regex"))
-        .collect();
-        loop {
-            let screen = rx.recv().await.unwrap();
-            if search_strings.iter().all(|re| re.is_match(&screen)) {
-                break;
-            }
-        }
-        // 4d. Switch tabs again and validate alias tab data
-        writer
-            .write(&b"\t"[..])
-            .await
-            .expect("channel write failed");
-        let search_strings: Vec<Regex> = [
-            r"Sandhole admin v\d+\.\d+\.\d+",
-            r"System information",
-            r"  CPU%  ",
-            r" Memory ",
-            r"   TX   ",
-            r"   RX   ",
-            r"Alias services",
-            r"proxy\.ccc:12345",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
-            r"127\.0\.0\.1:\d{4,5}",
-        ]
-        .into_iter()
-        .map(|re| Regex::new(re).expect("Invalid regex"))
-        .collect();
-        loop {
-            let screen = rx.recv().await.unwrap();
-            if search_strings.iter().all(|re| re.is_match(&screen)) {
-                break;
-            }
-        }
-        // 4e. Go back one tab
-        writer
-            .write(&b"\x1b[Z"[..])
-            .await
-            .expect("channel write failed");
-        let search_strings: Vec<Regex> = [
-            r"Sandhole admin v\d+\.\d+\.\d+",
-            r"System information",
-            r"  CPU%  ",
-            r" Memory ",
-            r"   TX   ",
-            r"   RX   ",
-            r"TCP services",
-            r"23456",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
-            r"127\.0\.0\.1:\d{4,5}",
-        ]
-        .into_iter()
-        .map(|re| Regex::new(re).expect("Invalid regex"))
-        .collect();
-        loop {
-            let screen = rx.recv().await.unwrap();
-            if search_strings.iter().all(|re| re.is_match(&screen)) {
-                break;
-            }
-        }
-        // 4f. View user details
-        writer
-            .write(&b"\x1b[A"[..])
-            .await
-            .expect("channel write failed");
-        // Wait for table state to update via render
-        sleep(Duration::from_millis(200)).await;
-        writer
-            .write(&b"\r"[..])
-            .await
-            .expect("channel write failed");
-        let search_strings: Vec<Regex> = [
-            r"Sandhole admin v\d+\.\d+\.\d+",
-            r"User details",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
-            r"Type: User",
-            r"Key comment: key1",
-            r"Algorithm: ssh-ed25519",
-            r" <Esc> Close  <Delete> Remove ",
-        ]
-        .into_iter()
-        .map(|re| Regex::new(re).expect("Invalid regex"))
-        .collect();
-        loop {
-            let screen = rx.recv().await.unwrap();
-            if search_strings.iter().all(|re| re.is_match(&screen)) {
-                break;
-            }
-        }
-        // 4g. Close user details
-        writer
-            .write(&b"\x1b"[..])
-            .await
-            .expect("channel write failed");
-        let search_strings: Vec<Regex> = [
-            r"Sandhole admin v\d+\.\d+\.\d+",
-            r"System information",
-            r"  CPU%  ",
-            r" Memory ",
-            r"   TX   ",
-            r"   RX   ",
-            r"TCP services",
-            r"23456",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
-            r"127\.0\.0\.1:\d{4,5}",
-        ]
-        .into_iter()
-        .map(|re| Regex::new(re).expect("Invalid regex"))
-        .collect();
-        loop {
-            let screen = rx.recv().await.unwrap();
-            if search_strings.iter().all(|re| re.is_match(&screen)) {
-                break;
-            }
-        }
-        // 4g. Quit the admin interface with Ctrl-C (ETX)
+        // 4b. Quit the admin interface with Ctrl-C (ETX)
         writer
             .write(&b"\x03"[..])
             .await

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Improve logic for SSH exec commands.
+
 ### Changed
 
 - Update dependencies.

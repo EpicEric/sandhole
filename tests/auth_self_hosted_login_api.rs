@@ -158,9 +158,7 @@ impl russh::client::Handler for SshClient {
                 StatusCode::FORBIDDEN
             }
         }
-        let router = Router::new()
-            .route("/authenticate", post(authentication_route))
-            .into_service();
+        let router = Router::new().route("/authenticate", post(authentication_route));
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {
             Builder::new(TokioExecutor::new())
