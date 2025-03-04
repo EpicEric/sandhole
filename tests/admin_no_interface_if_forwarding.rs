@@ -1,8 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
+use regex::Regex;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use russh::ChannelId;
 use russh::{
     client::{self, Msg, Session},
     Channel,
@@ -17,6 +17,7 @@ use tokio::{
 #[tokio::test(flavor = "multi_thread")]
 async fn admin_no_interface_if_forwarding() {
     // 1. Initialize Sandhole
+    let _ = env_logger::builder().is_test(true).try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
@@ -44,7 +45,7 @@ async fn admin_no_interface_if_forwarding() {
     ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
-        while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {
+        while TcpStream::connect("127.0.0.1:18022").await.is_err() {
             sleep(Duration::from_millis(100)).await;
         }
     })
@@ -56,7 +57,7 @@ async fn admin_no_interface_if_forwarding() {
 
     // 2. Start SSH client that will be proxied
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
         None,
     )
     .expect("Missing file key1");
@@ -79,18 +80,31 @@ async fn admin_no_interface_if_forwarding() {
         "authentication didn't succeed"
     );
     session
+        .tcpip_forward("http.aaa", 443)
+        .await
+        .expect("tcpip_forward failed");
+    session
+        .tcpip_forward("ssh.bbb", 22)
+        .await
+        .expect("tcpip_forward failed");
+    session
         .tcpip_forward("proxy.ccc", 12345)
         .await
         .expect("tcpip_forward failed");
+    session
+        .tcpip_forward("", 23456)
+        .await
+        .expect("tcpip_forward failed");
+    // Required for updating the admin interface data
+    sleep(Duration::from_secs(3)).await;
 
-    // 3. Create forwarding and fail to open admin interface
+    // 3. Request admin pty
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/admin"),
         None,
     )
     .expect("Missing file admin");
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let ssh_client = SshClientAdmin(tx);
+    let ssh_client = SshClientAdmin;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
@@ -108,68 +122,76 @@ async fn admin_no_interface_if_forwarding() {
             .success(),
         "authentication didn't succeed"
     );
-    let _alias_channel = session
-        .channel_open_direct_tcpip("proxy.ccc", 12345, "::1", 23456)
-        .await
-        .expect("Local forwarding failed");
-    let channel = session
+    let mut channel = session
         .channel_open_session()
         .await
         .expect("channel_open_session failed");
     channel
-        .exec(true, "admin")
+        .request_pty(false, "xterm", 140, 30, 640, 480, &[])
         .await
-        .expect("exec admin failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    sleep(Duration::from_millis(200)).await;
-    assert!(!session.is_closed(), "session should've been closed");
-
-    // 3. Open admin interface and fail to create forwarding
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/admin"),
-        None,
-    )
-    .expect("Missing file admin");
-    let ssh_client = SshClient;
-    let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
-    assert!(
-        session
-            .authenticate_publickey(
-                "user",
-                PrivateKeyWithHashAlg::new(
-                    Arc::new(key),
-                    session.best_supported_rsa_hash().await.unwrap().flatten()
-                )
-            )
-            .await
-            .expect("SSH authentication failed")
-            .success(),
-        "authentication didn't succeed"
-    );
-    let channel = session
-        .channel_open_session()
-        .await
-        .expect("channel_open_session failed");
+        .expect("request_pty failed");
     channel
         .exec(false, "admin")
         .await
         .expect("exec admin failed");
+
+    // 4. Interact with the admin interface and verify displayed data
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let jh = tokio::spawn(async move {
+        let mut parser = vt100_ctt::Parser::new(30, 140, 0);
+        let mut screen = Vec::new();
+        while let Some(msg) = channel.wait().await {
+            match msg {
+                russh::ChannelMsg::Data { data } => {
+                    parser.process(&data);
+                    let new_screen = parser.screen();
+                    let contents_formatted = new_screen.contents_formatted();
+                    if contents_formatted != screen {
+                        screen = contents_formatted;
+                        tx.send(new_screen.contents()).unwrap();
+                    }
+                }
+                _ => break,
+            }
+        }
+    });
+    if timeout(Duration::from_secs(3), async move {
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"System information",
+            r"  CPU%  ",
+            r" Memory ",
+            r"   TX   ",
+            r"   RX   ",
+            r"HTTP services",
+            r"http\.aaa",
+            r"SHA256:F7r4labRQQM1G0pbnxFNDZwd1BB5N/NlHHRca3jM0fo",
+            r"127\.0\.0\.1:\d{4,5}",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+    })
+    .await
+    .is_err()
+    {
+        panic!("Timed out waiting for admin interface.");
+    }
+
+    // 5. Attempt to remote forward and get disconnected
     assert!(
-        session
-            .channel_open_direct_tcpip("proxy.ccc", 12345, "::1", 23456)
-            .await
-            .is_err(),
-        "proxying should've failed"
+        session.tcpip_forward("localhost", 80).await.is_err(),
+        "tcpip_forward should've errored"
     );
     sleep(Duration::from_millis(200)).await;
     assert!(session.is_closed(), "session should've been closed");
+    jh.abort();
 }
 
 struct SshClient;
@@ -195,14 +217,13 @@ impl russh::client::Handler for SshClient {
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
             channel.data(&b"Hello, world!"[..]).await.unwrap();
-            sleep(Duration::from_secs(1)).await;
             channel.eof().await.unwrap();
         });
         Ok(())
     }
 }
 
-struct SshClientAdmin(mpsc::UnboundedSender<ChannelId>);
+struct SshClientAdmin;
 
 impl russh::client::Handler for SshClientAdmin {
     type Error = anyhow::Error;
@@ -212,14 +233,5 @@ impl russh::client::Handler for SshClientAdmin {
         _key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
-    }
-
-    async fn channel_failure(
-        &mut self,
-        channel: ChannelId,
-        _session: &mut russh::client::Session,
-    ) -> Result<(), Self::Error> {
-        self.0.send(channel).unwrap();
-        Ok(())
     }
 }

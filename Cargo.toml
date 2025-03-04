@@ -62,6 +62,7 @@ axum = { version = "0.8.1", features = ["macros", "ws"] }
 futures-util = "0.3.31"
 insta = { version = "1.42.1", features = ["yaml"] }
 mockall = "0.13.1"
+nix = "0.29.0"
 regex = "1.11.1"
 tokio-tungstenite = "0.26.2"
 tower = "0.5.2"

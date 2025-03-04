@@ -13,6 +13,7 @@ use tokio::{
 #[tokio::test(flavor = "multi_thread")]
 async fn ssh_invalid_exec_commands() {
     // 1. Initialize Sandhole
+    let _ = env_logger::builder().is_test(true).try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
@@ -39,7 +40,7 @@ async fn ssh_invalid_exec_commands() {
     ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
-        while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {
+        while TcpStream::connect("127.0.0.1:18022").await.is_err() {
             sleep(Duration::from_millis(100)).await;
         }
     })
@@ -170,7 +171,18 @@ async fn ssh_invalid_exec_commands() {
     };
     assert_eq!(channel_id, channel.id());
     assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2h. Fail to run `ip-allowlist` twice
+    // 2h. Fail to run `ip-allowlist` with no CIDRs
+    channel
+        .exec(true, "ip-allowlist=")
+        .await
+        .expect("exec ip-allowlist failed");
+    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+    else {
+        panic!("Timeout waiting for server to reply.");
+    };
+    assert_eq!(channel_id, channel.id());
+    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
+    // 2i. Fail to run `ip-allowlist` twice
     channel
         .exec(
             true,
@@ -194,7 +206,7 @@ async fn ssh_invalid_exec_commands() {
     };
     assert_eq!(channel_id, channel.id());
     assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2i. Fail to run `ip-blocklist` with invalid CIDR
+    // 2j. Fail to run `ip-blocklist` with invalid CIDR
     channel
         .exec(true, "ip-blocklist=10.0.0")
         .await
@@ -205,7 +217,18 @@ async fn ssh_invalid_exec_commands() {
     };
     assert_eq!(channel_id, channel.id());
     assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2j. Fail to run `ip-blocklist` twice
+    // 2k. Fail to run `ip-blocklist` with no CIDRs
+    channel
+        .exec(true, "ip-blocklist=")
+        .await
+        .expect("exec ip-blocklist failed");
+    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+    else {
+        panic!("Timeout waiting for server to reply.");
+    };
+    assert_eq!(channel_id, channel.id());
+    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
+    // 2l. Fail to run `ip-blocklist` twice
     channel
         .exec(
             true,
@@ -229,7 +252,7 @@ async fn ssh_invalid_exec_commands() {
     };
     assert_eq!(channel_id, channel.id());
     assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2k. Fail to run an unknown command
+    // 2m. Fail to run an unknown command
     channel
         .exec(true, "unknown-command")
         .await
@@ -242,7 +265,7 @@ async fn ssh_invalid_exec_commands() {
     assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
     assert!(!session.is_closed(), "session shouldn't have been closed");
 
-    // 3a. Start SSH user client that will fail to run user commands
+    // 3a. Start SSH admin client that will fail to run admin commands
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/admin"),
         None,
@@ -256,7 +279,7 @@ async fn ssh_invalid_exec_commands() {
     assert!(
         session
             .authenticate_publickey(
-                "user",
+                "admin",
                 PrivateKeyWithHashAlg::new(
                     Arc::new(key),
                     session.best_supported_rsa_hash().await.unwrap().flatten()
@@ -298,17 +321,14 @@ async fn ssh_invalid_exec_commands() {
         let mut parser = vt100_ctt::Parser::new(30, 140, 0);
         let mut screen = Vec::new();
         while let Some(msg) = channel.wait().await {
-            match msg {
-                russh::ChannelMsg::Data { data } => {
-                    parser.process(&data);
-                    let new_screen = parser.screen();
-                    let contents_formatted = new_screen.contents_formatted();
-                    if contents_formatted != screen {
-                        screen = contents_formatted;
-                        tx.send(new_screen.contents()).unwrap();
-                    }
+            if let russh::ChannelMsg::Data { data } = msg {
+                parser.process(&data);
+                let new_screen = parser.screen();
+                let contents_formatted = new_screen.contents_formatted();
+                if contents_formatted != screen {
+                    screen = contents_formatted;
+                    tx.send(new_screen.contents()).unwrap();
                 }
-                _ => (),
             }
         }
     });

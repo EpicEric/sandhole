@@ -1692,6 +1692,7 @@ impl Handler for ServerHandler {
                         proxy_handler(req, peer, fingerprint, Arc::clone(&proxy_data))
                     });
                     let io = TokioIo::new(channel.into_stream());
+                    let tcp_connection_timeout = self.server.tcp_connection_timeout;
                     match self.auth_data {
                         // Serve HTTP for unauthed user, then add disconnection timeout if this is the last proxy connection
                         AuthenticatedData::None { ref proxy_count } => {
@@ -1705,7 +1706,14 @@ impl Handler for ServerHandler {
                             tokio::spawn(async move {
                                 let server = auto::Builder::new(TokioExecutor::new());
                                 let conn = server.serve_connection_with_upgrades(io, service);
-                                let _ = conn.await;
+                                match tcp_connection_timeout {
+                                    Some(duration) => {
+                                        let _ = timeout(duration, conn).await;
+                                    }
+                                    None => {
+                                        let _ = conn.await;
+                                    }
+                                }
                                 if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
                                     *timeout_handle.lock().await =
                                         Some(DroppableHandle(tokio::spawn(async move {
@@ -1720,7 +1728,14 @@ impl Handler for ServerHandler {
                             tokio::spawn(async move {
                                 let server = auto::Builder::new(TokioExecutor::new());
                                 let conn = server.serve_connection_with_upgrades(io, service);
-                                let _ = conn.await;
+                                match tcp_connection_timeout {
+                                    Some(duration) => {
+                                        let _ = timeout(duration, conn).await;
+                                    }
+                                    None => {
+                                        let _ = conn.await;
+                                    }
+                                }
                             });
                         }
                     }

@@ -48,7 +48,7 @@ use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
     pin,
-    time::sleep,
+    time::{sleep, timeout},
 };
 use tokio_rustls::LazyConfigAcceptor;
 use tokio_util::sync::CancellationToken;
@@ -186,6 +186,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         )
         .into());
     }
+    let http_request_timeout = config.http_request_timeout.map(Into::into);
+    let tcp_connection_timeout = config.tcp_connection_timeout.map(Into::into);
     // Initialize crypto and credentials
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
@@ -309,7 +311,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         Arc::clone(&tcp_connections),
         Arc::clone(&telemetry),
         Arc::clone(&ip_filter),
-        config.tcp_connection_timeout.map(Into::into),
+        tcp_connection_timeout,
         config.disable_tcp_logs,
     ));
     // Add TCP handler service as a listener for TCP port updates.
@@ -492,8 +494,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         },
         // Always use aliasing channels instead of tunneling channels.
         proxy_type: ProxyType::Aliasing,
-        http_request_timeout: config.http_request_timeout.map(Into::into),
-        websocket_timeout: config.tcp_connection_timeout.map(Into::into),
+        http_request_timeout,
+        websocket_timeout: tcp_connection_timeout,
         disable_http_logs: config.disable_http_logs,
         _phantom_data: PhantomData,
     });
@@ -530,7 +532,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             .unproxied_connection_timeout
             .map(Into::into)
             .unwrap_or(config.idle_connection_timeout.into()),
-        tcp_connection_timeout: config.tcp_connection_timeout.map(Into::into),
+        tcp_connection_timeout,
     });
 
     // HTTP handler
@@ -562,8 +564,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             },
             // Always use tunneling channels.
             proxy_type: ProxyType::Tunneling,
-            http_request_timeout: config.http_request_timeout.map(Into::into),
-            websocket_timeout: config.tcp_connection_timeout.map(Into::into),
+            http_request_timeout,
+            websocket_timeout: tcp_connection_timeout,
             disable_http_logs: config.disable_http_logs,
             _phantom_data: PhantomData,
         });
@@ -593,7 +595,14 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 tokio::spawn(async move {
                     let server = http1::Builder::new();
                     let conn = server.serve_connection(io, service).with_upgrades();
-                    let _ = conn.await;
+                    match tcp_connection_timeout {
+                        Some(duration) => {
+                            let _ = timeout(duration, conn).await;
+                        }
+                        None => {
+                            let _ = conn.await;
+                        }
+                    }
                 });
             }
         })
@@ -626,8 +635,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             },
             // Always use tunneling channels.
             proxy_type: ProxyType::Tunneling,
-            http_request_timeout: config.http_request_timeout.map(Into::into),
-            websocket_timeout: config.tcp_connection_timeout.map(Into::into),
+            http_request_timeout,
+            websocket_timeout: tcp_connection_timeout,
             disable_http_logs: config.disable_http_logs,
             _phantom_data: PhantomData,
         });
@@ -694,7 +703,14 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                                             TokioIo::new(stream),
                                             service,
                                         );
-                                        let _ = conn.await;
+                                        match tcp_connection_timeout {
+                                            Some(duration) => {
+                                                let _ = timeout(duration, conn).await;
+                                            }
+                                            None => {
+                                                let _ = conn.await;
+                                            }
+                                        }
                                     }
                                     Err(err) => {
                                         warn!(

@@ -232,8 +232,7 @@ mod api_login_tests {
         let listener = TcpListener::bind("127.0.0.1:28011").await.unwrap();
         let jh = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        let api_login =
-            ApiLogin::new("http://localhost:28011/authentication".into(), mock).unwrap();
+        let api_login = ApiLogin::new("http://localhost:28011/authentication", mock).unwrap();
         assert!(
             api_login
                 .authenticate(&AuthenticationRequest {
@@ -270,8 +269,7 @@ mod api_login_tests {
         let listener = TcpListener::bind("127.0.0.1:28012").await.unwrap();
         let jh = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        let api_login =
-            ApiLogin::new("http://localhost:28012/authentication".into(), mock).unwrap();
+        let api_login = ApiLogin::new("http://localhost:28012/authentication", mock).unwrap();
         assert!(
             !api_login
                 .authenticate(&AuthenticationRequest {
@@ -357,7 +355,7 @@ mod api_login_tests {
         });
 
         let api_login =
-            ApiLogin::new("https://localhost:28013/secure_authentication".into(), mock).unwrap();
+            ApiLogin::new("https://localhost:28013/secure_authentication", mock).unwrap();
         assert!(
             api_login
                 .authenticate(&AuthenticationRequest {

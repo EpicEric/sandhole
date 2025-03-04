@@ -19,6 +19,7 @@ use tokio::{
 #[tokio::test(flavor = "multi_thread")]
 async fn tcp_allow_requested_ports() {
     // 1. Initialize Sandhole
+    let _ = env_logger::builder().is_test(true).try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
@@ -46,7 +47,7 @@ async fn tcp_allow_requested_ports() {
     ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
-        while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {
+        while TcpStream::connect("127.0.0.1:18022").await.is_err() {
             sleep(Duration::from_millis(100)).await;
         }
     })
@@ -94,7 +95,7 @@ async fn tcp_allow_requested_ports() {
         .await
         .expect("TCP connection failed");
     let mut buf = [0u8; 13];
-    tcp_stream.read(&mut buf).await.unwrap();
+    tcp_stream.read_exact(&mut buf).await.unwrap();
     assert_eq!(&buf, b"Hello, world!");
 
     // 4. Local-forward the TCP port for random user

@@ -203,8 +203,7 @@ impl AdminState {
             // If this is not a pseudo-terminal, show some information on how to allocate one
             let text = Text::from(vec![
                 Line::from(
-                    "PTY not detected! Make sure to connect with \"ssh -t ... admin\" instead."
-                        .red(),
+                    r#"PTY not detected! Make sure to connect with "ssh -t" instead."#.red(),
                 ),
                 Line::from("Press Ctrl-C to close this connection."),
             ]);

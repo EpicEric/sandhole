@@ -481,11 +481,7 @@ mod address_delegator_tests {
         .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
-            .with(
-                eq("_some_prefix"),
-                eq("some.address"),
-                eq(fingerprint.clone()),
-            )
+            .with(eq("_some_prefix"), eq("some.address"), eq(fingerprint))
             .return_const(true);
         mock.expect_has_cname_record_for_domain()
             .once()
@@ -525,11 +521,7 @@ mod address_delegator_tests {
         .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
-            .with(
-                eq("_some_prefix"),
-                eq("some.address"),
-                eq(fingerprint.clone()),
-            )
+            .with(eq("_some_prefix"), eq("some.address"), eq(fingerprint))
             .return_const(true);
         let delegator = AddressDelegator::new(AddressDelegatorData {
             resolver: mock,
@@ -599,7 +591,7 @@ mod address_delegator_tests {
         .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
-            .with(eq("_some_prefix"), eq("something"), eq(fingerprint.clone()))
+            .with(eq("_some_prefix"), eq("something"), eq(fingerprint))
             .return_const(false);
         let delegator = AddressDelegator::new(AddressDelegatorData {
             resolver: mock,
@@ -1067,7 +1059,7 @@ mod address_delegator_tests {
             .get_http_address(
                 "a1",
                 &None,
-                &Some(f1.clone()),
+                &Some(f1),
                 &"127.0.0.1:12301".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -1075,7 +1067,7 @@ mod address_delegator_tests {
             .get_http_address(
                 "a1",
                 &None,
-                &Some(f1.clone()),
+                &Some(f1),
                 &"127.0.0.1:12302".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -1083,7 +1075,7 @@ mod address_delegator_tests {
             .get_http_address(
                 "a1",
                 &None,
-                &Some(f2.clone()),
+                &Some(f2),
                 &"127.0.0.1:12303".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -1091,7 +1083,7 @@ mod address_delegator_tests {
             .get_http_address(
                 "a2",
                 &None,
-                &Some(f1.clone()),
+                &Some(f1),
                 &"127.0.0.1:12304".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -1099,7 +1091,7 @@ mod address_delegator_tests {
             .get_http_address(
                 "a1",
                 &Some("u1".into()),
-                &Some(f1.clone()),
+                &Some(f1),
                 &"127.0.0.1:12305".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -1107,7 +1099,7 @@ mod address_delegator_tests {
             .get_http_address(
                 "a1",
                 &Some("u1".into()),
-                &Some(f1.clone()),
+                &Some(f1),
                 &"127.0.0.1:12306".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -1115,7 +1107,7 @@ mod address_delegator_tests {
             .get_http_address(
                 "a1",
                 &Some("u1".into()),
-                &Some(f2.clone()),
+                &Some(f2),
                 &"127.0.0.1:12307".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -1123,7 +1115,7 @@ mod address_delegator_tests {
             .get_http_address(
                 "a2",
                 &Some("u1".into()),
-                &Some(f1.clone()),
+                &Some(f1),
                 &"127.0.0.1:12308".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -1131,7 +1123,7 @@ mod address_delegator_tests {
             .get_http_address(
                 "a1",
                 &Some("u2".into()),
-                &Some(f1.clone()),
+                &Some(f1),
                 &"127.0.0.1:12309".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -1139,7 +1131,7 @@ mod address_delegator_tests {
             .get_http_address(
                 "a1",
                 &Some("u2".into()),
-                &Some(f1.clone()),
+                &Some(f1),
                 &"127.0.0.1:12310".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -1147,7 +1139,7 @@ mod address_delegator_tests {
             .get_http_address(
                 "a1",
                 &Some("u2".into()),
-                &Some(f2.clone()),
+                &Some(f2),
                 &"127.0.0.1:12311".parse::<SocketAddr>().unwrap(),
             )
             .await;
@@ -1155,7 +1147,7 @@ mod address_delegator_tests {
             .get_http_address(
                 "a2",
                 &Some("u2".into()),
-                &Some(f1.clone()),
+                &Some(f1),
                 &"127.0.0.1:12312".parse::<SocketAddr>().unwrap(),
             )
             .await;

@@ -7,10 +7,13 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
-use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
     Channel,
+};
+use russh::{
+    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
+    Disconnect,
 };
 use sandhole::{entrypoint, ApplicationConfig};
 use serde::Deserialize;
@@ -23,6 +26,7 @@ use tower::Service;
 #[tokio::test(flavor = "multi_thread")]
 async fn auth_self_hosted_login_api() {
     // 1. Initialize Sandhole
+    let _ = env_logger::builder().is_test(true).try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
@@ -51,7 +55,7 @@ async fn auth_self_hosted_login_api() {
     ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
-        while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {
+        while TcpStream::connect("127.0.0.1:18022").await.is_err() {
             sleep(Duration::from_millis(100)).await;
         }
     })
@@ -90,7 +94,7 @@ async fn auth_self_hosted_login_api() {
         .await
         .expect("tcpip_forward failed");
 
-    // 3. Succeed in user+password login
+    // 3. Succeed in user+password login, create remote forwardings, then disconnect
     let new_ssh_client = SshClient;
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", new_ssh_client)
         .await
@@ -103,6 +107,16 @@ async fn auth_self_hosted_login_api() {
             .success(),
         "authentication didn't succeed"
     );
+    session
+        .tcpip_forward("localhost", 0)
+        .await
+        .expect("tcpip_forward failed");
+    session
+        .disconnect(Disconnect::ByApplication, "", "English")
+        .await
+        .expect("disconnect failed");
+    sleep(Duration::from_millis(500)).await;
+    assert!(session.is_closed());
 
     // 4. Fail in user+password login
     let new_ssh_client = SshClient;
@@ -151,7 +165,7 @@ impl russh::client::Handler for SshClient {
         ) -> impl IntoResponse {
             if body.user == "eric"
                 && body.password == "sandhole"
-                && body.remote_address.ip().is_loopback()
+                && body.remote_address.ip().to_canonical().is_loopback()
             {
                 StatusCode::OK
             } else {

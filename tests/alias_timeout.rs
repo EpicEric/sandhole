@@ -17,6 +17,7 @@ use tokio::{
 #[tokio::test(flavor = "multi_thread")]
 async fn alias_timeout() {
     // 1. Initialize Sandhole
+    let _ = env_logger::builder().is_test(true).try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
@@ -38,13 +39,13 @@ async fn alias_timeout() {
         "--acme-use-staging",
         "--bind-hostnames=all",
         "--allow-requested-ports",
-        "--idle-connection-timeout=500ms",
-        "--http-request-timeout=500ms",
+        "--idle-connection-timeout=700ms",
+        "--http-request-timeout=5s",
         "--tcp-connection-timeout=500ms",
     ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
-        while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {
+        while TcpStream::connect("127.0.0.1:18022").await.is_err() {
             sleep(Duration::from_millis(100)).await;
         }
     })
@@ -83,6 +84,10 @@ async fn alias_timeout() {
             .success(),
         "authentication didn't succeed"
     );
+    let _channel = proxy_session
+        .channel_open_session()
+        .await
+        .expect("channel_open_session failed");
     proxy_session
         .tcpip_forward("ssh.tunnel", 22)
         .await
@@ -127,33 +132,25 @@ async fn alias_timeout() {
             .success(),
         "authentication didn't succeed"
     );
-    let ssh_channel = client_session
-        .channel_open_direct_tcpip("ssh.tunnel", 18022, "::1", 1234)
-        .await
-        .expect("ssh.tunnel forwarding failed");
-    let http_channel = client_session
-        .channel_open_direct_tcpip("http.foobar.tld", 18080, "::1", 2345)
-        .await
-        .expect("http.foobar.tld forwarding failed");
-    let alias_channel = client_session
-        .channel_open_direct_tcpip("alias.tunnel", 12345, "::1", 3456)
-        .await
-        .expect("alias.tunnel forwarding failed");
-    let tcp_channel = client_session
-        .channel_open_direct_tcpip("localhost", 23456, "::1", 4567)
-        .await
-        .expect("TCP forwarding failed");
+
+    let ssh_channel = ("ssh.tunnel", 18022);
+    let http_channel = ("http.foobar.tld", 18080);
+    let alias_channel = ("alias.tunnel", 12345);
+    let tcp_channel = ("localhost", 23456);
     let Ok(()) = timeout(Duration::from_secs(3), async {
-        for mut channel in [ssh_channel, alias_channel, tcp_channel] {
+        for (i, channel) in [ssh_channel, http_channel, alias_channel, tcp_channel]
+            .into_iter()
+            .enumerate()
+        {
+            let mut forwarding_channel = client_session
+                .channel_open_direct_tcpip(channel.0, channel.1, "::1", 1000 + i as u32)
+                .await
+                .expect("forwarding failed");
             assert!(
-                channel.wait().await.is_none(),
+                forwarding_channel.wait().await.is_none(),
                 "channel should've been closed"
             );
         }
-        http_channel
-            .data(&b"GET / HTTP/1.0\r\nHost: http.foobar.tld\r\n\r\n"[..])
-            .await
-            .expect("blah");
     })
     .await
     else {
@@ -163,8 +160,11 @@ async fn alias_timeout() {
         !client_session.is_closed(),
         "session shouldn't have been closed yet"
     );
-    sleep(Duration::from_secs(2)).await;
-    assert!(client_session.is_closed(), "session should've been closed");
+    sleep(Duration::from_millis(1500)).await;
+    assert!(
+        client_session.is_closed(),
+        "anonymous session should've been closed"
+    );
 
     // 3. Start authenticated SSH client that will forward the proxies via aliasing
     let key = load_secret_key(
@@ -195,33 +195,24 @@ async fn alias_timeout() {
             .success(),
         "authentication didn't succeed"
     );
-    let ssh_channel = client_session
-        .channel_open_direct_tcpip("ssh.tunnel", 18022, "::1", 1234)
-        .await
-        .expect("ssh.tunnel forwarding failed");
-    let http_channel = client_session
-        .channel_open_direct_tcpip("http.foobar.tld", 18080, "::1", 2345)
-        .await
-        .expect("http.foobar.tld forwarding failed");
-    let alias_channel = client_session
-        .channel_open_direct_tcpip("alias.tunnel", 12345, "::1", 3456)
-        .await
-        .expect("alias.tunnel forwarding failed");
-    let tcp_channel = client_session
-        .channel_open_direct_tcpip("localhost", 23456, "::1", 4567)
-        .await
-        .expect("TCP forwarding failed");
+    let ssh_channel = ("ssh.tunnel", 18022);
+    let http_channel = ("http.foobar.tld", 18080);
+    let alias_channel = ("alias.tunnel", 12345);
+    let tcp_channel = ("localhost", 23456);
     let Ok(()) = timeout(Duration::from_secs(3), async {
-        for mut channel in [ssh_channel, alias_channel, tcp_channel] {
+        for (i, channel) in [ssh_channel, http_channel, alias_channel, tcp_channel]
+            .into_iter()
+            .enumerate()
+        {
+            let mut forwarding_channel = client_session
+                .channel_open_direct_tcpip(channel.0, channel.1, "::1", 1000 + i as u32)
+                .await
+                .expect("forwarding failed");
             assert!(
-                channel.wait().await.is_none(),
+                forwarding_channel.wait().await.is_none(),
                 "channel should've been closed"
             );
         }
-        http_channel
-            .data(&b"GET / HTTP/1.0\r\nHost: http.foobar.tld\r\n\r\n"[..])
-            .await
-            .expect("blah");
     })
     .await
     else {
@@ -231,10 +222,10 @@ async fn alias_timeout() {
         !client_session.is_closed(),
         "session shouldn't have been closed"
     );
-    sleep(Duration::from_secs(2)).await;
+    sleep(Duration::from_millis(1500)).await;
     assert!(
         !client_session.is_closed(),
-        "session shouldn't have been closed"
+        "user session shouldn't have been closed"
     );
 }
 

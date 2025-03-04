@@ -1,20 +1,31 @@
 use std::{sync::Arc, time::Duration};
 
+use axum::{extract::Request, routing::get, Router};
 use clap::Parser;
+use hyper::{body::Incoming, client::conn::http1::SendRequest, service::service_fn};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto::Builder,
+};
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     client::{Msg, Session},
     Channel,
 };
+use rustls::{
+    pki_types::{pem::PemObject, CertificateDer},
+    RootCertStore,
+};
 use sandhole::{entrypoint, ApplicationConfig};
 use tokio::{
-    io::AsyncReadExt,
     net::TcpStream,
     time::{sleep, timeout},
 };
+use tokio_rustls::TlsConnector;
+use tower::Service;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn tcp_timeout() {
+async fn http_timeout() {
     // 1. Initialize Sandhole
     let _ = env_logger::builder().is_test(true).try_init();
     let config = ApplicationConfig::parse_from([
@@ -36,9 +47,9 @@ async fn tcp_timeout() {
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
-        "--bind-hostnames=none",
-        "--allow-requested-ports",
+        "--bind-hostnames=all",
         "--idle-connection-timeout=1s",
+        "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
         "--tcp-connection-timeout=500ms",
     ]);
@@ -79,25 +90,70 @@ async fn tcp_timeout() {
         "authentication didn't succeed"
     );
     session
-        .tcpip_forward("foobar.tld", 12345)
+        .tcpip_forward("foobar.tld", 80)
         .await
         .expect("tcpip_forward failed");
 
-    // 3. Connect to the TCP port of our proxy and get timed out
-    let mut tcp_stream = TcpStream::connect("127.0.0.1:12345")
+    // 3. Idle after connecting to the HTTP port of our proxy
+    let tcp_stream = TcpStream::connect("127.0.0.1:18080")
         .await
         .expect("TCP connection failed");
+    let (sender, conn): (SendRequest<Incoming>, _) =
+        hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream))
+            .await
+            .expect("HTTP handshake failed");
     if timeout(Duration::from_secs(2), async {
-        let mut buf = [0u8; 4];
-        tcp_stream.read_exact(&mut buf).await.unwrap();
-        assert_eq!(&buf, b"One\n");
-        assert_eq!(tcp_stream.read(&mut buf).await.unwrap(), 0);
+        assert!(
+            conn.await.is_err(),
+            "connection should've closed with an error"
+        );
     })
     .await
     .is_err()
     {
-        panic!("Timeout waiting for TCP stream to reply.")
+        panic!("Timeout waiting for connection to be closed.")
     };
+    drop(sender);
+
+    // 4. Idle after connecting to the HTTPS port of our proxy
+    let mut root_store = RootCertStore::empty();
+    root_store.add_parsable_certificates(
+        CertificateDer::pem_file_iter(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/ca/rootCA.pem"
+        ))
+        .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
+        .expect("Failed to parse certificates"),
+    );
+    let tls_config = Arc::new(
+        rustls::ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth(),
+    );
+    let connector = TlsConnector::from(tls_config);
+    let tcp_stream = TcpStream::connect("127.0.0.1:18443")
+        .await
+        .expect("TCP connection failed");
+    let tls_stream = connector
+        .connect("foobar.tld".try_into().unwrap(), tcp_stream)
+        .await
+        .expect("TLS stream failed");
+    let (sender, conn): (SendRequest<Incoming>, _) =
+        hyper::client::conn::http1::handshake(TokioIo::new(tls_stream))
+            .await
+            .expect("HTTP handshake failed");
+    if timeout(Duration::from_secs(2), async {
+        assert!(
+            conn.await.is_err(),
+            "connection should've closed with an error"
+        );
+    })
+    .await
+    .is_err()
+    {
+        panic!("Timeout waiting for connection to be closed.")
+    };
+    drop(sender);
 }
 
 struct SshClient;
@@ -121,11 +177,16 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
+        let router = Router::new().route(
+            "/",
+            get(|| async move { "Hello from foobar.tld!".to_string() }),
+        );
+        let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {
-            channel.data(&b"One\n"[..]).await.unwrap();
-            sleep(Duration::from_secs(5)).await;
-            channel.data(&b"Two\n"[..]).await.unwrap();
-            channel.eof().await.unwrap();
+            Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(TokioIo::new(channel.into_stream()), service)
+                .await
+                .expect("Invalid request");
         });
         Ok(())
     }

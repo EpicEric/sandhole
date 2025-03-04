@@ -10,6 +10,8 @@ use russh::{
 };
 use russh::{MethodKind, MethodSet};
 use sandhole::{entrypoint, ApplicationConfig};
+use tokio::runtime::Handle;
+use tokio::task::spawn_blocking;
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
@@ -18,6 +20,7 @@ use tokio::{
 #[tokio::test(flavor = "multi_thread")]
 async fn lib_configure_from_scratch() {
     // 1. Create random temporary directory and initialize Sandhole
+    let _ = env_logger::builder().is_test(true).try_init();
     let random_name = String::from_utf8(
         (0..6)
             .flat_map(|_| {
@@ -57,9 +60,10 @@ async fn lib_configure_from_scratch() {
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
     ]);
-    tokio::spawn(async move { entrypoint(config).await });
+    let rt = Handle::current();
+    let jh = std::thread::spawn(move || rt.block_on(async { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
-        while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {
+        while TcpStream::connect("127.0.0.1:18022").await.is_err() {
             sleep(Duration::from_millis(100)).await;
         }
     })
@@ -168,6 +172,17 @@ async fn lib_configure_from_scratch() {
         .tcpip_forward("localhost", 12345)
         .await
         .expect("unable to request port-forwarding");
+
+    // 5. Shutdown Sandhole with SIGINT
+    #[cfg(unix)]
+    {
+        use nix::libc::{pthread_kill, SIGINT};
+        use std::os::unix::thread::JoinHandleExt;
+
+        let pthread = jh.as_pthread_t();
+        spawn_blocking(move || unsafe { pthread_kill(pthread, SIGINT) });
+        assert!(jh.join().is_ok(), "signal wasn't captured successfully");
+    }
 }
 
 struct SshClient;

@@ -18,6 +18,7 @@ use tokio::{
 #[tokio::test(flavor = "multi_thread")]
 async fn admin_interface() {
     // 1. Initialize Sandhole
+    let _ = env_logger::builder().is_test(true).try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
@@ -45,7 +46,7 @@ async fn admin_interface() {
     ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
-        while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {
+        while TcpStream::connect("127.0.0.1:18022").await.is_err() {
             sleep(Duration::from_millis(100)).await;
         }
     })
@@ -181,7 +182,7 @@ async fn admin_interface() {
         }
         // 4b. Switch tabs and validate SSH tab data
         writer
-            .write(&b"\t"[..])
+            .write_all(&b"\t"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -207,7 +208,7 @@ async fn admin_interface() {
         }
         // 4c. Switch tabs again and validate TCP tab data
         writer
-            .write(&b"\t"[..])
+            .write_all(&b"\t"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -233,7 +234,7 @@ async fn admin_interface() {
         }
         // 4d. Switch tabs again and validate alias tab data
         writer
-            .write(&b"\t"[..])
+            .write_all(&b"\t"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -259,7 +260,7 @@ async fn admin_interface() {
         }
         // 4e. Go back one tab
         writer
-            .write(&b"\x1b[Z"[..])
+            .write_all(&b"\x1b[Z"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -285,13 +286,13 @@ async fn admin_interface() {
         }
         // 4f. View user details
         writer
-            .write(&b"\x1b[A"[..])
+            .write_all(&b"\x1b[A"[..])
             .await
             .expect("channel write failed");
         // Wait for table state to update via render
         sleep(Duration::from_millis(200)).await;
         writer
-            .write(&b"\r"[..])
+            .write_all(&b"\r"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -314,7 +315,7 @@ async fn admin_interface() {
         }
         // 4g. Close user details
         writer
-            .write(&b"\x1b"[..])
+            .write_all(&b"\x1b"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -340,7 +341,7 @@ async fn admin_interface() {
         }
         // 4g. Quit the admin interface with Ctrl-C (ETX)
         writer
-            .write(&b"\x03"[..])
+            .write_all(&b"\x03"[..])
             .await
             .expect("channel write failed");
     })

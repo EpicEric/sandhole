@@ -27,6 +27,7 @@ use tower::Service;
 #[tokio::test(flavor = "multi_thread")]
 async fn admin_remove_user() {
     // 1. Initialize Sandhole
+    let _ = env_logger::builder().is_test(true).try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
@@ -41,12 +42,12 @@ async fn admin_remove_user() {
         "--acme-cache-directory",
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
         "--disable-directory-creation",
-        "--listen-address=127.0.0.1",
+        "--listen-address=::",
         "--ssh-port=18022",
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
-        "--password-authentication-url=http://localhost:38080/authenticate",
+        "--password-authentication-url=http://127.0.0.1:38080/authenticate",
         "--bind-hostnames=all",
         "--allow-requested-subdomains",
         "--allow-requested-ports",
@@ -56,7 +57,7 @@ async fn admin_remove_user() {
     ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
-        while let Err(_) = TcpStream::connect("127.0.0.1:18022").await {
+        while TcpStream::connect("127.0.0.1:18022").await.is_err() {
             sleep(Duration::from_millis(100)).await;
         }
     })
@@ -73,13 +74,13 @@ async fn admin_remove_user() {
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session_1 = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+    let mut session_1 = russh::client::connect(Default::default(), "[::1]:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(
         session_1
             .authenticate_publickey(
-                "user",
+                "api_user",
                 PrivateKeyWithHashAlg::new(
                     Arc::new(key),
                     session_1.best_supported_rsa_hash().await.unwrap().flatten()
@@ -92,6 +93,10 @@ async fn admin_remove_user() {
     );
     session_1
         .tcpip_forward("localhost", 38080)
+        .await
+        .expect("tcpip_forward failed");
+    session_1
+        .tcpip_forward("aaa.foobar.tld", 80)
         .await
         .expect("tcpip_forward failed");
 
@@ -132,7 +137,7 @@ async fn admin_remove_user() {
     assert!(
         session
             .authenticate_publickey(
-                "user",
+                "admin",
                 PrivateKeyWithHashAlg::new(
                     Arc::new(key),
                     session.best_supported_rsa_hash().await.unwrap().flatten()
@@ -156,7 +161,7 @@ async fn admin_remove_user() {
         .await
         .expect("exec admin failed");
 
-    // 4. Interact with the admin interface and verify displayed data
+    // 5. Interact with the admin interface and verify displayed data
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut writer = channel.make_writer();
     let jh = tokio::spawn(async move {
@@ -178,11 +183,13 @@ async fn admin_remove_user() {
         }
     });
     if timeout(Duration::from_secs(5), async move {
-        // 4a. Validate HTTP tab data
+        // 5a. Validate HTTP tab data
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",
             r"HTTP services",
             r"aaa\.foobar\.tld",
+            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"\[::1\]:\d{4,5}",
             r"custom_user",
             r"127\.0\.0\.1:\d{4,5}",
         ]
@@ -195,13 +202,42 @@ async fn admin_remove_user() {
                 break;
             }
         }
-        // 4b. Select user and open details
+        // 5b. Select HTTP service and open connected users prompt
         writer
-            .write(&b"\x1b[B"[..])
+            .write_all(&b"\x1b[B"[..])
             .await
             .expect("channel write failed");
         writer
-            .write(&b"\r"[..])
+            .write_all(&b"\r"[..])
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"Connected users",
+            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"custom_user",
+            r" <Enter> Details ",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 5c. Select custom_user and open user details prompt
+        writer
+            .write_all(&b"\x1b[B"[..])
+            .await
+            .expect("channel write failed");
+        writer
+            .write_all(&b"\x1b[B"[..])
+            .await
+            .expect("channel write failed");
+        writer
+            .write_all(&b"\r"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -221,9 +257,9 @@ async fn admin_remove_user() {
                 break;
             }
         }
-        // 4c. Open removal prompt
+        // 5c. Open removal prompt
         writer
-            .write(&b"\x1b[3~"[..])
+            .write_all(&b"\x1b[3~"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -243,9 +279,9 @@ async fn admin_remove_user() {
                 break;
             }
         }
-        // 4d. Confirm removal
+        // 5d. Confirm removal
         writer
-            .write(&b"\r"[..])
+            .write_all(&b"\r"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -265,21 +301,21 @@ async fn admin_remove_user() {
         // Required for updating the admin interface data
         sleep(Duration::from_secs(3)).await;
         assert!(session_2.is_closed(), "user session wasn't terminated");
-        // 4e. Close prompt, head to the TCP tab, and ensure that the window still displays the first service there
+        // 5e. Close prompt, head to the TCP tab, and ensure that the window still displays the first service there
         assert!(
             !session_1.is_closed(),
             "proxy session shouldn't have been terminated"
         );
         writer
-            .write(&b"\r"[..])
+            .write_all(&b"\r"[..])
             .await
             .expect("channel write failed");
         writer
-            .write(&b"\x1b[Z"[..])
+            .write_all(&b"\x1b[Z"[..])
             .await
             .expect("channel write failed");
         writer
-            .write(&b"\x1b[Z"[..])
+            .write_all(&b"\x1b[Z"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -287,7 +323,7 @@ async fn admin_remove_user() {
             r"TCP services",
             r"38080",
             r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
-            r"127\.0\.0\.1:\d{4,5}",
+            r"\[::1\]:\d{4,5}",
         ]
         .into_iter()
         .map(|re| Regex::new(re).expect("Invalid regex"))
@@ -298,13 +334,13 @@ async fn admin_remove_user() {
                 break;
             }
         }
-        // 4f. Select user and open details
+        // 5f. Select user and open details
         writer
-            .write(&b"\x1b[B"[..])
+            .write_all(&b"\x1b[B"[..])
             .await
             .expect("channel write failed");
         writer
-            .write(&b"\r"[..])
+            .write_all(&b"\r"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -325,9 +361,9 @@ async fn admin_remove_user() {
                 break;
             }
         }
-        // 4g. Quit the admin interface with Ctrl-C (ETX)
+        // 5g. Quit the admin interface with Ctrl-C (ETX)
         writer
-            .write(&b"\x03"[..])
+            .write_all(&b"\x03"[..])
             .await
             .expect("channel write failed");
     })
@@ -373,7 +409,7 @@ impl russh::client::Handler for SshClient {
         ) -> impl IntoResponse {
             if body.user == "custom_user"
                 && body.password == "password"
-                && body.remote_address.ip().is_loopback()
+                && body.remote_address.ip().to_canonical().is_loopback()
             {
                 StatusCode::OK
             } else {

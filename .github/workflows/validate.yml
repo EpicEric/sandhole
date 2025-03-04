@@ -36,7 +36,7 @@ jobs:
       - name: Run Clippy
         run: |
           rustup component add clippy
-          cargo clippy -- -D warnings
+          cargo clippy --all-targets -- -D warnings
   build-msrv:
     name: Build on MSRV
     runs-on: ubuntu-latest

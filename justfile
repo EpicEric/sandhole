@@ -12,3 +12,6 @@ book:
 
 cli:
   to-html --no-prompt "cargo run --quiet -- --help" > cli.html
+
+clippy:
+  cargo clippy --all-targets --fix --allow-dirty && cargo fmt --all
