@@ -603,6 +603,7 @@ impl Handler for ServerHandler {
                     let set: Result<BTreeSet<Fingerprint>, _> = command
                         .trim_start_matches("allowed-fingerprints=")
                         .split(',')
+                        .filter(|a| !a.is_empty())
                         .map(|key| key.parse::<Fingerprint>())
                         .collect();
                     let set = match set {
@@ -781,6 +782,7 @@ impl Handler for ServerHandler {
                     let list: Result<Vec<IpNet>, _> = command
                         .trim_start_matches("ip-allowlist=")
                         .split(',')
+                        .filter(|a| !a.is_empty())
                         .map(|network| network.parse::<IpNet>())
                         .collect();
                     let list = match list {
@@ -819,6 +821,7 @@ impl Handler for ServerHandler {
                     let list: Result<Vec<IpNet>, _> = command
                         .trim_start_matches("ip-blocklist=")
                         .split(',')
+                        .filter(|a| !a.is_empty())
                         .map(|network| network.parse::<IpNet>())
                         .collect();
                     let list = match list {

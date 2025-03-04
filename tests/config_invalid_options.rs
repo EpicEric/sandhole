@@ -14,7 +14,10 @@ use tokio_rustls::TlsConnector;
 #[tokio::test(flavor = "multi_thread")]
 async fn config_invalid_options() {
     // 1. Fail to initialize Sandhole if HTTP, TCP, and aliasing are all disabled
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Debug)
+        .is_test(true)
+        .try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",

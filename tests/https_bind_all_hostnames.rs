@@ -28,7 +28,10 @@ use tower::Service;
 #[tokio::test(flavor = "multi_thread")]
 async fn https_bind_all_hostnames() {
     // 1. Initialize Sandhole
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Debug)
+        .is_test(true)
+        .try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
