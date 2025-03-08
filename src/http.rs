@@ -388,6 +388,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod proxy_handler_tests {
     use bytes::Bytes;
     use futures_util::{SinkExt, StreamExt};

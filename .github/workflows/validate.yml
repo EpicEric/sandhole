@@ -51,7 +51,7 @@ jobs:
           rustup override set ${RUST_MSRV}-x86_64-unknown-linux-gnu
           cargo build --locked
   tests:
-    name: Run tests on MSRV
+    name: Run tests on nightly
     runs-on: ubuntu-latest
     env:
       CARGO_LLVM_COV_VERSION: 0.6.16
@@ -67,8 +67,8 @@ jobs:
           tar -xvzf /tmp/cargo-llvm-cov.tar.gz -C ${HOME}/.cargo/bin
       - name: Test
         run: |
-          rustup toolchain install ${RUST_MSRV}-x86_64-unknown-linux-gnu
-          rustup override set ${RUST_MSRV}-x86_64-unknown-linux-gnu
+          rustup toolchain install nightly-x86_64-unknown-linux-gnu
+          rustup override set nightly-x86_64-unknown-linux-gnu
           cargo llvm-cov --verbose --codecov --locked --output-path codecov.json
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5

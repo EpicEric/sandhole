@@ -195,6 +195,7 @@ impl<C: Configurer> ApiLogin<C> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod api_login_tests {
     use std::{
         net::{IpAddr, Ipv4Addr, SocketAddr},

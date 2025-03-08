@@ -68,3 +68,6 @@ regex = "1.11.1"
 tokio-tungstenite = "0.26.2"
 tower = "0.5.2"
 vt100-ctt = "0.16.0"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }

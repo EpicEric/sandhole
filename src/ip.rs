@@ -66,6 +66,7 @@ impl IpFilter {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod ip_filter_tests {
     use std::{net::IpAddr, str::FromStr};
 

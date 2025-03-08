@@ -241,6 +241,7 @@ impl FingerprintsValidator {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod fingerprints_validator_tests {
     use russh::keys::{parse_public_key_base64, HashAlg};
 

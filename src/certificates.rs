@@ -227,6 +227,7 @@ impl ResolvesServerCert for CertificateResolver {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod certificate_resolver_tests {
     use std::sync::{Arc, RwLock};
 

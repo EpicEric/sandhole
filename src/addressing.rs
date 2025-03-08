@@ -363,6 +363,7 @@ impl<R: Resolver> AddressDelegator<R> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod address_delegator_tests {
     use std::{collections::HashSet, net::SocketAddr};
 

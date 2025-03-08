@@ -129,6 +129,7 @@ impl QuotaHandler for Arc<QuotaMap> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod quota_map_tests {
     use std::sync::Arc;
 

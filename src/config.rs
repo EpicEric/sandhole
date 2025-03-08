@@ -326,6 +326,7 @@ fn validate_txt_record_prefix(value: &str) -> Result<String, String> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod application_config_tests {
     use std::str::FromStr;
 

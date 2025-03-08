@@ -88,6 +88,7 @@ impl Counter {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod counter_tests {
     use std::{thread::sleep, time::Duration};
 
@@ -245,6 +246,7 @@ impl Telemetry {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod telemetry_tests {
     use std::sync::Arc;
 
