@@ -18,7 +18,7 @@ use tokio::{
 async fn admin_no_interface_if_proxying() {
     // 1. Initialize Sandhole
     let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_module("sandhole", log::LevelFilter::Debug)
         .is_test(true)
         .try_init();
     let config = ApplicationConfig::parse_from([
@@ -131,7 +131,7 @@ async fn admin_no_interface_if_proxying() {
     assert_eq!(channel_id, channel.id());
     assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
     sleep(Duration::from_millis(200)).await;
-    assert!(!session.is_closed(), "session shouldn't have been closed");
+    assert!(session.is_closed(), "session should've been closed");
 
     // 3. Open admin interface and fail to create forwarding
     let key = load_secret_key(

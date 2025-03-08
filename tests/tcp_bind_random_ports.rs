@@ -17,7 +17,7 @@ use tokio::{
 async fn tcp_bind_random_ports() {
     // 1. Initialize Sandhole
     let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_module("sandhole", log::LevelFilter::Debug)
         .is_test(true)
         .try_init();
     let config = ApplicationConfig::parse_from([

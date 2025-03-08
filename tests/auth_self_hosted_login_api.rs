@@ -27,7 +27,7 @@ use tower::Service;
 async fn auth_self_hosted_login_api() {
     // 1. Initialize Sandhole
     let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_module("sandhole", log::LevelFilter::Debug)
         .is_test(true)
         .try_init();
     let config = ApplicationConfig::parse_from([

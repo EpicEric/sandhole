@@ -10,7 +10,7 @@ use human_bytes::human_bytes;
 use itertools::Itertools;
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Flex, Layout, Margin, Rect},
+    layout::{Constraint, Flex, Layout, Margin, Position, Rect},
     prelude::CrosstermBackend,
     style::{Color, Modifier, Style, Stylize},
     symbols::border,
@@ -140,6 +140,8 @@ enum AdminPrompt {
 struct AdminState {
     // Reference to the server for collecting data and interacting with user keys.
     server: Arc<SandholeServer>,
+    // Whether data should be rendered to the terminal.
+    enabled: bool,
     // Whether this is rendered in a pseudo-terminal or not.
     is_pty: bool,
     // Currently selected tab.
@@ -568,6 +570,7 @@ impl AdminInterface {
             terminal: Terminal::with_options(backend, options).unwrap(),
             state: AdminState {
                 server,
+                enabled: true,
                 tab: TabData { tabs, current: 0 },
                 is_pty: false,
                 table_state: Default::default(),
@@ -582,14 +585,16 @@ impl AdminInterface {
                 {
                     let mut interface = interface.lock().unwrap();
                     let AdminTerminal { terminal, state } = interface.deref_mut();
-                    terminal
-                        .draw(|frame| {
-                            // Render the terminal
-                            state.render(frame.area(), frame.buffer_mut());
-                            // Update the cursor position (avoids cursor from disappearing on disconnect)
-                            frame.set_cursor_position((0, 0));
-                        })
-                        .unwrap();
+                    if state.enabled
+                        && terminal
+                            .draw(|frame| {
+                                // Render the terminal
+                                state.render(frame.area(), frame.buffer_mut());
+                            })
+                            .is_err()
+                    {
+                        break;
+                    }
                 }
                 // Wait one second or for an user-generated event to refresh the interface
                 tokio::select! {
@@ -905,5 +910,14 @@ impl AdminInterface {
         if notify {
             let _ = self.change_notifier.send(());
         }
+    }
+
+    // Disable updates to the terminal for shutdown
+    pub(crate) fn disable(&mut self) {
+        let mut interface = self.interface.lock().unwrap();
+        let _ = interface.terminal.show_cursor();
+        let _ = interface.terminal.set_cursor_position(Position::ORIGIN);
+        let _ = interface.terminal.flush();
+        interface.state.enabled = false;
     }
 }

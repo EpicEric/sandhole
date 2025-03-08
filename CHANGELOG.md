@@ -5,10 +5,13 @@
 ### Fixed
 
 - Improve logic for SSH exec commands.
+- Flush messages to data channel when closing connection.
+- Show cursor in admin interface only on shutdown.
 
 ### Changed
 
 - Update dependencies.
+- **BREAKING**: Shutdown when trying to open admin interface in invalid context.
 
 ## 0.4.0 (2025-02-11)
 

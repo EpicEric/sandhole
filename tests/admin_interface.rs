@@ -8,6 +8,7 @@ use russh::{
     Channel,
 };
 use sandhole::{entrypoint, ApplicationConfig};
+use tokio::sync::oneshot;
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
@@ -19,7 +20,7 @@ use tokio::{
 async fn admin_interface() {
     // 1. Initialize Sandhole
     let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_module("sandhole", log::LevelFilter::Debug)
         .is_test(true)
         .try_init();
     let config = ApplicationConfig::parse_from([
@@ -141,6 +142,7 @@ async fn admin_interface() {
 
     // 4. Interact with the admin interface and verify displayed data
     let (tx, mut rx) = mpsc::unbounded_channel();
+    let (hide_cursor_tx, hide_cursor_rx) = oneshot::channel();
     let mut writer = channel.make_writer();
     let jh = tokio::spawn(async move {
         let mut parser = vt100_ctt::Parser::new(30, 140, 0);
@@ -153,12 +155,13 @@ async fn admin_interface() {
                     let contents_formatted = new_screen.contents_formatted();
                     if contents_formatted != screen {
                         screen = contents_formatted;
-                        tx.send(new_screen.contents()).unwrap();
+                        let _ = tx.send(new_screen.contents());
                     }
                 }
                 _ => break,
             }
         }
+        let _ = hide_cursor_tx.send(parser.screen().hide_cursor());
     });
     if timeout(Duration::from_secs(3), async move {
         // 4a. Validate header, system information, and HTTP tab data
@@ -355,6 +358,10 @@ async fn admin_interface() {
     }
     sleep(Duration::from_millis(200)).await;
     assert!(session.is_closed(), "session didn't close properly");
+    assert!(
+        !hide_cursor_rx.await.unwrap(),
+        "cursor should be visible after session is closed"
+    );
     jh.abort();
 }
 

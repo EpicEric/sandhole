@@ -28,7 +28,7 @@ use tower::Service;
 async fn admin_remove_user() {
     // 1. Initialize Sandhole
     let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_module("sandhole", log::LevelFilter::Debug)
         .is_test(true)
         .try_init();
     let config = ApplicationConfig::parse_from([
@@ -178,7 +178,7 @@ async fn admin_remove_user() {
                     let contents_formatted = new_screen.contents_formatted();
                     if contents_formatted != screen {
                         screen = contents_formatted;
-                        tx.send(new_screen.contents()).unwrap();
+                        let _ = tx.send(new_screen.contents());
                     }
                 }
                 _ => break,

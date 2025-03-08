@@ -1,7 +1,8 @@
 use std::{
     borrow::Borrow,
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
     fmt::Display,
+    mem,
     net::{IpAddr, SocketAddr},
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -25,6 +26,7 @@ use crate::{
     SandholeServer,
 };
 
+use enumflags2::{bitflags, BitFlags};
 use http::Request;
 use hyper::{body::Incoming, service::service_fn};
 use hyper_util::{
@@ -39,7 +41,7 @@ use russh::{
     Channel, ChannelId, ChannelStream, MethodKind, MethodSet,
 };
 use tokio::{
-    io::{copy_bidirectional, AsyncWriteExt},
+    io::copy_bidirectional,
     sync::{mpsc, Mutex, RwLock},
     time::{sleep, timeout},
 };
@@ -253,11 +255,14 @@ impl Display for AuthenticatedData {
     }
 }
 
+// Wrapper around an optional sender that throws away messages when the sender is missing.
 struct OptionalSender(Option<mpsc::UnboundedSender<Vec<u8>>>);
 
 impl OptionalSender {
     fn send(&self, data: Vec<u8>) {
-        let _ = self.0.as_ref().map(|tx| tx.send(data));
+        self.0.as_ref().inspect(|tx| {
+            let _ = tx.send(data);
+        });
     }
 
     fn is_some(&self) -> bool {
@@ -267,6 +272,18 @@ impl OptionalSender {
     fn clone_inner(&self) -> Option<mpsc::UnboundedSender<Vec<u8>>> {
         self.0.clone()
     }
+}
+
+#[bitflags]
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExecCommand {
+    Admin,
+    AllowedFingerprints,
+    TcpAlias,
+    ForceHttps,
+    IpAllowlist,
+    IpBlocklist,
 }
 
 // Shared data for each SSH connection.
@@ -285,14 +302,14 @@ pub(crate) struct ServerHandler {
     cancellation_token: CancellationToken,
     // User-specific data, set after authentication.
     auth_data: AuthenticatedData,
-    // Commands running on the open session channel.
-    commands: HashSet<String>,
     // Sender for data session messages, used for sending logs and TUI state to the client.
     tx: OptionalSender,
     // Handle for the opened data session task. Initially None.
     open_session_join_handle: Option<DroppableHandle<()>>,
     // Reference to the Sandhole data, for accessing configuration and services.
     server: Arc<SandholeServer>,
+    // Commands running on the open session channel.
+    commands: BitFlags<ExecCommand>,
 }
 
 pub(crate) trait Server {
@@ -333,7 +350,7 @@ impl Server for Arc<SandholeServer> {
 impl Handler for ServerHandler {
     type Error = russh::Error;
 
-    // Handle creation of a channel for sending and receiving logs or TUI updates to the client.
+    // Handle creation of a channel for sending logs or TUI updates to the client.
     async fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
@@ -347,11 +364,32 @@ impl Handler for ServerHandler {
             return Ok(false);
         };
         let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
-        let mut stream = channel.into_stream();
+        let graceful_cancellation_token = CancellationToken::new();
+        let graceful_shutdown_rx = graceful_cancellation_token.clone();
+        let cancellation_token =
+            mem::replace(&mut self.cancellation_token, graceful_cancellation_token);
         let join_handle = tokio::spawn(async move {
-            while let Some(message) = rx.recv().await {
-                if stream.write_all(&message).await.is_err() {
-                    break;
+            loop {
+                tokio::select! {
+                    _ = graceful_shutdown_rx.cancelled() => {
+                        // Flush the remaining messages
+                        while let Ok(message) = rx.try_recv() {
+                            if channel.data(message.as_ref()).await.is_err() {
+                                break;
+                            }
+                        }
+                        let _ = channel.eof().await;
+                        let _ = channel.close().await;
+                        // Close the connection
+                        cancellation_token.cancel();
+                        break;
+                    }
+                    message = rx.recv() => {
+                        let Some(message) = message else { break };
+                        if channel.data(message.as_ref()).await.is_err() {
+                            break;
+                        }
+                    }
                 }
             }
         });
@@ -497,11 +535,6 @@ impl Handler for ServerHandler {
         data: &[u8],
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        // Ctrl+C (0x03) ends the session and disconnects the client
-        if data == b"\x03" {
-            self.cancellation_token.cancel();
-            return Ok(());
-        }
         debug!("received data {:?}", data);
         match &mut self.auth_data {
             // Ignore other commands for non-admin users
@@ -524,10 +557,16 @@ impl Handler for ServerHandler {
                         b"\r" => admin_interface.enter(),
                         // Delete
                         b"\x1b[3~" => admin_interface.delete(),
+                        // Ctrl+C
+                        b"\x03" => admin_interface.disable(),
                         _ => (),
                     }
                 }
             }
+        }
+        // Ctrl+C (0x03) ends the session and disconnects the client
+        if data == b"\x03" {
+            self.cancellation_token.cancel();
         }
         Ok(())
     }
@@ -547,7 +586,7 @@ impl Handler for ServerHandler {
             match (command, &mut self.auth_data) {
                 // - `admin` command creates an admin interface if the user is an admin
                 ("admin", AuthenticatedData::Admin { admin_data, .. }) => {
-                    if self.commands.contains("admin") {
+                    if self.commands.contains(ExecCommand::Admin) {
                         self.tx
                             .send(b"Invalid option \"admin\": duplicated command\r\n".to_vec());
                         success = false;
@@ -559,6 +598,7 @@ impl Handler for ServerHandler {
                                 .to_vec(),
                         );
                         success = false;
+                        self.cancellation_token.cancel();
                         break;
                     }
                     let Some(tx) = self.tx.clone_inner() else {
@@ -572,7 +612,7 @@ impl Handler for ServerHandler {
                         let _ = admin_interface.resize(col_width as u16, row_height as u16);
                     }
                     admin_data.admin_interface = Some(admin_interface);
-                    self.commands.insert("admin".into());
+                    self.commands.insert(ExecCommand::Admin);
                 }
                 // - `allowed-fingerprints` sets this connection as alias-only,
                 //   and requires local forwardings to have one of the specified key fingerprints.
@@ -589,7 +629,7 @@ impl Handler for ServerHandler {
                         success = false;
                         break;
                     }
-                    if self.commands.contains("allowed-fingerprints") {
+                    if self.commands.contains(ExecCommand::AllowedFingerprints) {
                         self.tx.send(
                             b"Invalid option \"allowed-fingerprints\": duplicated command\r\n"
                                 .to_vec(),
@@ -672,7 +712,7 @@ impl Handler for ServerHandler {
                             break;
                         }
                     }
-                    self.commands.insert("allowed-fingerprints".into());
+                    self.commands.insert(ExecCommand::AllowedFingerprints);
                 }
                 // - `tcp-alias` sets this connection as alias-only.
                 (
@@ -687,7 +727,7 @@ impl Handler for ServerHandler {
                         success = false;
                         break;
                     }
-                    if self.commands.contains("tcp-alias") {
+                    if self.commands.contains(ExecCommand::TcpAlias) {
                         self.tx
                             .send(b"Invalid option \"tcp-alias\": duplicated command\r\n".to_vec());
                         success = false;
@@ -743,7 +783,7 @@ impl Handler for ServerHandler {
                             break;
                         }
                     }
-                    self.commands.insert("tcp-alias".into());
+                    self.commands.insert(ExecCommand::TcpAlias);
                 }
                 // - `force-https` causes tunneled HTTP requests to be redirected to HTTPS.
                 (
@@ -751,7 +791,7 @@ impl Handler for ServerHandler {
                     AuthenticatedData::User { user_data, .. }
                     | AuthenticatedData::Admin { user_data, .. },
                 ) => {
-                    if self.commands.contains("force-https") {
+                    if self.commands.contains(ExecCommand::ForceHttps) {
                         self.tx.send(
                             b"Invalid option \"force-https\": duplicated command\r\n".to_vec(),
                         );
@@ -763,7 +803,7 @@ impl Handler for ServerHandler {
                         .write()
                         .await
                         .redirect_http_to_https_port = Some(self.server.https_port);
-                    self.commands.insert("force-https".into());
+                    self.commands.insert(ExecCommand::ForceHttps);
                 }
                 // - `ip-allowlist` requires tunneling/aliasing connections to come from
                 //   specific IP ranges.
@@ -772,7 +812,9 @@ impl Handler for ServerHandler {
                     AuthenticatedData::User { user_data, .. }
                     | AuthenticatedData::Admin { user_data, .. },
                 ) if command.starts_with("ip-allowlist=") => {
-                    if self.commands.contains("ip-allowlist") || user_data.allowlist.is_some() {
+                    if self.commands.contains(ExecCommand::IpAllowlist)
+                        || user_data.allowlist.is_some()
+                    {
                         self.tx.send(
                             b"Invalid option \"ip-allowlist\": duplicated command\r\n".to_vec(),
                         );
@@ -802,7 +844,7 @@ impl Handler for ServerHandler {
                         break;
                     }
                     user_data.allowlist = Some(list);
-                    self.commands.insert("ip-allowlist".into());
+                    self.commands.insert(ExecCommand::IpAllowlist);
                 }
                 // - `ip-blocklist` requires tunneling/aliasing connections to come from
                 //   specific IP ranges.
@@ -811,7 +853,9 @@ impl Handler for ServerHandler {
                     AuthenticatedData::User { user_data, .. }
                     | AuthenticatedData::Admin { user_data, .. },
                 ) if command.starts_with("ip-blocklist=") => {
-                    if self.commands.contains("ip-blocklist") || user_data.blocklist.is_some() {
+                    if self.commands.contains(ExecCommand::IpBlocklist)
+                        || user_data.blocklist.is_some()
+                    {
                         self.tx.send(
                             b"Invalid option \"ip-blocklist\": duplicated command\r\n".to_vec(),
                         );
@@ -841,7 +885,7 @@ impl Handler for ServerHandler {
                         break;
                     }
                     user_data.blocklist = Some(list);
-                    self.commands.insert("ip-blocklist".into());
+                    self.commands.insert(ExecCommand::IpBlocklist);
                 }
                 // - Unknown command
                 (command, _) => {
@@ -850,8 +894,9 @@ impl Handler for ServerHandler {
                         command, self.auth_data, self.peer
                     );
                     self.tx
-                        .send(format!("Ignoring unknown command {}...", command).into_bytes());
+                        .send(format!("Error: invalid command {}...", command).into_bytes());
                     success = false;
+                    break;
                 }
             }
         }

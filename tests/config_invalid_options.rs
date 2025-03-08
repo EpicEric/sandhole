@@ -15,7 +15,7 @@ use tokio_rustls::TlsConnector;
 async fn config_invalid_options() {
     // 1. Fail to initialize Sandhole if HTTP, TCP, and aliasing are all disabled
     let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_module("sandhole", log::LevelFilter::Debug)
         .is_test(true)
         .try_init();
     let config = ApplicationConfig::parse_from([

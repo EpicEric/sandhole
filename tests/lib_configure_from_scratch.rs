@@ -21,7 +21,7 @@ use tokio::{
 async fn lib_configure_from_scratch() {
     // 1. Create random temporary directory and initialize Sandhole
     let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_module("sandhole", log::LevelFilter::Debug)
         .is_test(true)
         .try_init();
     let random_name = String::from_utf8(

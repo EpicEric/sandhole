@@ -22,6 +22,7 @@ chrono = "0.4.39"
 clap = { version = "4.5.30", features = ["derive", "string"] }
 crossterm = "0.28.1"
 dashmap = "6.1.0"
+enumflags2 = "0.7.11"
 env_logger = "0.11.6"
 hickory-resolver = "0.24.4"
 http = "1.2.0"

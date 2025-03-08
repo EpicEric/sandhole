@@ -14,7 +14,7 @@ use tokio::{
 async fn ssh_invalid_exec_commands() {
     // 1. Initialize Sandhole
     let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_module("sandhole", log::LevelFilter::Debug)
         .is_test(true)
         .try_init();
     let config = ApplicationConfig::parse_from([
@@ -351,7 +351,7 @@ async fn ssh_invalid_exec_commands() {
                 let contents_formatted = new_screen.contents_formatted();
                 if contents_formatted != screen {
                     screen = contents_formatted;
-                    tx.send(new_screen.contents()).unwrap();
+                    let _ = tx.send(new_screen.contents());
                 }
             }
         }
