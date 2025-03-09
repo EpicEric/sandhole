@@ -66,7 +66,7 @@ impl Configurer for PlatformVerifierConfigurer {
 
 impl<C: Configurer> ApiLogin<C> {
     // Create the login client with the shared configuration for HTTP requests.
-    pub(crate) fn new(endpoint: &str, configurer: C) -> anyhow::Result<Self> {
+    pub(crate) fn from(endpoint: &str, configurer: C) -> anyhow::Result<Self> {
         // Parse data from the URL
         let url: Uri = endpoint
             .parse()
@@ -141,14 +141,14 @@ impl<C: Configurer> ApiLogin<C> {
                             return Err(anyhow!("API login handshake failed: {}", err));
                         }
                     };
-                let _join_handle = DroppableHandle(tokio::spawn(async move {
+                let join_handle = DroppableHandle(tokio::spawn(async move {
                     if let Err(err) = conn.await {
                         warn!("API login TCP connection errored: {:?}", err);
                     }
                 }));
                 // Get the response via HTTP
                 match sender.send_request(request).await {
-                    Ok(response) => (response, _join_handle),
+                    Ok(response) => (response, join_handle),
                     Err(err) => {
                         return Err(anyhow!("API login HTTP request failed: {}", err));
                     }
@@ -175,14 +175,14 @@ impl<C: Configurer> ApiLogin<C> {
                             return Err(anyhow!("API login handshake failed: {}", err));
                         }
                     };
-                let _join_handle = DroppableHandle(tokio::spawn(async move {
+                let join_handle = DroppableHandle(tokio::spawn(async move {
                     if let Err(err) = conn.await {
                         warn!("API login TCP connection errored: {:?}", err);
                     }
                 }));
                 // Get the response via HTTP
                 match sender.send_request(request).await {
-                    Ok(response) => (response, _join_handle),
+                    Ok(response) => (response, join_handle),
                     Err(err) => {
                         return Err(anyhow!("API login HTTP request failed: {}", err));
                     }
@@ -207,7 +207,7 @@ mod api_login_tests {
     use hyper::{body::Incoming, service::service_fn};
     use hyper_util::rt::{TokioExecutor, TokioIo};
     use rustls::{ClientConfig, RootCertStore, ServerConfig};
-    use tokio::net::TcpListener;
+    use tokio::{io::AsyncReadExt, net::TcpListener};
     use tokio_rustls::TlsAcceptor;
     use tower::Service;
     use webpki::types::{pem::PemObject, CertificateDer, PrivateKeyDer};
@@ -233,7 +233,7 @@ mod api_login_tests {
         let listener = TcpListener::bind("127.0.0.1:28011").await.unwrap();
         let jh = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        let api_login = ApiLogin::new("http://localhost:28011/authentication", mock).unwrap();
+        let api_login = ApiLogin::from("http://localhost:28011/authentication", mock).unwrap();
         assert!(
             api_login
                 .authenticate(&AuthenticationRequest {
@@ -270,7 +270,7 @@ mod api_login_tests {
         let listener = TcpListener::bind("127.0.0.1:28012").await.unwrap();
         let jh = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        let api_login = ApiLogin::new("http://localhost:28012/authentication", mock).unwrap();
+        let api_login = ApiLogin::from("http://localhost:28012/authentication", mock).unwrap();
         assert!(
             !api_login
                 .authenticate(&AuthenticationRequest {
@@ -356,7 +356,7 @@ mod api_login_tests {
         });
 
         let api_login =
-            ApiLogin::new("https://localhost:28013/secure_authentication", mock).unwrap();
+            ApiLogin::from("https://localhost:28013/secure_authentication", mock).unwrap();
         assert!(
             api_login
                 .authenticate(&AuthenticationRequest {
@@ -370,6 +370,277 @@ mod api_login_tests {
                 .await
                 .unwrap(),
             "should authenticated valid user"
+        );
+        jh.abort();
+    }
+
+    #[test]
+    fn fails_on_empty_url() {
+        let mut mock = MockConfigurer::new();
+        mock.expect_get_client_config().never();
+        assert!(
+            ApiLogin::from("", mock).is_err(),
+            "should error on empty URL"
+        );
+    }
+
+    #[test]
+    fn fails_on_invalid_url() {
+        let mut mock = MockConfigurer::new();
+        mock.expect_get_client_config().never();
+        assert!(
+            ApiLogin::from("https://should.fail/\x00", mock).is_err(),
+            "should error on missing URL"
+        );
+    }
+
+    #[test]
+    fn fails_on_missing_host() {
+        let mut mock = MockConfigurer::new();
+        mock.expect_get_client_config().never();
+        assert!(
+            ApiLogin::from("https:///invalid", mock).is_err(),
+            "should error on missing host"
+        );
+    }
+
+    #[test]
+    fn fails_on_invalid_host() {
+        let mut mock = MockConfigurer::new();
+        mock.expect_get_client_config().never();
+        assert!(
+            ApiLogin::from("https://should\x00fail", mock).is_err(),
+            "should error on invalid host"
+        );
+    }
+
+    #[test]
+    fn fails_on_missing_scheme() {
+        let mut mock = MockConfigurer::new();
+        mock.expect_get_client_config().never();
+        assert!(
+            ApiLogin::from("should.fail", mock).is_err(),
+            "should error on missing scheme"
+        );
+    }
+
+    #[test]
+    fn fails_on_unknown_scheme() {
+        let mut mock = MockConfigurer::new();
+        mock.expect_get_client_config().never();
+        assert!(
+            ApiLogin::from("unknown://should.fail", mock).is_err(),
+            "should error on unknown scheme"
+        );
+    }
+
+    #[tokio::test]
+    async fn errors_when_unable_to_connect_to_socket() {
+        let mut mock = MockConfigurer::new();
+        mock.expect_get_client_config().never();
+
+        let api_login = ApiLogin::from("http://localhost:28015/authentication", mock).unwrap();
+        assert!(
+            api_login
+                .authenticate(&AuthenticationRequest {
+                    user: "eric",
+                    password: "sandhole",
+                    remote_address: &SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                        12345
+                    )
+                })
+                .await
+                .is_err(),
+            "should fail to connect to socket"
+        );
+    }
+
+    #[tokio::test]
+    async fn errors_when_unable_to_complete_http_handshake() {
+        let mut mock = MockConfigurer::new();
+        mock.expect_get_client_config().never();
+
+        let listener = TcpListener::bind("127.0.0.1:28016").await.unwrap();
+        let jh = tokio::spawn(async move {
+            loop {
+                drop(listener.accept().await.unwrap());
+            }
+        });
+
+        let api_login = ApiLogin::from("http://localhost:28016/authentication", mock).unwrap();
+        assert!(
+            api_login
+                .authenticate(&AuthenticationRequest {
+                    user: "eric",
+                    password: "sandhole",
+                    remote_address: &SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                        12345
+                    )
+                })
+                .await
+                .is_err(),
+            "should fail to complete HTTP handshake"
+        );
+        jh.abort();
+    }
+
+    #[tokio::test]
+    async fn errors_when_http_request_fails() {
+        let mut mock = MockConfigurer::new();
+        mock.expect_get_client_config().never();
+
+        let listener = TcpListener::bind("127.0.0.1:28017").await.unwrap();
+        let jh = tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 1024];
+                loop {
+                    let len = stream.read(&mut buf).await.unwrap();
+                    if buf[..len].windows(4).any(|subslice| subslice == b"POST") {
+                        drop(stream);
+                        break;
+                    }
+                }
+            }
+        });
+
+        let api_login = ApiLogin::from("http://localhost:28017/authentication", mock).unwrap();
+        assert!(
+            api_login
+                .authenticate(&AuthenticationRequest {
+                    user: "eric",
+                    password: "sandhole",
+                    remote_address: &SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                        12345
+                    )
+                })
+                .await
+                .is_err(),
+            "should fail to complete HTTP request"
+        );
+        jh.abort();
+    }
+
+    #[tokio::test]
+    async fn errors_when_unable_to_complete_https_handshake() {
+        let mut mock = MockConfigurer::new();
+        let mut root_store = RootCertStore::empty();
+        root_store.add_parsable_certificates(
+            CertificateDer::pem_file_iter(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/data/ca/rootCA.pem"
+            ))
+            .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
+            .expect("Failed to parse client certificates"),
+        );
+        let tls_client_config = ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        mock.expect_get_client_config()
+            .once()
+            .return_once(move || tls_client_config);
+
+        let listener = TcpListener::bind("127.0.0.1:28018").await.unwrap();
+        let jh = tokio::spawn(async move {
+            loop {
+                drop(listener.accept().await.unwrap());
+            }
+        });
+
+        let api_login =
+            ApiLogin::from("https://localhost:28018/secure_authentication", mock).unwrap();
+        assert!(
+            api_login
+                .authenticate(&AuthenticationRequest {
+                    user: "eric",
+                    password: "sandhole",
+                    remote_address: &SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                        12345
+                    )
+                })
+                .await
+                .is_err(),
+            "should fail to complete HTTPS handshake"
+        );
+        jh.abort();
+    }
+
+    #[tokio::test]
+    async fn errors_when_https_request_fails() {
+        let mut mock = MockConfigurer::new();
+        let mut root_store = RootCertStore::empty();
+        root_store.add_parsable_certificates(
+            CertificateDer::pem_file_iter(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/data/ca/rootCA.pem"
+            ))
+            .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
+            .expect("Failed to parse client certificates"),
+        );
+        let tls_client_config = ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        mock.expect_get_client_config()
+            .once()
+            .return_once(move || tls_client_config);
+
+        let listener = TcpListener::bind("127.0.0.1:28019").await.unwrap();
+        let tls_server_config = Arc::new(
+            ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    CertificateDer::pem_file_iter(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/tests/data/certificates/localhost/fullchain.pem"
+                    ))
+                    .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
+                    .expect("Failed to parse server certificates"),
+                    PrivateKeyDer::from_pem_file(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/tests/data/certificates/localhost/privkey.pem"
+                    ))
+                    .expect("Failed to parse server key"),
+                )
+                .expect("Failed to build server config"),
+        );
+        let tls_acceptor = TlsAcceptor::from(tls_server_config);
+        let jh = tokio::spawn(async move {
+            loop {
+                let acceptor = tls_acceptor.clone();
+                let (conn, _) = listener.accept().await.unwrap();
+                tokio::spawn(async move {
+                    let mut stream = acceptor.accept(conn).await.unwrap();
+                    let mut buf = [0u8; 1024];
+                    loop {
+                        let len = stream.read(&mut buf).await.unwrap();
+                        if buf[..len].windows(4).any(|subslice| subslice == b"POST") {
+                            drop(stream);
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+
+        let api_login =
+            ApiLogin::from("https://localhost:28019/secure_authentication", mock).unwrap();
+        assert!(
+            api_login
+                .authenticate(&AuthenticationRequest {
+                    user: "eric",
+                    password: "sandhole",
+                    remote_address: &SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                        12345
+                    )
+                })
+                .await
+                .is_err(),
+            "should fail to complete HTTPS request"
         );
         jh.abort();
     }

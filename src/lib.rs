@@ -188,8 +188,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         )
         .into());
     }
-    let http_request_timeout = config.http_request_timeout.map(Into::into);
-    let tcp_connection_timeout = config.tcp_connection_timeout.map(Into::into);
+    let http_request_timeout = config.http_request_timeout;
+    let tcp_connection_timeout = config.tcp_connection_timeout;
     // Initialize crypto and credentials
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
@@ -243,7 +243,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let api_login = config
         .password_authentication_url
         .as_ref()
-        .map(|url| ApiLogin::new(url, PlatformVerifierConfigurer))
+        .map(|url| ApiLogin::from(url, PlatformVerifierConfigurer))
         .transpose()
         .with_context(|| "Error intializing login API")?;
     // Initialize the ACME ALPN service if a contact email has been provided.
@@ -528,12 +528,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         disable_http: config.disable_http,
         disable_tcp: config.disable_tcp,
         disable_aliasing: config.disable_aliasing,
-        authentication_request_timeout: config.authentication_request_timeout.into(),
-        idle_connection_timeout: config.idle_connection_timeout.into(),
+        authentication_request_timeout: config.authentication_request_timeout,
+        idle_connection_timeout: config.idle_connection_timeout,
         unproxied_connection_timeout: config
             .unproxied_connection_timeout
-            .map(Into::into)
-            .unwrap_or(config.idle_connection_timeout.into()),
+            .unwrap_or(config.idle_connection_timeout),
         tcp_connection_timeout,
     });
 

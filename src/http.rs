@@ -5,10 +5,10 @@ use std::{net::SocketAddr, sync::Arc};
 
 use crate::connection_handler::ConnectionHandler;
 use crate::connections::ConnectionGetByHttpHost;
+use crate::error::ServerError;
 use crate::tcp_alias::TcpAlias;
 use crate::telemetry::Telemetry;
 
-use super::error::ServerError;
 use axum::{
     body::Body as AxumBody,
     response::{IntoResponse, Redirect},
@@ -197,14 +197,14 @@ where
         &proxy_data.proxy_type,
     ) {
         // If force-https is true, redirect this HTTP request to HTTPS
-        (Protocol::Http { .. }, Some(to_port), ProxyType::Tunneling)
-        | (Protocol::TlsRedirect { to: to_port, .. }, _, ProxyType::Tunneling) => {
+        (Protocol::Http { .. }, Some(port), ProxyType::Tunneling)
+        | (Protocol::TlsRedirect { to: port, .. }, _, ProxyType::Tunneling) => {
             let elapsed_time = timer.elapsed();
             let response = Redirect::permanent(
                 format!(
                     "https://{}:{}{}",
                     host,
-                    to_port,
+                    port,
                     request
                         .uri()
                         .path_and_query()

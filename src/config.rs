@@ -2,10 +2,11 @@ use std::{
     net::{IpAddr, Ipv6Addr},
     num::NonZero,
     path::PathBuf,
+    str::FromStr,
+    time::Duration,
 };
 
 use clap::{command, Parser, ValueEnum};
-use humantime::Duration;
 use ipnet::IpNet;
 use webpki::types::DnsName;
 
@@ -282,7 +283,12 @@ pub struct ApplicationConfig {
     /// Grace period for dangling/unauthenticated SSH connections before they are forcefully disconnected.
     ///
     /// A low value may cause valid proxy/tunnel connections to be erroneously removed.
-    #[arg(long, default_value = "2s", value_name = "DURATION")]
+    #[arg(
+        long,
+        default_value = "2s",
+        value_parser = validate_duration,
+        value_name = "DURATION"
+    )]
     pub idle_connection_timeout: Duration,
 
     /// Grace period for unauthenticated SSH connections after closing the last proxy tunnel before they are forcefully disconnected.
@@ -290,24 +296,29 @@ pub struct ApplicationConfig {
     /// A low value may cause valid proxy/tunnel connections to be erroneously removed.
     ///
     /// If unset, this defaults to the value set by --idle-connection-timeout
-    #[arg(long, value_name = "DURATION")]
+    #[arg(long, value_parser = validate_duration, value_name = "DURATION")]
     pub unproxied_connection_timeout: Option<Duration>,
 
     /// Time until a user+password authentication request is canceled.
     /// Any timed out requests will not authenticate the user.
-    #[arg(long, default_value = "5s", value_name = "DURATION")]
+    #[arg(
+        long,
+        default_value = "5s",
+        value_parser = validate_duration,
+        value_name = "DURATION"
+    )]
     pub authentication_request_timeout: Duration,
 
     /// Time until an outgoing HTTP request is automatically canceled.
     ///
     /// By default, outgoing requests are not terminated by Sandhole.
-    #[arg(long, value_name = "DURATION")]
+    #[arg(long, value_parser = validate_duration, value_name = "DURATION")]
     pub http_request_timeout: Option<Duration>,
 
     /// How long until TCP connections (including Websockets and local forwardings) are automatically garbage-collected.
     ///
     /// By default, these connections are not terminated by Sandhole.
-    #[arg(long, value_name = "DURATION")]
+    #[arg(long, value_parser = validate_duration, value_name = "DURATION")]
     pub tcp_connection_timeout: Option<Duration>,
 }
 
@@ -325,13 +336,18 @@ fn validate_txt_record_prefix(value: &str) -> Result<String, String> {
     }
 }
 
+fn validate_duration(value: &str) -> Result<Duration, String> {
+    Ok(humantime::Duration::from_str(value)
+        .map_err(|_| "invalid duration")?
+        .into())
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod application_config_tests {
-    use std::str::FromStr;
+    use std::{str::FromStr, time::Duration};
 
     use clap::Parser;
-    use humantime::Duration;
     use ipnet::IpNet;
 
     use super::{ApplicationConfig, BindHostnames, LoadBalancing, RandomSubdomainSeed};
@@ -376,9 +392,9 @@ mod application_config_tests {
                 requested_domain_filter_profanities: false,
                 ip_allowlist: None,
                 ip_blocklist: None,
-                idle_connection_timeout: Duration::from_str("2s").unwrap(),
+                idle_connection_timeout: Duration::from_secs(2),
                 unproxied_connection_timeout: None,
-                authentication_request_timeout: Duration::from_str("5s").unwrap(),
+                authentication_request_timeout: Duration::from_secs(5),
                 http_request_timeout: None,
                 tcp_connection_timeout: None
             }
@@ -469,11 +485,11 @@ mod application_config_tests {
                     IpNet::from_str("10.1.0.0/16").unwrap(),
                     IpNet::from_str("10.2.0.0/16").unwrap()
                 ]),
-                idle_connection_timeout: Duration::from_str("3s").unwrap(),
-                unproxied_connection_timeout: Some(Duration::from_str("4s").unwrap()),
-                authentication_request_timeout: Duration::from_str("6s").unwrap(),
-                http_request_timeout: Some(Duration::from_str("15s").unwrap()),
-                tcp_connection_timeout: Some(Duration::from_str("30s").unwrap())
+                idle_connection_timeout: Duration::from_secs(3),
+                unproxied_connection_timeout: Some(Duration::from_secs(4)),
+                authentication_request_timeout: Duration::from_secs(6),
+                http_request_timeout: Some(Duration::from_secs(15)),
+                tcp_connection_timeout: Some(Duration::from_secs(30))
             }
         )
     }
@@ -489,6 +505,16 @@ mod application_config_tests {
             "sandhole",
             "--domain=foobar.tld",
             "--txt-record-prefix=hello.world"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn fails_to_parse_if_invalid_duration() {
+        assert!(ApplicationConfig::try_parse_from([
+            "sandhole",
+            "--domain=foobar.tld",
+            "--idle-connection-timeout=42"
         ])
         .is_err());
     }

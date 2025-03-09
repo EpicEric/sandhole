@@ -39,7 +39,8 @@ pub(crate) struct HttpReactor {
 // (in order to tell which hostnames are still being tracked or not).
 impl ConnectionMapReactor<String> for HttpReactor {
     fn call(&self, identifiers: Vec<String>) {
-        self.certificates.update_acme_domains(identifiers.clone());
+        self.certificates
+            .update_acme_domains(identifiers.as_slice());
         self.telemetry.http_reactor(identifiers);
     }
 }

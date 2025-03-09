@@ -109,7 +109,7 @@ impl CertificateResolver {
                                     Ok(key) => key,
                                     Err(err) => {
                                         warn!(
-                                            "Unable to load certficate key in {:?}: {}",
+                                            "Unable to load certificate key in {:?}: {}",
                                             entry.path().join("privkey.pem"),
                                             err
                                         );
@@ -203,10 +203,11 @@ impl CertificateResolver {
     }
 
     // Find the list of domains that don't have a certificate associated with them, and request ACME challenges for them.
-    pub(crate) fn update_acme_domains(&self, hostnames: Vec<String>) {
+    pub(crate) fn update_acme_domains(&self, hostnames: &[String]) {
         let domains = hostnames
-            .into_iter()
-            .filter(|domain| self.resolve_server_name(domain.as_ref()).is_none())
+            .iter()
+            .filter(|domain| self.resolve_server_name(domain).is_none())
+            .cloned()
             .collect();
         self.alpn_resolver.write().unwrap().update_domains(domains);
     }
@@ -232,6 +233,8 @@ mod certificate_resolver_tests {
     use std::sync::{Arc, RwLock};
 
     use mockall::predicate::eq;
+    use rand::{rng, seq::IndexedRandom};
+    use tokio::fs;
 
     use super::{CertificateResolver, DummyAlpnChallengeResolver, MockAlpnChallengeResolver};
 
@@ -242,6 +245,19 @@ mod certificate_resolver_tests {
     // Certificate is valid for "localhost"
     static DOMAINS_LOCALHOST: &[&str] = &["localhost"];
     static UNKNOWN_DOMAINS: &[&str] = &[".invalid.", "tld", "example.com", "too.nested.foobar.tld"];
+
+    #[tokio::test]
+    async fn errors_on_missing_directory() {
+        assert!(
+            CertificateResolver::watch(
+                std::env::temp_dir().join("invalid_directory_123"),
+                RwLock::new(Box::new(DummyAlpnChallengeResolver)),
+            )
+            .await
+            .is_err(),
+            "should error on missing directory"
+        );
+    }
 
     #[tokio::test]
     async fn allows_valid_domains() {
@@ -285,12 +301,167 @@ mod certificate_resolver_tests {
     }
 
     #[tokio::test]
+    async fn errors_on_missing_certificate() {
+        let random_name = String::from_utf8(
+            (0..6)
+                .flat_map(|_| {
+                    "0123456789abcdefghijklmnopqrstuvwxyz"
+                        .as_bytes()
+                        .choose(&mut rng())
+                        .copied()
+                })
+                .collect(),
+        )
+        .unwrap();
+        let temp_dir = std::env::temp_dir().join(format!("sandhole_certificates_{random_name}"));
+        let certs_dir = temp_dir.join("foobar.tld");
+        fs::create_dir_all(certs_dir.as_path())
+            .await
+            .expect("unable to create foobar.tld tempdir");
+        fs::write(
+            certs_dir.join("privkey.pem"),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/data/certificates/foobar.tld/privkey.pem"
+            )),
+        )
+        .await
+        .expect("unable to copy privkey.pem to tempdir");
+        let resolver =
+            CertificateResolver::watch(temp_dir, RwLock::new(Box::new(DummyAlpnChallengeResolver)))
+                .await
+                .unwrap();
+        assert!(
+            resolver.resolve_server_name("test.foobar.tld").is_none(),
+            "shouldn't have resolved invalid domain test.foobar.tld"
+        );
+    }
+
+    #[tokio::test]
+    async fn errors_on_missing_key() {
+        let random_name = String::from_utf8(
+            (0..6)
+                .flat_map(|_| {
+                    "0123456789abcdefghijklmnopqrstuvwxyz"
+                        .as_bytes()
+                        .choose(&mut rng())
+                        .copied()
+                })
+                .collect(),
+        )
+        .unwrap();
+        let temp_dir = std::env::temp_dir().join(format!("sandhole_certificates_{random_name}"));
+        let certs_dir = temp_dir.join("foobar.tld");
+        fs::create_dir_all(certs_dir.as_path())
+            .await
+            .expect("unable to create foobar.tld tempdir");
+        fs::write(
+            certs_dir.join("fullchain.pem"),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/data/certificates/foobar.tld/fullchain.pem"
+            )),
+        )
+        .await
+        .expect("unable to copy fullchain.pem to tempdir");
+        let resolver =
+            CertificateResolver::watch(temp_dir, RwLock::new(Box::new(DummyAlpnChallengeResolver)))
+                .await
+                .unwrap();
+        assert!(
+            resolver.resolve_server_name("test.foobar.tld").is_none(),
+            "shouldn't have resolved invalid domain test.foobar.tld"
+        );
+    }
+
+    #[tokio::test]
+    async fn errors_on_invalid_certificate() {
+        let random_name = String::from_utf8(
+            (0..6)
+                .flat_map(|_| {
+                    "0123456789abcdefghijklmnopqrstuvwxyz"
+                        .as_bytes()
+                        .choose(&mut rng())
+                        .copied()
+                })
+                .collect(),
+        )
+        .unwrap();
+        let temp_dir = std::env::temp_dir().join(format!("sandhole_certificates_{random_name}"));
+        let certs_dir = temp_dir.join("foobar.tld");
+        fs::create_dir_all(certs_dir.as_path())
+            .await
+            .expect("unable to create foobar.tld tempdir");
+        fs::write(certs_dir.join("fullchain.pem"), b"invalid certificate")
+            .await
+            .expect("unable to write fullchain.pem to tempdir");
+        fs::write(
+            certs_dir.join("privkey.pem"),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/data/certificates/foobar.tld/privkey.pem"
+            )),
+        )
+        .await
+        .expect("unable to copy privkey.pem to tempdir");
+        let resolver =
+            CertificateResolver::watch(temp_dir, RwLock::new(Box::new(DummyAlpnChallengeResolver)))
+                .await
+                .unwrap();
+        assert!(
+            resolver.resolve_server_name("test.foobar.tld").is_none(),
+            "shouldn't have resolved invalid domain test.foobar.tld"
+        );
+    }
+
+    #[tokio::test]
+    async fn errors_on_invalid_key() {
+        let random_name = String::from_utf8(
+            (0..6)
+                .flat_map(|_| {
+                    "0123456789abcdefghijklmnopqrstuvwxyz"
+                        .as_bytes()
+                        .choose(&mut rng())
+                        .copied()
+                })
+                .collect(),
+        )
+        .unwrap();
+        let temp_dir = std::env::temp_dir().join(format!("sandhole_certificates_{random_name}"));
+        let certs_dir = temp_dir.join("foobar.tld");
+        fs::create_dir_all(certs_dir.as_path())
+            .await
+            .expect("unable to create foobar.tld tempdir");
+        fs::write(
+            certs_dir.join("fullchain.pem"),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/data/certificates/foobar.tld/fullchain.pem"
+            )),
+        )
+        .await
+        .expect("unable to copy fullchain.pem to tempdir");
+        fs::write(certs_dir.join("privkey.pem"), b"invalid key")
+            .await
+            .expect("unable to write privkey.pem to tempdir");
+        let resolver =
+            CertificateResolver::watch(temp_dir, RwLock::new(Box::new(DummyAlpnChallengeResolver)))
+                .await
+                .unwrap();
+        assert!(
+            resolver.resolve_server_name("test.foobar.tld").is_none(),
+            "shouldn't have resolved invalid domain test.foobar.tld"
+        );
+    }
+
+    #[tokio::test]
     async fn updates_alpn_resolver_on_reaction() {
         let mut mock = MockAlpnChallengeResolver::new();
         mock.expect_update_domains()
             .once()
             .with(eq(vec!["example.com".to_string()]))
             .returning(|_| {});
+
         let resolver = Arc::new(
             CertificateResolver::watch(
                 CERTIFICATES_DIRECTORY.parse().unwrap(),
@@ -299,6 +470,6 @@ mod certificate_resolver_tests {
             .await
             .unwrap(),
         );
-        resolver.update_acme_domains(vec!["foobar.tld".into(), "example.com".into()]);
+        resolver.update_acme_domains(&["foobar.tld".into(), "example.com".into()]);
     }
 }

@@ -1,4 +1,4 @@
-use std::{fs, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
 use rand::{rng, seq::IndexedRandom};
@@ -10,6 +10,7 @@ use russh::{
 };
 use russh::{MethodKind, MethodSet};
 use sandhole::{entrypoint, ApplicationConfig};
+use tokio::fs;
 use tokio::runtime::Handle;
 use tokio::task::spawn_blocking;
 use tokio::{
@@ -35,8 +36,10 @@ async fn lib_configure_from_scratch() {
             .collect(),
     )
     .unwrap();
-    let temp_dir = std::env::temp_dir().join(random_name);
-    fs::create_dir(temp_dir.as_path()).expect("Unable to create tempdir");
+    let temp_dir = std::env::temp_dir().join(format!("sandhole_test_{random_name}"));
+    fs::create_dir(temp_dir.as_path())
+        .await
+        .expect("Unable to create tempdir");
     let temp_dir_path = |path: &str| temp_dir.join(path).to_string_lossy().to_string();
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -145,6 +148,7 @@ async fn lib_configure_from_scratch() {
         ),
         temp_dir.join("user_keys/keys_1_2.pub"),
     )
+    .await
     .expect("cannot copy key2");
     // Wait for debounce on user pubkeys watcher (2s) + time to process the file
     sleep(Duration::from_millis(3_000)).await;
