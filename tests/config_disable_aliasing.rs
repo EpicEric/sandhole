@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use axum::{routing::get, Router};
+use axum::{Router, routing::get};
 use clap::Parser;
 use http::{Request, StatusCode};
 use hyper::{body::Incoming, service::service_fn};
@@ -12,10 +12,10 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key, ssh_key::private::Ed25519Keypair};
 use russh::{
-    client::{Msg, Session},
     Channel, ChannelId,
+    client::{Msg, Session},
 };
-use sandhole::{entrypoint, ApplicationConfig};
+use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
     sync::mpsc,
@@ -235,7 +235,7 @@ impl russh::client::Handler for SshClientOne {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let router = Router::new().route("/", get(|| async move { StatusCode::NO_CONTENT }));
+        let router = Router::new().route("/", get(async || StatusCode::NO_CONTENT));
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {
             Builder::new(TokioExecutor::new())

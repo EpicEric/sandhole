@@ -2,8 +2,8 @@ use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use russh::{client::Session, ChannelId};
-use sandhole::{entrypoint, ApplicationConfig};
+use russh::{ChannelId, client::Session};
+use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
     sync::mpsc,

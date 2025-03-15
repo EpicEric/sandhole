@@ -4,7 +4,7 @@ use clap::Parser;
 use rustls::ClientConfig;
 use rustls_acme::acme::ACME_TLS_ALPN_NAME;
 use rustls_platform_verifier::ConfigVerifierExt;
-use sandhole::{entrypoint, ApplicationConfig};
+use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
@@ -88,9 +88,11 @@ async fn config_invalid_options() {
     let tcp_stream = TcpStream::connect("127.0.0.1:18443")
         .await
         .expect("TCP connection failed");
-    assert!(connector
-        .connect("test.foobar.tld".try_into().unwrap(), tcp_stream)
-        .await
-        .is_err());
+    assert!(
+        connector
+            .connect("test.foobar.tld".try_into().unwrap(), tcp_stream)
+            .await
+            .is_err()
+    );
     jh.abort();
 }

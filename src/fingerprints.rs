@@ -9,7 +9,7 @@ use std::{
 use crate::{directory::watch_directory, droppable_handle::DroppableHandle, error::ServerError};
 use log::{error, warn};
 use notify::RecommendedWatcher;
-use russh::keys::{ssh_key::Fingerprint, Algorithm, HashAlg, PublicKey};
+use russh::keys::{Algorithm, HashAlg, PublicKey, ssh_key::Fingerprint};
 use tokio::{
     fs::{read_dir, read_to_string},
     sync::oneshot,
@@ -243,7 +243,7 @@ impl FingerprintsValidator {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod fingerprints_validator_tests {
-    use russh::keys::{parse_public_key_base64, HashAlg};
+    use russh::keys::{HashAlg, parse_public_key_base64};
 
     use super::{AuthenticationType, FingerprintsValidator};
 

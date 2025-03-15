@@ -9,16 +9,16 @@ use clap::Parser;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::{
+    Channel, MethodSet,
     client::{self, Msg},
     keys::ssh_key::private::Ed25519Keypair,
     server::{self, Auth, Server},
-    Channel, MethodSet,
 };
 use russh::{
-    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
     MethodKind,
+    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
 };
-use sandhole::{entrypoint, ApplicationConfig};
+use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
@@ -312,6 +312,7 @@ impl server::Handler for HoneypotHandler {
     ) -> Result<Auth, Self::Error> {
         Ok(Auth::Reject {
             proceed_with_methods: Some(MethodSet::from([MethodKind::Password].as_slice())),
+            partial_success: false,
         })
     }
 
@@ -321,6 +322,7 @@ impl server::Handler for HoneypotHandler {
         } else {
             Ok(Auth::Reject {
                 proceed_with_methods: None,
+                partial_success: false,
             })
         }
     }

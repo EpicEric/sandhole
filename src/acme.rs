@@ -2,11 +2,11 @@ use std::{path::PathBuf, sync::Arc};
 
 use log::{info, warn};
 use rustls::{
+    ServerConfig,
     server::{ClientHello, ResolvesServerCert},
     sign::CertifiedKey,
-    ServerConfig,
 };
-use rustls_acme::{caches::DirCache, AcmeConfig, ResolvesServerCertAcme, UseChallenge};
+use rustls_acme::{AcmeConfig, ResolvesServerCertAcme, UseChallenge, caches::DirCache};
 use tokio_stream::StreamExt;
 
 use crate::{certificates::AlpnChallengeResolver, droppable_handle::DroppableHandle};

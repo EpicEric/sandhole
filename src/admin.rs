@@ -9,6 +9,7 @@ use std::{
 use human_bytes::human_bytes;
 use itertools::Itertools;
 use ratatui::{
+    Terminal, TerminalOptions, Viewport,
     buffer::Buffer,
     layout::{Constraint, Flex, Layout, Margin, Position, Rect},
     prelude::CrosstermBackend,
@@ -19,7 +20,6 @@ use ratatui::{
         Block, Clear, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
         StatefulWidget, Table, TableState, Tabs, Widget, Wrap,
     },
-    Terminal, TerminalOptions, Viewport,
 };
 use russh::keys::ssh_key::Fingerprint;
 use tokio::{
@@ -28,10 +28,10 @@ use tokio::{
 };
 
 use crate::{
+    SandholeServer, SystemData,
     droppable_handle::DroppableHandle,
     fingerprints::{AuthenticationType, KeyData},
     tcp_alias::TcpAlias,
-    SandholeServer, SystemData,
 };
 
 struct BufferedSender {

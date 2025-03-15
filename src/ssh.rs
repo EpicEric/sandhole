@@ -5,12 +5,14 @@ use std::{
     mem,
     net::{IpAddr, SocketAddr},
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
+    time::Duration,
 };
 
 use crate::{
+    SandholeServer,
     admin::AdminInterface,
     connection_handler::{ConnectionHandler, ConnectionHttpData},
     connections::ConnectionGetByHttpHost,
@@ -23,10 +25,9 @@ use crate::{
     quota::{TokenHolder, UserIdentification},
     tcp::PortHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
-    SandholeServer,
 };
 
-use enumflags2::{bitflags, BitFlags};
+use enumflags2::{BitFlags, bitflags};
 use http::Request;
 use hyper::{body::Incoming, service::service_fn};
 use hyper_util::{
@@ -36,13 +37,13 @@ use hyper_util::{
 use ipnet::IpNet;
 use log::{debug, error, info, warn};
 use russh::{
-    keys::{ssh_key::Fingerprint, HashAlg, PublicKey},
-    server::{Auth, Handler, Msg, Session},
     Channel, ChannelId, ChannelStream, MethodKind, MethodSet,
+    keys::{HashAlg, PublicKey, ssh_key::Fingerprint},
+    server::{Auth, Handler, Msg, Session},
 };
 use tokio::{
     io::copy_bidirectional,
-    sync::{mpsc, Mutex, RwLock},
+    sync::{Mutex, RwLock, mpsc},
     time::{sleep, timeout},
 };
 use tokio_util::sync::CancellationToken;
@@ -378,9 +379,11 @@ impl Handler for ServerHandler {
                                 break;
                             }
                         }
-                        let _ = channel.eof().await;
-                        let _ = channel.close().await;
-                        // Close the connection
+                        if channel.eof().await.is_ok() {
+                            let _ = channel.close().await;
+                        }
+                        // Close the connection after a small wait
+                        sleep(Duration::from_millis(100)).await;
                         cancellation_token.cancel();
                         break;
                     }
@@ -402,6 +405,7 @@ impl Handler for ServerHandler {
     async fn auth_none(&mut self, _user: &str) -> Result<Auth, Self::Error> {
         Ok(Auth::Reject {
             proceed_with_methods: Some(MethodSet::from([MethodKind::PublicKey].as_slice())),
+            partial_success: false,
         })
     }
 
@@ -458,6 +462,7 @@ impl Handler for ServerHandler {
         }
         Ok(Auth::Reject {
             proceed_with_methods: None,
+            partial_success: false,
         })
     }
 
@@ -482,6 +487,7 @@ impl Handler for ServerHandler {
                 if self.server.disable_aliasing {
                     return Ok(Auth::Reject {
                         proceed_with_methods: None,
+                        partial_success: false,
                     });
                 } else {
                     // Start timer for user to do local port forwarding.

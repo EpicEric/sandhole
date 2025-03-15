@@ -6,10 +6,10 @@ use rand_chacha::ChaCha20Rng;
 use russh::keys::ssh_key::private::Ed25519Keypair;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
-    client::{self, Msg, Session},
     Channel,
+    client::{self, Msg, Session},
 };
-use sandhole::{entrypoint, ApplicationConfig};
+use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},

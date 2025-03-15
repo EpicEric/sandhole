@@ -14,15 +14,15 @@ use axum::{
     response::{IntoResponse, Redirect},
 };
 use hyper::{
+    Request, Response, StatusCode,
     body::Body,
     header::{HOST, UPGRADE},
-    Request, Response, StatusCode,
 };
 use hyper_util::rt::TokioIo;
 use log::warn;
 use russh::keys::ssh_key::Fingerprint;
 use tokio::{
-    io::{copy_bidirectional, AsyncRead, AsyncWrite},
+    io::{AsyncRead, AsyncWrite, copy_bidirectional},
     sync::mpsc,
     time::timeout,
 };
@@ -390,10 +390,14 @@ where
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod proxy_handler_tests {
+    use axum::{
+        Router,
+        routing::{any, get, post},
+    };
     use bytes::Bytes;
     use futures_util::{SinkExt, StreamExt};
     use http_body_util::Empty;
-    use hyper::{body::Incoming, service::service_fn, HeaderMap, Request, StatusCode};
+    use hyper::{HeaderMap, Request, StatusCode, body::Incoming, service::service_fn};
     use hyper_util::rt::TokioIo;
     use std::{marker::PhantomData, sync::Arc, time::Duration};
     use tokio::{io::DuplexStream, sync::mpsc, time::sleep};
@@ -410,7 +414,7 @@ mod proxy_handler_tests {
         telemetry::Telemetry,
     };
 
-    use super::{proxy_handler, DomainRedirect, Protocol, ProxyData, ProxyType};
+    use super::{DomainRedirect, Protocol, ProxyData, ProxyType, proxy_handler};
 
     #[tokio::test]
     async fn errors_on_missing_host_header() {
@@ -859,9 +863,9 @@ mod proxy_handler_tests {
             .header("host", "slow.handler")
             .body(Empty::<Bytes>::new())
             .unwrap();
-        let router = axum::Router::new().route(
+        let router = Router::new().route(
             "/slow_endpoint",
-            axum::routing::get(|| async move {
+            get(async || {
                 sleep(Duration::from_secs(1)).await;
                 "Slow hello."
             }),
@@ -952,9 +956,9 @@ mod proxy_handler_tests {
             .header("host", "with.handler")
             .body(String::from("Hello world"))
             .unwrap();
-        let router = axum::Router::new().route(
+        let router = Router::new().route(
             "/api/endpoint",
-            axum::routing::post(|headers: HeaderMap, body: String| async move {
+            post(|headers: HeaderMap, body: String| async move {
                 if headers.get("X-Forwarded-For").unwrap() == "127.0.0.1"
                     && headers.get("X-Forwarded-Host").unwrap() == "with.handler"
                     && body == "Hello world"
@@ -1048,9 +1052,9 @@ mod proxy_handler_tests {
             .header("host", "with.handler")
             .body(String::from("Hello world"))
             .unwrap();
-        let router = axum::Router::new().route(
+        let router = Router::new().route(
             "/api/endpoint",
-            axum::routing::post(|headers: HeaderMap, body: String| async move {
+            post(|headers: HeaderMap, body: String| async move {
                 if headers.get("X-Forwarded-For").unwrap() == "127.0.0.1"
                     && headers.get("X-Forwarded-Host").unwrap() == "with.handler"
                     && body == "Hello world"
@@ -1144,9 +1148,9 @@ mod proxy_handler_tests {
             .header("host", "root.domain")
             .body(String::from("My body"))
             .unwrap();
-        let router = axum::Router::new().route(
+        let router = Router::new().route(
             "/test",
-            axum::routing::post(|headers: HeaderMap, body: String| async move {
+            post(|headers: HeaderMap, body: String| async move {
                 if headers.get("X-Forwarded-For").unwrap() == "192.168.0.1"
                     && headers.get("X-Forwarded-Host").unwrap() == "root.domain"
                     && body == "My body"
@@ -1238,9 +1242,9 @@ mod proxy_handler_tests {
             )
             .unwrap();
         let (socket, stream) = tokio::io::duplex(1024);
-        let router = axum::Router::new().route(
+        let router = Router::new().route(
             "/ws",
-            axum::routing::any(|ws: axum::extract::WebSocketUpgrade| async move {
+            any(|ws: axum::extract::WebSocketUpgrade| async move {
                 ws.on_upgrade(|mut socket| async move {
                     let _ = socket
                         .send(axum::extract::ws::Message::Text("Success.".into()))

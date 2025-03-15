@@ -11,16 +11,16 @@ use log::{error, warn};
 use mockall::automock;
 use notify::RecommendedWatcher;
 use rustls::{
+    ServerConfig,
     client::verify_server_name,
     crypto::aws_lc_rs::sign::any_supported_type,
-    pki_types::{pem::PemObject, DnsName, PrivateKeyDer, ServerName},
+    pki_types::{DnsName, PrivateKeyDer, ServerName, pem::PemObject},
     server::{ClientHello, ParsedCertificate, ResolvesServerCert},
     sign::CertifiedKey,
-    ServerConfig,
 };
 use tokio::{fs::read_dir, sync::oneshot};
 use trie_rs::map::{Trie, TrieBuilder};
-use webpki::{types::CertificateDer, EndEntityCert};
+use webpki::{EndEntityCert, types::CertificateDer};
 
 #[derive(Debug)]
 pub(crate) struct DummyAlpnChallengeResolver;

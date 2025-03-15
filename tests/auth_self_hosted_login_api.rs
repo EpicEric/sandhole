@@ -1,21 +1,21 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use axum::{extract::Request, response::IntoResponse, routing::post, Json, Router};
+use axum::{Json, Router, extract::Request, response::IntoResponse, routing::post};
 use clap::Parser;
-use hyper::{body::Incoming, service::service_fn, StatusCode};
+use hyper::{StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
 use russh::{
-    client::{Msg, Session},
     Channel,
+    client::{Msg, Session},
 };
 use russh::{
-    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
     Disconnect,
+    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
 };
-use sandhole::{entrypoint, ApplicationConfig};
+use sandhole::{ApplicationConfig, entrypoint};
 use serde::Deserialize;
 use tokio::{
     net::TcpStream,

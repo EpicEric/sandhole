@@ -135,7 +135,7 @@ mod quota_map_tests {
 
     use rand::{Rng, SeedableRng};
     use rand_chacha::ChaCha20Rng;
-    use russh::keys::{ssh_key::private::Ed25519Keypair, HashAlg};
+    use russh::keys::{HashAlg, ssh_key::private::Ed25519Keypair};
 
     use super::{QuotaHandler, QuotaMap, TokenHolder, UserIdentification};
 

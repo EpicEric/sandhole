@@ -1,5 +1,5 @@
 use clap::Parser;
-use sandhole::{entrypoint, ApplicationConfig};
+use sandhole::{ApplicationConfig, entrypoint};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

@@ -10,7 +10,7 @@ use std::{
     marker::PhantomData,
     net::SocketAddr,
     num::NonZero,
-    sync::{atomic::AtomicUsize, Arc, Mutex, RwLock},
+    sync::{Arc, Mutex, RwLock, atomic::AtomicUsize},
     time::Duration,
 };
 
@@ -18,7 +18,7 @@ use addressing::AddressDelegatorData;
 use anyhow::Context;
 use connections::HttpAliasingConnection;
 use http::{DomainRedirect, ProxyData, ProxyType};
-use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request};
+use hyper::{Request, body::Incoming, server::conn::http1, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
@@ -31,12 +31,12 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use reactor::{AliasReactor, HttpReactor, SshReactor, TcpReactor};
 use russh::{
+    ChannelStream,
     keys::{
         decode_secret_key,
-        ssh_key::{private::Ed25519Keypair, Fingerprint, LineEnding},
+        ssh_key::{Fingerprint, LineEnding, private::Ed25519Keypair},
     },
     server::{Config, Msg},
-    ChannelStream,
 };
 use rustls::ServerConfig;
 use rustls_acme::is_tls_alpn_challenge;
@@ -62,7 +62,7 @@ use crate::{
     connections::ConnectionMap,
     error::ServerError,
     fingerprints::FingerprintsValidator,
-    http::{proxy_handler, Protocol},
+    http::{Protocol, proxy_handler},
     ssh::{Server, SshTunnelHandler},
 };
 
@@ -191,9 +191,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let http_request_timeout = config.http_request_timeout;
     let tcp_connection_timeout = config.tcp_connection_timeout;
     // Initialize crypto and credentials
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .expect("Unable to install CryptoProvider");
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // Find the private SSH key for Sandhole or create a new one.
     let key = match fs::read_to_string(config.private_key_file.as_path()).await {
         Ok(key) => decode_secret_key(&key, None).with_context(|| "Error decoding secret key")?,
@@ -242,8 +240,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     // Initialize the login API service if a URL has been set.
     let api_login = config
         .password_authentication_url
-        .as_ref()
-        .map(|url| ApiLogin::from(url, PlatformVerifierConfigurer))
+        .map(|url| ApiLogin::from(PlatformVerifierConfigurer, url, http_request_timeout))
         .transpose()
         .with_context(|| "Error intializing login API")?;
     // Initialize the ACME ALPN service if a contact email has been provided.
@@ -814,7 +811,7 @@ fn handle_ssh_connection(
 
 #[cfg(unix)]
 async fn wait_for_signal() {
-    use tokio::signal::unix::{signal, SignalKind};
+    use tokio::signal::unix::{SignalKind, signal};
 
     let mut signal_terminate = signal(SignalKind::terminate()).unwrap();
     let mut signal_interrupt = signal(SignalKind::interrupt()).unwrap();

@@ -1,19 +1,19 @@
 use std::{sync::Arc, time::Duration};
 
-use axum::{extract::Request, routing::get, Router};
+use axum::{Router, extract::Request, routing::get};
 use clap::Parser;
 use http_body_util::BodyExt;
-use hyper::{body::Incoming, service::service_fn, StatusCode};
+use hyper::{StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
-    client::{Msg, Session},
     Channel, ChannelId,
+    client::{Msg, Session},
 };
-use sandhole::{entrypoint, ApplicationConfig};
+use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
     sync::mpsc,
@@ -301,7 +301,7 @@ impl russh::client::Handler for SshClientProxy {
     ) -> Result<(), Self::Error> {
         let router = Router::new().route(
             "/",
-            get(|| async move { "Hello from my (sometimes) secure server!".to_string() }),
+            get(async || "Hello from my (sometimes) secure server!"),
         );
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {
@@ -346,7 +346,7 @@ impl russh::client::Handler for SshClient {
     ) -> Result<(), Self::Error> {
         let router = Router::new().route(
             "/",
-            get(|| async move { "Hello from my (sometimes) secure server!".to_string() }),
+            get(async || "Hello from my (sometimes) secure server!"),
         );
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {

@@ -273,7 +273,7 @@ mod connection_map_tests {
 
     use crate::{
         config::LoadBalancing,
-        quota::{get_test_token, MockQuotaHandler, TokenHolder, UserIdentification},
+        quota::{MockQuotaHandler, TokenHolder, UserIdentification, get_test_token},
         reactor::MockConnectionMapReactor,
     };
 

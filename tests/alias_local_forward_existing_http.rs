@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use axum::{routing::get, Router};
+use axum::{Router, routing::get};
 use clap::Parser;
 use http::{Request, StatusCode};
 use http_body_util::BodyExt;
@@ -13,10 +13,10 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key, ssh_key::private::Ed25519Keypair};
 use russh::{
-    client::{self, Msg, Session},
     Channel,
+    client::{self, Msg, Session},
 };
-use sandhole::{entrypoint, ApplicationConfig};
+use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
@@ -186,10 +186,7 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let router = Router::new().route(
-            "/",
-            get(|| async move { "Connected via local forwarding!" }),
-        );
+        let router = Router::new().route("/", get(async || "Connected via local forwarding!"));
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {
             Builder::new(TokioExecutor::new())

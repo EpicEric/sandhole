@@ -10,8 +10,10 @@
 
 ### Changed
 
-- Update dependencies.
 - **BREAKING**: Shutdown when trying to open admin interface in invalid context.
+- Update dependencies.
+- Bump MSRV to 1.85.0.
+- Use `reqwest` for the login API.
 
 ## 0.4.0 (2025-02-11)
 

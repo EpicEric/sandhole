@@ -3,10 +3,10 @@ use std::{sync::Arc, time::Duration};
 use clap::Parser;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
-    client::{Msg, Session},
     Channel,
+    client::{Msg, Session},
 };
-use sandhole::{entrypoint, ApplicationConfig};
+use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},

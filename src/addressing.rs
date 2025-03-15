@@ -1,12 +1,12 @@
 use std::{hash::Hash, net::SocketAddr, num::NonZero, sync::Mutex};
 
 use block_id::{Alphabet, BlockId};
-use hickory_resolver::{proto::rr::RecordType, TokioAsyncResolver};
+use hickory_resolver::{TokioAsyncResolver, proto::rr::RecordType};
 use itertools::Itertools;
 use log::{debug, warn};
 #[cfg(test)]
 use mockall::automock;
-use rand::{self, seq::IndexedRandom, Rng, SeedableRng};
+use rand::{self, Rng, SeedableRng, seq::IndexedRandom};
 use rand_chacha::ChaCha20Rng;
 use rand_seeder::SipHasher;
 use russh::keys::ssh_key::Fingerprint;
@@ -371,7 +371,7 @@ mod address_delegator_tests {
     use rand::{Rng, SeedableRng};
     use rand_chacha::ChaCha20Rng;
     use regex::Regex;
-    use russh::keys::{ssh_key::private::Ed25519Keypair, HashAlg};
+    use russh::keys::{HashAlg, ssh_key::private::Ed25519Keypair};
     use webpki::types::DnsName;
 
     use crate::config::{BindHostnames, RandomSubdomainSeed};

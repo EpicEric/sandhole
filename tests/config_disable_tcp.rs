@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use axum::{routing::get, Router};
+use axum::{Router, routing::get};
 use clap::Parser;
 use http::{Request, StatusCode};
 use hyper::{body::Incoming, service::service_fn};
@@ -10,10 +10,10 @@ use hyper_util::{
 };
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
-    client::{Msg, Session},
     Channel,
+    client::{Msg, Session},
 };
-use sandhole::{entrypoint, ApplicationConfig};
+use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
@@ -128,7 +128,7 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let router = Router::new().route("/", get(|| async move { StatusCode::NO_CONTENT }));
+        let router = Router::new().route("/", get(async || StatusCode::NO_CONTENT));
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {
             Builder::new(TokioExecutor::new())

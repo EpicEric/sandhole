@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use axum::{extract::Request, response::IntoResponse, routing::post, Json, Router};
+use axum::{Json, Router, extract::Request, response::IntoResponse, routing::post};
 use clap::Parser;
 use http::StatusCode;
 use hyper::{body::Incoming, service::service_fn};
@@ -11,10 +11,10 @@ use hyper_util::{
 use regex::Regex;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
-    client::{self, Msg, Session},
     Channel,
+    client::{self, Msg, Session},
 };
-use sandhole::{entrypoint, ApplicationConfig};
+use sandhole::{ApplicationConfig, entrypoint};
 use serde::Deserialize;
 use tokio::{
     io::AsyncWriteExt,

@@ -1,9 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
+use axum::Router;
 use axum::extract::ws::Message;
 use axum::extract::{Request, WebSocketUpgrade};
 use axum::routing::any;
-use axum::Router;
 use clap::Parser;
 use futures_util::stream::FusedStream;
 use futures_util::{SinkExt, StreamExt};
@@ -14,10 +14,10 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
-    client::{Msg, Session},
     Channel,
+    client::{Msg, Session},
 };
-use sandhole::{entrypoint, ApplicationConfig};
+use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},

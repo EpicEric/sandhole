@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use clap::{command, Parser, ValueEnum};
+use clap::{Parser, ValueEnum, command};
 use ipnet::IpNet;
 use webpki::types::DnsName;
 
@@ -501,21 +501,25 @@ mod application_config_tests {
 
     #[test]
     fn fails_to_parse_if_invalid_txt_record_prefix() {
-        assert!(ApplicationConfig::try_parse_from([
-            "sandhole",
-            "--domain=foobar.tld",
-            "--txt-record-prefix=hello.world"
-        ])
-        .is_err());
+        assert!(
+            ApplicationConfig::try_parse_from([
+                "sandhole",
+                "--domain=foobar.tld",
+                "--txt-record-prefix=hello.world"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
     fn fails_to_parse_if_invalid_duration() {
-        assert!(ApplicationConfig::try_parse_from([
-            "sandhole",
-            "--domain=foobar.tld",
-            "--idle-connection-timeout=42"
-        ])
-        .is_err());
+        assert!(
+            ApplicationConfig::try_parse_from([
+                "sandhole",
+                "--domain=foobar.tld",
+                "--idle-connection-timeout=42"
+            ])
+            .is_err()
+        );
     }
 }

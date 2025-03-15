@@ -5,11 +5,11 @@ use rand::{rng, seq::IndexedRandom};
 use russh::client::AuthResult;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
-    client::{Msg, Session},
     Channel,
+    client::{Msg, Session},
 };
 use russh::{MethodKind, MethodSet};
-use sandhole::{entrypoint, ApplicationConfig};
+use sandhole::{ApplicationConfig, entrypoint};
 use tokio::fs;
 use tokio::runtime::Handle;
 use tokio::task::spawn_blocking;
@@ -102,11 +102,15 @@ async fn lib_configure_from_scratch() {
         .await
         .expect("Failed to connect to SSH server");
     match session.authenticate_none("user").await.unwrap() {
-        AuthResult::Failure { remaining_methods } => {
+        AuthResult::Failure {
+            remaining_methods,
+            partial_success,
+        } => {
             assert_eq!(
                 remaining_methods,
                 MethodSet::from([MethodKind::PublicKey].as_slice())
             );
+            assert!(!partial_success);
         }
         _ => panic!("unexpected AuthResult from authenticate_none"),
     }
@@ -183,7 +187,7 @@ async fn lib_configure_from_scratch() {
     // 5. Shutdown Sandhole with SIGINT
     #[cfg(unix)]
     {
-        use nix::libc::{pthread_kill, SIGINT};
+        use nix::libc::{SIGINT, pthread_kill};
         use std::os::unix::thread::JoinHandleExt;
 
         let pthread = jh.as_pthread_t();
