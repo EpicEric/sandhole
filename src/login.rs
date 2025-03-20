@@ -86,7 +86,7 @@ impl<C: Configurer> ApiLogin<C> {
                 .build()
                 .with_context(|| "Unable to build HTTPS client")?
         } else {
-            return Err(ServerError::UnknownHttpScheme).with_context(|| "Invalid API login URL")?;
+            return Err(ServerError::UnknownHttpScheme).with_context(|| "Invalid API login URL");
         };
         Ok(ApiLogin {
             configurer: PhantomData,

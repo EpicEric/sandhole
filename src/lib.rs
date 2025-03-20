@@ -16,9 +16,10 @@ use std::{
 
 use addressing::AddressDelegatorData;
 use anyhow::Context;
+use connection_handler::ConnectionHandler;
 use connections::HttpAliasingConnection;
 use http::{DomainRedirect, ProxyData, ProxyType};
-use hyper::{Request, body::Incoming, server::conn::http1, service::service_fn};
+use hyper::{Request, body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
@@ -591,8 +592,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 });
                 let io = TokioIo::new(stream);
                 tokio::spawn(async move {
-                    let server = http1::Builder::new();
-                    let conn = server.serve_connection(io, service).with_upgrades();
+                    let server = auto::Builder::new(TokioExecutor::new());
+                    let conn = server.serve_connection_with_upgrades(io, service);
                     match tcp_connection_timeout {
                         Some(duration) => {
                             let _ = timeout(duration, conn).await;
@@ -618,14 +619,21 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             config.https_port
         );
         let certificates_clone = Arc::clone(&certificates);
-        let tls_server_config = Arc::new(
-            ServerConfig::builder()
-                .with_no_client_auth()
-                .with_cert_resolver(certificates),
-        );
+        let mut http11_server_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(certificates);
+        let mut http2_server_config = http11_server_config.clone();
+        http11_server_config
+            .alpn_protocols
+            .extend_from_slice(&[b"http/1.1".to_vec()]);
+        let http11_server_config = Arc::new(http11_server_config);
+        http2_server_config
+            .alpn_protocols
+            .extend_from_slice(&[b"h2".to_vec(), b"http/1.1".to_vec()]);
+        let http2_server_config = Arc::new(http2_server_config);
         let ip_filter_clone = Arc::clone(&ip_filter);
         let https_proxy_data = Arc::new(ProxyData {
-            conn_manager: http_connections,
+            conn_manager: Arc::clone(&http_connections),
             telemetry: Arc::clone(&telemetry),
             domain_redirect: Arc::clone(&domain_redirect),
             protocol: Protocol::Https {
@@ -655,10 +663,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     continue;
                 }
                 let proxy_data = Arc::clone(&https_proxy_data);
-                let server_config = Arc::clone(&tls_server_config);
                 let ssh_config = Arc::clone(&ssh_config_clone);
                 let mut sandhole = Arc::clone(&sandhole_clone);
                 let certificates = Arc::clone(&certificates_clone);
+                let http_connections = Arc::clone(&http_connections);
+                let http2_server_config = Arc::clone(&http2_server_config);
+                let http11_server_config = Arc::clone(&http11_server_config);
                 tokio::spawn(async move {
                     if let Err(err) = stream.set_nodelay(true) {
                         warn!("Error setting nodelay for {}: {}", address, err);
@@ -683,7 +693,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     tokio::pin!(acceptor);
                     match acceptor.as_mut().await {
                         Ok(handshake) => {
-                            if is_tls_alpn_challenge(&handshake.client_hello()) {
+                            let client_hello = handshake.client_hello();
+                            if is_tls_alpn_challenge(&client_hello) {
                                 // Handle ALPN challenges with the ACME resolver.
                                 if let Some(challenge_config) =
                                     certificates.challenge_rustls_config()
@@ -694,13 +705,26 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                                 }
                             } else {
                                 // Handle regular HTTPS TLS stream.
+                                let is_http2 = match client_hello
+                                    .server_name()
+                                    .and_then(|host| http_connections.get(host))
+                                {
+                                    Some(conn) => {
+                                        conn.http_data().await.is_some_and(|data| data.http2)
+                                    }
+                                    None => false,
+                                };
+                                let server_config = if is_http2 {
+                                    http2_server_config
+                                } else {
+                                    http11_server_config
+                                };
                                 match handshake.into_stream(server_config).await {
                                     Ok(stream) => {
+                                        let io = TokioIo::new(stream);
                                         let server = auto::Builder::new(TokioExecutor::new());
-                                        let conn = server.serve_connection_with_upgrades(
-                                            TokioIo::new(stream),
-                                            service,
-                                        );
+                                        let conn =
+                                            server.serve_connection_with_upgrades(io, service);
                                         match tcp_connection_timeout {
                                             Some(duration) => {
                                                 let _ = timeout(duration, conn).await;

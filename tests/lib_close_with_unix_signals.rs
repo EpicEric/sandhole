@@ -15,6 +15,10 @@ use tokio::{
 
 #[tokio::test(flavor = "multi_thread")]
 async fn lib_configure_from_scratch() {
+    let _ = env_logger::builder()
+        .filter_module("sandhole", log::LevelFilter::Debug)
+        .is_test(true)
+        .try_init();
     for signal in [SIGINT, SIGTERM] {
         // 1. Initialize Sandhole
         let config = ApplicationConfig::parse_from([

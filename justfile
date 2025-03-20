@@ -14,4 +14,4 @@ cli:
   to-html --no-prompt "cargo run --quiet -- --help" > cli.html
 
 clippy:
-  cargo clippy --all-targets --fix --allow-dirty && cargo fmt --all
+  cargo clippy --all-targets --fix --allow-dirty --allow-staged && cargo fmt --all

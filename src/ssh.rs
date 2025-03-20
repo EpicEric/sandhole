@@ -192,6 +192,7 @@ impl UserData {
             http_data: Arc::new(RwLock::new(ConnectionHttpData {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
+                http2: false,
             })),
             ip_filter: Arc::new(RwLock::new(None)),
             tcp_alias_only: false,
@@ -283,6 +284,7 @@ enum ExecCommand {
     AllowedFingerprints,
     TcpAlias,
     ForceHttps,
+    Http2,
     IpAllowlist,
     IpBlocklist,
 }
@@ -810,6 +812,21 @@ impl Handler for ServerHandler {
                         .await
                         .redirect_http_to_https_port = Some(self.server.https_port);
                     self.commands.insert(ExecCommand::ForceHttps);
+                }
+                // - `http2` allows serving HTTP/2 to the HTTP endpoints.
+                (
+                    "http2",
+                    AuthenticatedData::User { user_data, .. }
+                    | AuthenticatedData::Admin { user_data, .. },
+                ) => {
+                    if self.commands.contains(ExecCommand::Http2) {
+                        self.tx
+                            .send(b"Invalid option \"http2\": duplicated command\r\n".to_vec());
+                        success = false;
+                        break;
+                    }
+                    user_data.http_data.write().await.http2 = true;
+                    self.commands.insert(ExecCommand::Http2);
                 }
                 // - `ip-allowlist` requires tunneling/aliasing connections to come from
                 //   specific IP ranges.

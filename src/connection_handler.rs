@@ -11,6 +11,7 @@ pub(crate) struct ConnectionHttpData {
     // Port to redirect HTTP requests to. If missing, do not redirect.
     pub(crate) redirect_http_to_https_port: Option<u16>,
     pub(crate) is_aliasing: bool,
+    pub(crate) http2: bool,
 }
 
 // Trait for creating tunneling or aliasing channels (via an underlying SSH session).
