@@ -1,0 +1,31 @@
+networks:
+  sandhole_example:
+    external: false
+
+services:
+  nginx:
+    image: docker.io/nginx:alpine
+    container_name: sandhole_example_nginx
+    restart: unless-stopped
+    networks:
+      - sandhole_example
+
+  autossh:
+    image: docker.io/epiceric/sandhole-client:latest
+    build:
+      context: .
+    container_name: sandhole_example_autossh
+    restart: unless-stopped
+    # Add your secret key to ./ssh_secret/id_ed25519
+    volumes:
+      - ./ssh_secret:/secret:ro
+    networks:
+      - sandhole_example
+    # Make sure to change at least the Sandhole domain below
+    command: |
+      -i /secret/id_ed25519
+      -o StrictHostKeyChecking=accept-new
+      -o ServerAliveInterval=30
+      -R example:80:nginx:80
+      -p 2222
+      sandhole.com

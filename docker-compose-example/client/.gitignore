@@ -1,5 +1,4 @@
 *
 !/.gitignore
 !/compose.yml
-!/le-config.yml
-!/client/
+!/Dockerfile

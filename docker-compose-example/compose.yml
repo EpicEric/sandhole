@@ -2,19 +2,21 @@ services:
   letsencrypt:
     image: docker.io/adferrand/dnsrobocert:3.25.0
     container_name: sandhole_dnsrobocert
+    restart: unless-stopped
     volumes:
       - ./letsencrypt:/etc/letsencrypt:rw
       - ./le-config.yml:/etc/dnsrobocert/config.yml:ro
-    restart: unless-stopped
 
   sandhole:
     image: docker.io/epiceric/sandhole:latest
     container_name: sandhole
+    restart: unless-stopped
     volumes:
       - ./deploy:/deploy:rw
       - ./letsencrypt:/letsencrypt:ro
       # Change this to where the CA certificates are on the host
       - /etc/ssl/certs:/etc/ssl/certs:ro
+    network_mode: host
     # See also: https://sandhole.eric.dev.br/cli.html
     # Make sure to change at least --domain and --acme-contact-email below
     command: |
@@ -29,6 +31,3 @@ services:
       --http-port=80
       --https-port=443
       --force-https
-      --http-request-timeout=60s
-    network_mode: host
-    restart: unless-stopped

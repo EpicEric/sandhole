@@ -48,4 +48,6 @@ ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password username@san
 
 ## Automatic reconnection
 
-If you'd like to have persistent tunnels, use a tool like `autossh` with the `-M 0` option to automatically reconnect when disconnected. Note that you'll be assigned a new subdomain/port if the option above is not enabled, depending on the server configuration.
+If you'd like to have persistent tunnels, use a tool like `autossh` with the `-M 0` option to automatically reconnect when disconnected. Note that you might be assigned a new subdomain or port through disconnects, depending on the server configuration.
+
+For a container-based alternative, [check out the Docker Compose client example](https://github.com/EpicEric/sandhole/tree/main/docker-compose-example/client) in the repository.
