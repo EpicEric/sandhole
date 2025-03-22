@@ -1,14 +1,12 @@
 # Exposing your first service
 
-Now that you have a Sandhole instance running, and you [authorized your public key](./configuration.md#adding-users-and-admins), you can expose a local service through Sandhole. Assuming that your local HTTP service is running on port 3000, and that Sandhole is listening on `sandhole.com:2222`, all you have to do is run
+Once you have [an authorized public key](./configuration.md#adding-users-and-admins) in Sandhole, you can expose a local service. Assuming that your local HTTP service is running on port 3000, and that Sandhole is listening on `sandhole.com:2222`, all you have to do is run
 
 ```bash
 ssh -i /your/private/key -R 80:localhost:3000 sandhole.com -p 2222
 ```
 
-Yep, that's it! Sandhole will log that HTTP is being served for you on a certain subdomain, and you can access the provided URL to see that your service is available to the public.
-
-For HTTP and HTTPS services, Websockets work out of the box.
+Yep, that's it! Sandhole will log that HTTP is being served for you on a certain subdomain, and you can access the URL printed to the console to see that your service is available to the public.
 
 ## Requesting multiple tunnels
 
@@ -40,7 +38,7 @@ ssh -i /your/private/key -R localhost:4321:localhost:3000 sandhole.com -p 2222
 
 ## Connecting with user + password
 
-If you'd like to connect with a password instead of your public key, make sure that [HTTP(S) login](./configuration.md#alternative-authentication-with-password) has been enabled by the administrator, then run:
+If you'd like to connect with a password instead of your public key, make sure that [password authentication](./configuration.md#alternative-authentication-with-password) has been enabled by the administrator, then run:
 
 ```bash
 ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password username@sandhole.com -p 2222 ...
@@ -48,6 +46,6 @@ ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password username@san
 
 ## Automatic reconnection
 
-If you'd like to have persistent tunnels, use a tool like `autossh` with the `-M 0` option to automatically reconnect when disconnected. Note that you might be assigned a new subdomain or port through disconnects, depending on the server configuration.
+If you'd like to have persistent tunnels, use a tool like `autossh` to automatically reconnect when disconnected. Note that you might be assigned a new subdomain or port through disconnects, depending on the server configuration.
 
 For a container-based alternative, [check out the Docker Compose client example](https://github.com/EpicEric/sandhole/tree/main/docker-compose-example/client) in the repository.

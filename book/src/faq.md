@@ -6,7 +6,7 @@
 ssh -R website.com:80:localhost:3000 -R www.website.com:80:localhost:3000 sandhole.com -p 2222
 ```
 
-See ["Advanced Uses"](./advanced_uses.md#custom-domains) on how to add custom domains.
+See also ["Advanced uses"](./advanced_uses.md#custom-domains) on how to add custom domains.
 
 ## How do I connect to a forwarded SSH server?
 
@@ -26,7 +26,7 @@ Websockets are always enabled for HTTP services.
 
 ## How do I disable HTTP/TCP/aliasing?
 
-With the `--disable--http`, `--disable-tcp`, and `--disable-aliasing` [CLI flags](./cli.md) respectively. Note that you cannot disable all three at once.
+With the `--disable--http`, `--disable-tcp`, and `--disable-aliasing` [CLI flags](./cli.md) respectively. Note that you cannot disable all three at once, as that'd remove all of Sandhole's functionality.
 
 ## How do I prevent multiple services from load-balancing?
 
@@ -34,15 +34,15 @@ With the `--load-balancing=deny` or `--load-balancing=replace` [CLI flag](./cli.
 
 ## How do I force HTTP requests to get redirected to HTTPS?
 
-With the `--force-https` [CLI flag](./cli.md), or by passing `force-https` on the tunneling connection(s):
+You may do so globally with the `--force-https` [CLI flag](./cli.md), or per service by passing `force-https` on the tunneling connection(s):
 
 ```bash
-ssh -R website.com:80:localhost:3000 sandhole.com -p 2222 force-https
+ssh -R website.com:443:localhost:3000 sandhole.com -p 2222 force-https
 ```
 
 ## How do I allow/block certain IP ranges?
 
-With the `--ip-allowlist` and `--ip-blocklist` [CLI flags](./cli.md) respectively, or by passing `ip-allowist=...` and/or `ip-blocklist=...` on the tunneling connection(s):
+You may do so globally with the `--ip-allowlist` and `--ip-blocklist` [CLI flags](./cli.md) respectively, or per service by passing `ip-allowist=...` and/or `ip-blocklist=...` on the tunneling connection(s):
 
 ```bash
 ssh -R website.com:80:localhost:3000 sandhole.com -p 2222 ip-allowlist=10.0.0.0/8 ip-blocklist=10.1.0.0/16
@@ -59,4 +59,4 @@ COPY --from=epiceric/sandhole:latest /sandhole /sandhole
 ENTRYPOINT [ "/sandhole" ]
 ```
 
-If you don't need the [HTTPS login API functionality](./configuration.md#alternative-authentication-with-password), you can skip mounting the certificates directory, and just use the plain Docker image.
+However, if you don't intend to use the [HTTPS login API functionality](./configuration.md#alternative-authentication-with-password), you can skip using certificates entirely.

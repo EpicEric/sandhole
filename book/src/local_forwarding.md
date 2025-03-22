@@ -2,13 +2,13 @@
 
 In addition to remote port forwarding, Sandhole also supports local port forwarding by default. This allows you to create SSH-based tunnels to connect to a service.
 
-Given a remote service running as
+Given a remote service running as:
 
 ```bash
 ssh -R my.tunnel:3000:localhost:2000 sandhole.com -p 2222
 ```
 
-Note that the server won't listen on port 3000; instead, you can establish a local forward to the port from your machine:
+Note that the server won't listen on port 3000; the service will instead alias to `my.tunnel`. You can establish a local forward to the port from your machine:
 
 ```bash
 ssh -L 4000:my.tunnel:3000
@@ -16,11 +16,11 @@ ssh -L 4000:my.tunnel:3000
 
 Then you can access `localhost:4000`, and all traffic will be redirected to port 2000 on the remote service. It's almost like a VPN!
 
-## Enforcing local forwarding
+## Enforcing aliasing
 
-Local forwarding is always enabled for SSH hosts, and is conditionally enabled for TCP hosts that have a requested address different from `localhost`.
+Aliasing is always enabled for SSH hosts, and is conditionally enabled for TCP hosts that have requested a address different from `localhost` (for example, `my.tunnel` in the previous section).
 
-To enable local forwarding for HTTP hosts, pass either the `tcp-alias` or [the `allowed-fingerprints`](#restricting-access-to-local-forwardings) command to the remote forwarding command as follows:
+To enable aliasing for HTTP hosts, pass either the `tcp-alias` command to the remote forwarding command as follows:
 
 ```bash
 ssh -R my.tunnel:80:localhost:8080 sandhole.com -p 2222 tcp-alias
@@ -33,6 +33,10 @@ If you'd like to restrict which users can access your service, you can provide t
 ```bash
 ssh -R my.tunnel:3000:localhost:2000 sandhole.com -p 2222 allowed-fingerprints=SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ,SHA256:bwf4FDtNeZzFv8xHBzHJwRpDRxssCll8w2tCHFC9n1o
 ```
+
+These fingerprints may belong to keys unrecognized by Sandhole, and they'll still be able to connect to your tunnel.
+
+This option will also enforce aliasing for HTTP hosts.
 
 ## Disabling local forwarding
 

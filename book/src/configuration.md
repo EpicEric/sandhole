@@ -38,7 +38,7 @@ Otherwise, if you wish the subdomains to still be random, but persist between re
 
 In some scenarios, it makes more sense to authenticate users dynamically with a password, rather than manually adding public keys to a directory.
 
-For such use cases, you can provide a URL to `--password-authentication-url`. This should be running an HTTP or HTTPS service which accepts a POST request with a JSON body containing the user's credentials, and returns 2xx on successful authentication. This is what the JSON payload looks like:
+In order to support this, you can provide a URL to `--password-authentication-url`. This should be running an HTTP or HTTPS service, which must accept a JSON POST request containing the user's credentials as follows:
 
 ```json
 {
@@ -48,10 +48,12 @@ For such use cases, you can provide a URL to `--password-authentication-url`. Th
 }
 ```
 
+Any 2xx status will signify a successful authentication.
+
 ## Restricting resources for users
 
 By default, users are able to bind as many services as they want. In order to limit this amount, Sandhole provides the `--quota-per-user` option, which must be a number greater than 0. The user's quota includes all services across HTTP, SSH, and TCP.
 
-To enforce this quota across multiple connections, a user is purpoted to be any forwardings sharing _the same public key_. In the case of [password-authenticated users](#alternative-authentication-with-password), _their username_ will be considered instead.
+To enforce this quota across multiple connections, Sandhole considers a unique user to be any number of forwardings sharing _the same public key_. In the case of [password-authenticated users](#alternative-authentication-with-password), _their username_ will be considered instead.
 
 The quota is not enforced for admin users.

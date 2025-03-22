@@ -11,7 +11,7 @@ cargo build --release
 scp target/release/sandhole user@sandhole.com:/usr/local/bin/sandhole
 ```
 
-If you're compiling on the machine that's running Sandhole, you can install it directly with `cargo install`. This should also add `sandhole` to your `PATH`:
+If you're compiling on the machine that'll be running Sandhole, you can install it directly with `cargo install`. This should also add `sandhole` to your `PATH`:
 
 ```bash
 cargo install --git https://github.com/EpicEric/sandhole
