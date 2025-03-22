@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fix reading messages from all data channels.
 - Improve logic for SSH exec commands.
 - Flush messages to data channel when closing connection.
 - Show cursor in admin interface only on shutdown.

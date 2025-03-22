@@ -187,7 +187,6 @@ impl russh::client::Handler for SshClient {
                     && request.headers().get(COOKIE).unwrap() == "foo=1; bar=2"
                     && request.uri() == &"/hello".parse::<Uri>().unwrap()
                 {
-                    dbg!(request.headers());
                     "Hello from http11.foobar.tld!"
                 } else {
                     "Error"

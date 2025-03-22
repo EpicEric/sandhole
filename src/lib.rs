@@ -61,6 +61,7 @@ use crate::{
     addressing::{AddressDelegator, DnsResolver},
     certificates::{AlpnChallengeResolver, CertificateResolver, DummyAlpnChallengeResolver},
     connections::ConnectionMap,
+    droppable_handle::DroppableHandle,
     error::ServerError,
     fingerprints::FingerprintsValidator,
     http::{Protocol, proxy_handler},
@@ -536,7 +537,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
 
     // HTTP handler
     let mut join_handle_http = if config.disable_http {
-        tokio::spawn(future::pending())
+        DroppableHandle(tokio::spawn(future::pending()))
     } else {
         let http_listener = TcpListener::bind((config.listen_address, config.http_port.into()))
             .await
@@ -568,7 +569,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             disable_http_logs: config.disable_http_logs,
             _phantom_data: PhantomData,
         });
-        tokio::spawn(async move {
+        DroppableHandle(tokio::spawn(async move {
             loop {
                 let proxy_data = Arc::clone(&http_proxy_data);
                 let (stream, address) = match http_listener.accept().await {
@@ -604,12 +605,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     }
                 });
             }
-        })
+        }))
     };
 
     // HTTPS handler (with optional SSH handling)
     let mut join_handle_https = if config.disable_http {
-        tokio::spawn(future::pending())
+        DroppableHandle(tokio::spawn(future::pending()))
     } else {
         let https_listener = TcpListener::bind((config.listen_address, config.https_port.into()))
             .await
@@ -648,7 +649,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         });
         let sandhole_clone = Arc::clone(&sandhole);
         let ssh_config_clone = Arc::clone(&ssh_config);
-        tokio::spawn(async move {
+        DroppableHandle(tokio::spawn(async move {
             loop {
                 let (stream, address) = match https_listener.accept().await {
                     Ok((stream, address)) => (stream, address),
@@ -752,7 +753,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     }
                 });
             }
-        })
+        }))
     };
 
     // Start Sandhole on SSH port
@@ -787,17 +788,15 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             _ = &mut signal_handler => {
                 break;
             }
-            _ = &mut join_handle_http => {
+            _ = &mut join_handle_http.0 => {
                 break;
             }
-            _ = &mut join_handle_https => {
+            _ = &mut join_handle_https.0 => {
                 break;
             }
         }
     }
     info!("Sandhole is shutting down.");
-    join_handle_http.abort();
-    join_handle_https.abort();
     Ok(())
 }
 

@@ -17,8 +17,6 @@ pub(crate) enum ServerError {
     InvalidHttpVersion(Version),
     #[error("Missing Upgrade header")]
     MissingUpgradeHeader,
-    #[error("Request timed out")]
-    RequestTimeout,
     #[error("Invalid file path")]
     InvalidFilePath,
     #[error("Already bound by another service")]

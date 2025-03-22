@@ -145,7 +145,7 @@ async fn tcp_allow_requested_ports() {
         panic!("Timeout waiting for proxy server to reply.")
     };
 
-    // 4. Local-forward the TCP port for known user
+    // 5. Local-forward the TCP port for known user
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
         None,
@@ -192,7 +192,7 @@ async fn tcp_allow_requested_ports() {
         panic!("Timeout waiting for proxy server to reply.")
     };
 
-    // 5. Attempt to close TCP forwarding
+    // 6. Attempt to close TCP forwarding
     session_one
         .cancel_tcpip_forward("foobar.tld", 12345)
         .await

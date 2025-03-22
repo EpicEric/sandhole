@@ -305,6 +305,8 @@ pub(crate) struct ServerHandler {
     cancellation_token: CancellationToken,
     // User-specific data, set after authentication.
     auth_data: AuthenticatedData,
+    // ID for the open session channel.
+    channel_id: Option<ChannelId>,
     // Sender for data session messages, used for sending logs and TUI state to the client.
     tx: OptionalSender,
     // Handle for the opened data session task. Initially None.
@@ -343,6 +345,7 @@ impl Server for Arc<SandholeServer> {
                 proxy_count: Arc::new(AtomicUsize::new(0)),
             },
             commands: Default::default(),
+            channel_id: None,
             tx: OptionalSender(None),
             open_session_join_handle: None,
             server: Arc::clone(self),
@@ -366,6 +369,7 @@ impl Handler for ServerHandler {
             }
             return Ok(false);
         };
+        self.channel_id = Some(channel.id());
         let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let graceful_cancellation_token = CancellationToken::new();
         let graceful_shutdown_rx = graceful_cancellation_token.clone();
@@ -539,42 +543,47 @@ impl Handler for ServerHandler {
     // Handle data received from the client such as key presses.
     async fn data(
         &mut self,
-        _channel: ChannelId,
+        channel: ChannelId,
         data: &[u8],
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        debug!("received data {:?}", data);
-        match &mut self.auth_data {
-            // Ignore other commands for non-admin users
-            AuthenticatedData::None { .. } | AuthenticatedData::User { .. } => (),
-            AuthenticatedData::Admin { admin_data, .. } => {
-                // Handle the proper key press in the admin TUI.
-                if let Some(admin_interface) = admin_data.admin_interface.as_mut() {
-                    match data {
-                        // Tab
-                        b"\t" => admin_interface.next_tab(),
-                        // Shift+Tab
-                        b"\x1b[Z" => admin_interface.previous_tab(),
-                        // Up
-                        b"\x1b[A" | b"k" => admin_interface.move_up(),
-                        // Down
-                        b"\x1b[B" | b"j" => admin_interface.move_down(),
-                        // Esc
-                        b"\x1b" => admin_interface.cancel(),
-                        // Enter
-                        b"\r" => admin_interface.enter(),
-                        // Delete
-                        b"\x1b[3~" => admin_interface.delete(),
-                        // Ctrl+C
-                        b"\x03" => admin_interface.disable(),
-                        _ => (),
+        if self
+            .channel_id
+            .is_some_and(|channel_id| channel_id == channel)
+        {
+            debug!("received data {:?}", data);
+            match &mut self.auth_data {
+                // Ignore other commands for non-admin users
+                AuthenticatedData::None { .. } | AuthenticatedData::User { .. } => (),
+                AuthenticatedData::Admin { admin_data, .. } => {
+                    // Handle the proper key press in the admin TUI.
+                    if let Some(admin_interface) = admin_data.admin_interface.as_mut() {
+                        match data {
+                            // Tab
+                            b"\t" => admin_interface.next_tab(),
+                            // Shift+Tab
+                            b"\x1b[Z" => admin_interface.previous_tab(),
+                            // Up
+                            b"\x1b[A" | b"k" => admin_interface.move_up(),
+                            // Down
+                            b"\x1b[B" | b"j" => admin_interface.move_down(),
+                            // Esc
+                            b"\x1b" => admin_interface.cancel(),
+                            // Enter
+                            b"\r" => admin_interface.enter(),
+                            // Delete
+                            b"\x1b[3~" => admin_interface.delete(),
+                            // Ctrl+C
+                            b"\x03" => admin_interface.disable(),
+                            _ => (),
+                        }
                     }
                 }
             }
-        }
-        // Ctrl+C (0x03) ends the session and disconnects the client
-        if data == b"\x03" {
-            self.cancellation_token.cancel();
+            // Ctrl+C (0x03) ends the session and disconnects the client
+            if data == b"\x03" {
+                self.cancellation_token.cancel();
+            }
         }
         Ok(())
     }
