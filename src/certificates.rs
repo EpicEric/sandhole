@@ -18,9 +18,10 @@ use rustls::{
     server::{ClientHello, ParsedCertificate, ResolvesServerCert},
     sign::CertifiedKey,
 };
+use rustls_pki_types::CertificateDer;
 use tokio::{fs::read_dir, sync::oneshot};
 use trie_rs::map::{Trie, TrieBuilder};
-use webpki::{EndEntityCert, types::CertificateDer};
+use webpki::EndEntityCert;
 
 #[derive(Debug)]
 pub(crate) struct DummyAlpnChallengeResolver;

@@ -34,7 +34,7 @@ If you need to use multiple keys for the same domain, simply add a TXT record fo
 Then, expose your service at the given domain:
 
 ```bash
-ssh -R my.domain.net:80:localhost:3000 sandhole.com -p 2222
+ssh -p 2222 -R my.domain.net:80:localhost:3000 sandhole.com
 ```
 
 ### HTTPS support

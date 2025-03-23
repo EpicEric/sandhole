@@ -187,7 +187,7 @@ async fn config_disable_aliasing() {
 
     // 4. Reject anonymous users if aliasing is disabled
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        &ChaCha20Rng::from_os_rng().random(),
     ));
     let ssh_client = SshClientTwo;
     let mut session_three =

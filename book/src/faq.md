@@ -3,14 +3,14 @@
 ## How do I expose my service on multiple URLs (for example, `website.com` and `www.website.com`)?
 
 ```bash
-ssh -R website.com:80:localhost:3000 -R www.website.com:80:localhost:3000 sandhole.com -p 2222
+ssh -p 2222 -R website.com:80:localhost:3000 -R www.website.com:80:localhost:3000 sandhole.com
 ```
 
 See also ["Advanced uses"](./advanced_uses.md#custom-domains) on how to add custom domains.
 
 ## How do I connect to a forwarded SSH server?
 
-Use `ssh -J sandhole.com:2222 mysshserver.com -p 2222` (replace the ports with Sandhole's SSH port if not using the default `2222`).
+Use `ssh -p 2222 -J sandhole.com:2222 mysshserver.com ` (replace the ports with Sandhole's SSH port if not using the default `2222`).
 
 If you'd like to avoid typing out the proxy jump command every time, make sure to edit your SSH config file (usually `~/.ssh/config`) and add the following entry (changing the port where appropriate):
 
@@ -37,7 +37,7 @@ With the `--load-balancing=deny` or `--load-balancing=replace` [CLI flag](./cli.
 You may do so globally with the `--force-https` [CLI flag](./cli.md), or per service by passing `force-https` on the tunneling connection(s):
 
 ```bash
-ssh -R website.com:443:localhost:3000 sandhole.com -p 2222 force-https
+ssh -p -R website.com:443:localhost:3000 sandhole.com 2222 force-https
 ```
 
 ## How do I allow/block certain IP ranges?
@@ -45,7 +45,7 @@ ssh -R website.com:443:localhost:3000 sandhole.com -p 2222 force-https
 You may do so globally with the `--ip-allowlist` and `--ip-blocklist` [CLI flags](./cli.md) respectively, or per service by passing `ip-allowist=...` and/or `ip-blocklist=...` on the tunneling connection(s):
 
 ```bash
-ssh -R website.com:80:localhost:3000 sandhole.com -p 2222 ip-allowlist=10.0.0.0/8 ip-blocklist=10.1.0.0/16
+ssh -p 2222 -R website.com:80:localhost:3000 sandhole.com ip-allowlist=10.0.0.0/8 ip-blocklist=10.1.0.0/16
 ```
 
 ## How do I run the Docker container without mounting root certificates from the host?

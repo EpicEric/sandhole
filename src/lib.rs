@@ -200,7 +200,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             info!("Key file not found. Creating...");
             let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-                &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+                &ChaCha20Rng::from_os_rng().random(),
             ));
             if !config.disable_directory_creation {
                 fs::create_dir_all(

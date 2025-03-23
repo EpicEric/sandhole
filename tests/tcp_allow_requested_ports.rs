@@ -103,7 +103,7 @@ async fn tcp_allow_requested_ports() {
 
     // 4. Local-forward the TCP port for random user
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        &ChaCha20Rng::from_os_rng().random(),
     ));
     let ssh_client = SshClient;
     let mut session_two = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)

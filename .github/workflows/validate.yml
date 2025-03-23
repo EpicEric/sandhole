@@ -24,7 +24,7 @@ jobs:
       - name: Run rustfmt
         run: |
           rustup component add rustfmt
-          cargo fmt --check
+          cargo fmt --check --all
   clippy:
     name: Check Clippy lints
     runs-on: ubuntu-latest

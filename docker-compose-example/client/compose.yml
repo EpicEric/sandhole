@@ -24,8 +24,8 @@ services:
     # Make sure to change at least the Sandhole domain below
     command: |
       -i /secret/id_ed25519
+      -p 2222
       -o StrictHostKeyChecking=accept-new
       -o ServerAliveInterval=30
       -R example:80:nginx:80
-      -p 2222
       sandhole.com

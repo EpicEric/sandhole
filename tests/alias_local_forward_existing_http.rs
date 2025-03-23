@@ -102,7 +102,7 @@ async fn alias_local_forward_existing_http() {
 
     // 3. Local-forward instead of connecting directly
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        &ChaCha20Rng::from_os_rng().random(),
     ));
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)

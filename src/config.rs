@@ -8,7 +8,7 @@ use std::{
 
 use clap::{Parser, ValueEnum, command};
 use ipnet::IpNet;
-use webpki::types::DnsName;
+use rustls_pki_types::DnsName;
 
 // Which value to seed with when generating random subdomains, for determinism.
 // This allows binding to the same random address until Sandhole is restarted.

@@ -1,7 +1,7 @@
 use std::{hash::Hash, net::SocketAddr, num::NonZero, sync::Mutex};
 
 use block_id::{Alphabet, BlockId};
-use hickory_resolver::{TokioAsyncResolver, proto::rr::RecordType};
+use hickory_resolver::{TokioResolver, proto::rr::RecordType};
 use itertools::Itertools;
 use log::{debug, warn};
 #[cfg(test)]
@@ -10,13 +10,13 @@ use rand::{self, Rng, SeedableRng, seq::IndexedRandom};
 use rand_chacha::ChaCha20Rng;
 use rand_seeder::SipHasher;
 use russh::keys::ssh_key::Fingerprint;
+use rustls_pki_types::DnsName;
 use rustrict::{Censor, CensorStr, Type};
-use webpki::types::DnsName;
 
 use crate::config::{BindHostnames, RandomSubdomainSeed};
 
 // Struct wrapping a DNS async resolver.
-pub(crate) struct DnsResolver(TokioAsyncResolver);
+pub(crate) struct DnsResolver(TokioResolver);
 
 // Trait for DNS record verification.
 #[cfg_attr(test, automock)]
@@ -35,10 +35,11 @@ pub(crate) trait Resolver {
 
 impl DnsResolver {
     pub(crate) fn new() -> Self {
-        DnsResolver(TokioAsyncResolver::tokio(
-            Default::default(),
-            Default::default(),
-        ))
+        DnsResolver(
+            TokioResolver::builder_tokio()
+                .expect("failed to create DNS resolver")
+                .build(),
+        )
     }
 }
 
@@ -372,7 +373,7 @@ mod address_delegator_tests {
     use rand_chacha::ChaCha20Rng;
     use regex::Regex;
     use russh::keys::{HashAlg, ssh_key::private::Ed25519Keypair};
-    use webpki::types::DnsName;
+    use rustls_pki_types::DnsName;
 
     use crate::config::{BindHostnames, RandomSubdomainSeed};
 
@@ -477,7 +478,7 @@ mod address_delegator_tests {
     #[tokio::test]
     async fn returns_provided_address_if_cname_matches_fingerprint() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+            &ChaCha20Rng::from_os_rng().random(),
         ))
         .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
@@ -517,7 +518,7 @@ mod address_delegator_tests {
     #[tokio::test]
     async fn returns_provided_address_if_txt_record_matches_fingerprint() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+            &ChaCha20Rng::from_os_rng().random(),
         ))
         .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
@@ -587,7 +588,7 @@ mod address_delegator_tests {
     #[tokio::test]
     async fn returns_subdomain_if_no_txt_record_matches_fingerprint() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+            &ChaCha20Rng::from_os_rng().random(),
         ))
         .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
@@ -655,7 +656,7 @@ mod address_delegator_tests {
     #[tokio::test]
     async fn returns_host_domain_if_address_equals_host_domain_and_has_fingerprint() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+            &ChaCha20Rng::from_os_rng().random(),
         ))
         .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
@@ -692,7 +693,7 @@ mod address_delegator_tests {
     #[tokio::test]
     async fn returns_random_subdomain_if_address_equals_host_domain_and_doesnt_have_fingerprint() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+            &ChaCha20Rng::from_os_rng().random(),
         ))
         .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
@@ -735,7 +736,7 @@ mod address_delegator_tests {
     #[tokio::test]
     async fn returns_random_subdomain_if_requested_address_is_not_direct_subdomain() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+            &ChaCha20Rng::from_os_rng().random(),
         ))
         .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
@@ -778,7 +779,7 @@ mod address_delegator_tests {
     #[tokio::test]
     async fn returns_random_subdomain_if_invalid_address() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+            &ChaCha20Rng::from_os_rng().random(),
         ))
         .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
@@ -819,7 +820,7 @@ mod address_delegator_tests {
     #[tokio::test]
     async fn returns_unique_random_subdomains_if_forced() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+            &ChaCha20Rng::from_os_rng().random(),
         ))
         .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
@@ -869,7 +870,7 @@ mod address_delegator_tests {
     #[tokio::test]
     async fn returns_unique_random_subdomains_with_different_size_and_no_profanities() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+            &ChaCha20Rng::from_os_rng().random(),
         ))
         .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();
@@ -1036,11 +1037,11 @@ mod address_delegator_tests {
     #[tokio::test]
     async fn returns_unique_random_subdomains_per_fingerprint_user_and_address_if_forced() {
         let f1: russh::keys::ssh_key::Fingerprint = russh::keys::PrivateKey::from(
-            Ed25519Keypair::from_seed(&ChaCha20Rng::try_from_os_rng().unwrap().random()),
+            Ed25519Keypair::from_seed(&ChaCha20Rng::from_os_rng().random()),
         )
         .fingerprint(HashAlg::Sha256);
         let f2 = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+            &ChaCha20Rng::from_os_rng().random(),
         ))
         .fingerprint(HashAlg::Sha256);
         let mut mock = MockResolver::new();

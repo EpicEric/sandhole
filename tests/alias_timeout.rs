@@ -110,7 +110,7 @@ async fn alias_timeout() {
 
     // 3. Start anonymous SSH client that will forward the proxies via aliasing
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        &ChaCha20Rng::from_os_rng().random(),
     ));
     let ssh_client = SshClient;
     let mut client_session =

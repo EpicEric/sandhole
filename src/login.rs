@@ -122,10 +122,10 @@ mod api_login_tests {
     use hyper::{body::Incoming, service::service_fn};
     use hyper_util::rt::{TokioExecutor, TokioIo};
     use rustls::{ClientConfig, RootCertStore, ServerConfig};
+    use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
     use tokio::{io::AsyncReadExt, net::TcpListener};
     use tokio_rustls::TlsAcceptor;
     use tower::Service;
-    use webpki::types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 
     use super::{ApiLogin, AuthenticationRequest, MockConfigurer};
 

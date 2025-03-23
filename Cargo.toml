@@ -9,27 +9,30 @@ homepage = "https://sandhole.eric.dev.br/"
 license = "MIT"
 authors = ["Eric Rodrigues Pires <eric@eric.dev.br>"]
 readme = "README.md"
-keywords = ["ssh", "proxy", "tunnel", "hole-punching"]
+keywords = ["ssh", "proxy", "reverse-proxy", "tunnel", "hole-punching"]
 categories = ["network-programming", "web-programming", "authentication"]
 exclude = [".github", "book", "docker-compose-example", "tests/data"]
 
 [dependencies]
-anyhow = "1.0.96"
+anyhow = "1.0.97"
 aws-lc-rs = "1.12.6"
 axum = { version = "0.8.1", default-features = false }
 block-id = "0.2.1"
-bytes = "1.10.0"
+bytes = "1.10.1"
 chrono = "0.4.39"
-clap = { version = "4.5.30", features = ["derive", "string"] }
-crossterm = "0.28.1"
+clap = { version = "4.5.32", features = ["derive", "string"] }
+crossterm = { version = "0.28.1", default-features = false }
 dashmap = "6.1.0"
 enumflags2 = "0.7.11"
-env_logger = "0.11.6"
-hickory-resolver = "0.24.4"
-http = "1.2.0"
-http-body-util = "0.1.2"
+env_logger = { version = "0.11.7", default-features = false, features = [
+  "auto-color",
+  "humantime",
+] }
+hickory-resolver = "0.25.1"
+http = "1.3.1"
+http-body-util = "0.1.3"
 human_bytes = { version = "0.4.3", default-features = false }
-humantime = "2.1.0"
+humantime = "2.2.0"
 hyper = { version = "1.6.0", features = ["full"] }
 hyper-util = { version = "0.1.10", features = ["full"] }
 ipnet = "2.11.0"
@@ -39,10 +42,17 @@ log = "0.4.26"
 notify = "8.0.0"
 openssl = { version = "0.10.71", features = ["vendored"] }
 pretty-duration = "0.1.1"
-rand = "0.9.0"
+rand = { version = "0.9.0", default-features = false, features = [
+  "std",
+  "std_rng",
+  "os_rng",
+  "thread_rng",
+] }
 rand_chacha = "0.9.0"
 rand_seeder = "0.4.0"
-ratatui = "0.29.0"
+ratatui = { version = "0.29.0", default-features = false, features = [
+  "crossterm",
+] }
 reqwest = { version = "0.12.14", default-features = false, features = [
   "charset",
   "http2",
@@ -51,31 +61,41 @@ reqwest = { version = "0.12.14", default-features = false, features = [
   "rustls-tls-manual-roots",
 ] }
 russh = "0.51.1"
-rustls = "0.23.16"
+rustls = "0.23.25"
 rustls-acme = "0.13.0"
-rustls-platform-verifier = "0.5.0"
-rustls-webpki = "0.102.8"
-rustrict = { version = "0.7.33", features = ["customize"] }
-serde = "1.0.218"
-serde_json = "1.0.139"
+rustls-pki-types = "1.11.0"
+rustls-platform-verifier = "0.5.1"
+rustls-webpki = "0.103.0"
+rustrict = { version = "0.7.34", features = ["customize"] }
+serde = "1.0.219"
+serde_json = "1.0.140"
 sysinfo = "0.33.1"
-thiserror = "2.0.11"
-tokio = { version = "1.43.0", features = ["full"] }
-tokio-rustls = "0.26.1"
+thiserror = "2.0.12"
+tokio = { version = "1.44.1", features = ["full"] }
+tokio-rustls = "0.26.2"
 tokio-stream = "0.1.17"
-tokio-util = "0.7.13"
+tokio-util = "0.7.14"
 trie-rs = "0.4.2"
 
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["macros", "ws"] }
-futures-util = "0.3.31"
-insta = { version = "1.42.1", features = ["yaml"] }
+futures-util = { version = "0.3.31", default-features = false, features = [
+  "std",
+] }
+insta = { version = "1.42.2", features = ["yaml"] }
 mockall = "0.13.1"
 nix = "0.29.0"
 regex = "1.11.1"
 tokio-tungstenite = "0.26.2"
 tower = "0.5.2"
-vt100-ctt = "0.16.0"
+vt100-ctt = { version = "0.16.0", default-features = false }
+
+[profile.release]
+strip = true
+lto = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["openssl"]

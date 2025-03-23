@@ -98,7 +98,7 @@ async fn alias_aliasing_tunnel() {
 
     // 3. Establish a tunnel via aliasing
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        &ChaCha20Rng::from_os_rng().random(),
     ));
     let ssh_client = SshClient;
     let mut client_session =

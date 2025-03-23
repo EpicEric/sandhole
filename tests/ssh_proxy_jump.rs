@@ -102,7 +102,7 @@ async fn ssh_proxy_jump() {
 
     // 3. Connect to the SSH port of our proxy with anonymous user
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+        &ChaCha20Rng::from_os_rng().random(),
     ));
     let ssh_client = ProxyClient;
     let mut session_two = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
@@ -264,7 +264,7 @@ impl client::Handler for SshClient {
             let session = match server::run_stream(
                 Arc::new(server::Config {
                     keys: vec![russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-                        &ChaCha20Rng::try_from_os_rng().unwrap().random(),
+                        &ChaCha20Rng::from_os_rng().random(),
                     ))],
                     ..Default::default()
                 }),
