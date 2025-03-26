@@ -22,20 +22,18 @@ use ratatui::{
     },
 };
 use russh::keys::ssh_key::Fingerprint;
-use tokio::{
-    sync::{mpsc::UnboundedSender, watch},
-    time::sleep,
-};
+use tokio::{sync::watch, time::sleep};
 
 use crate::{
     SandholeServer, SystemData,
     droppable_handle::DroppableHandle,
     fingerprints::{AuthenticationType, KeyData},
+    ssh::ServerHandlerSender,
     tcp_alias::TcpAlias,
 };
 
 struct BufferedSender {
-    tx: UnboundedSender<Vec<u8>>,
+    tx: ServerHandlerSender,
     buf: Vec<u8>,
 }
 
@@ -46,12 +44,7 @@ impl io::Write for BufferedSender {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        let result = self.tx.send(self.buf.drain(..).collect());
-        if let Err(err) = result {
-            Err(io::Error::new(io::ErrorKind::BrokenPipe, err))
-        } else {
-            Ok(())
-        }
+        self.tx.send(self.buf.drain(..).collect())
     }
 }
 
@@ -543,7 +536,7 @@ pub(crate) struct AdminInterface {
 
 impl AdminInterface {
     // Create an admin interface and send its output to the provided UnboundedSender
-    pub(crate) fn new(tx: UnboundedSender<Vec<u8>>, server: Arc<SandholeServer>) -> Self {
+    pub(crate) fn new(tx: ServerHandlerSender, server: Arc<SandholeServer>) -> Self {
         let backend = CrosstermBackend::new(BufferedSender {
             tx,
             buf: Vec::new(),

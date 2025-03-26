@@ -7,6 +7,7 @@ use std::{net::SocketAddr, sync::Arc};
 use crate::connection_handler::ConnectionHandler;
 use crate::connections::ConnectionGetByHttpHost;
 use crate::error::ServerError;
+use crate::ssh::ServerHandlerSender;
 use crate::tcp_alias::TcpAlias;
 use crate::telemetry::Telemetry;
 
@@ -26,7 +27,6 @@ use log::{debug, warn};
 use russh::keys::ssh_key::Fingerprint;
 use tokio::{
     io::{AsyncRead, AsyncWrite, copy_bidirectional},
-    sync::mpsc,
     time::timeout,
 };
 
@@ -44,7 +44,7 @@ struct HttpLog<'a> {
     elapsed_time: Duration,
 }
 
-fn http_log(data: HttpLog, tx: Option<mpsc::UnboundedSender<Vec<u8>>>, disable_http_logs: bool) {
+fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: bool) {
     let HttpLog {
         ip,
         status,
@@ -322,7 +322,7 @@ where
                     uri: &uri,
                     elapsed_time,
                 },
-                tx,
+                Some(tx),
                 disable_http_logs,
             );
             Ok(response)
@@ -394,7 +394,7 @@ where
                         uri: &uri,
                         elapsed_time,
                     },
-                    tx,
+                    Some(tx),
                     disable_http_logs,
                 );
                 // Check if the underlying server accepts the Upgrade request
@@ -472,7 +472,7 @@ where
                         uri: &uri,
                         elapsed_time,
                     },
-                    tx,
+                    Some(tx),
                     disable_http_logs,
                 );
                 // Return the received response to the client
@@ -511,6 +511,7 @@ mod proxy_handler_tests {
         connections::ConnectionMap,
         quota::{DummyQuotaHandler, TokenHolder, UserIdentification},
         reactor::MockConnectionMapReactor,
+        ssh::ServerHandlerSender,
         telemetry::Telemetry,
     };
 
@@ -669,6 +670,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                sni_proxy: false,
             })
         });
         conn_manager
@@ -734,6 +736,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                sni_proxy: false,
             })
         });
         conn_manager
@@ -800,6 +803,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: Some(443),
                 is_aliasing: false,
                 http2: false,
+                sni_proxy: false,
             })
         });
         conn_manager
@@ -865,6 +869,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: Some(8443),
                 is_aliasing: false,
                 http2: false,
+                sni_proxy: false,
             })
         });
         conn_manager
@@ -928,7 +933,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || Some(logging_tx));
+            .return_once(move || ServerHandlerSender(logging_tx));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -937,6 +942,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                sni_proxy: false,
             })
         });
         conn_manager
@@ -1019,7 +1025,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || Some(logging_tx));
+            .return_once(move || ServerHandlerSender(logging_tx));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -1028,6 +1034,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                sni_proxy: false,
             })
         });
         conn_manager
@@ -1122,7 +1129,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || Some(logging_tx));
+            .return_once(move || ServerHandlerSender(logging_tx));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -1131,6 +1138,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: true,
+                sni_proxy: false,
             })
         });
         conn_manager
@@ -1212,7 +1220,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || Some(logging_tx));
+            .return_once(move || ServerHandlerSender(logging_tx));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -1221,6 +1229,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                sni_proxy: false,
             })
         });
         conn_manager
@@ -1308,7 +1317,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || Some(logging_tx));
+            .return_once(move || ServerHandlerSender(logging_tx));
         mock.expect_aliasing_channel()
             .once()
             .return_once(move |_, _, _| Ok(handler));
@@ -1317,6 +1326,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: Some(443),
                 is_aliasing: false,
                 http2: false,
+                sni_proxy: false,
             })
         });
         conn_manager
@@ -1404,7 +1414,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || Some(logging_tx));
+            .return_once(move || ServerHandlerSender(logging_tx));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -1413,6 +1423,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                sni_proxy: false,
             })
         });
         conn_manager
@@ -1500,7 +1511,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || Some(logging_tx));
+            .return_once(move || ServerHandlerSender(logging_tx));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -1509,6 +1520,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                sni_proxy: false,
             })
         });
         conn_manager
@@ -1598,7 +1610,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || Some(logging_tx));
+            .return_once(move || ServerHandlerSender(logging_tx));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -1607,6 +1619,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: true,
+                sni_proxy: false,
             })
         });
         conn_manager

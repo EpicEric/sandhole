@@ -3,7 +3,8 @@ use std::net::IpAddr;
 #[cfg(test)]
 use mockall::automock;
 use russh::keys::ssh_key::Fingerprint;
-use tokio::sync::mpsc;
+
+use crate::ssh::ServerHandlerSender;
 
 // Extra data available for HTTP tunneling/aliasing connections.
 #[derive(Clone)]
@@ -12,13 +13,14 @@ pub(crate) struct ConnectionHttpData {
     pub(crate) redirect_http_to_https_port: Option<u16>,
     pub(crate) is_aliasing: bool,
     pub(crate) http2: bool,
+    pub(crate) sni_proxy: bool,
 }
 
 // Trait for creating tunneling or aliasing channels (via an underlying SSH session).
 #[cfg_attr(test, automock)]
 pub(crate) trait ConnectionHandler<T: Sync> {
     // Return a copy of the logging channel associated with this handler.
-    fn log_channel(&self) -> Option<mpsc::UnboundedSender<Vec<u8>>>;
+    fn log_channel(&self) -> ServerHandlerSender;
 
     // Return a tunneling channel for this handler.
     async fn tunneling_channel(&self, ip: IpAddr, port: u16) -> anyhow::Result<T>;

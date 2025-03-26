@@ -1,12 +1,10 @@
 # Frequently asked questions
 
-## How do I expose my service on multiple URLs (for example, `website.com` and `www.website.com`)?
+## How do I expose my service on multiple custom domains (such as `example.com` and `www.example.com`)?
 
 ```bash
-ssh -p 2222 -R website.com:80:localhost:3000 -R www.website.com:80:localhost:3000 sandhole.com.br
+ssh -p 2222 -R example.com:80:localhost:3000 -R www.example.com:80:localhost:3000 sandhole.com.br
 ```
-
-See also ["Advanced uses"](./advanced_uses.md#custom-domains) on how to add custom domains.
 
 ## How do I connect to a forwarded SSH server?
 
@@ -34,19 +32,11 @@ With the `--load-balancing=deny` or `--load-balancing=replace` [CLI flag](./cli.
 
 ## How do I force HTTP requests to get redirected to HTTPS?
 
-You may do so globally with the `--force-https` [CLI flag](./cli.md), or per service by passing `force-https` on the tunneling connection(s):
-
-```bash
-ssh -p -R website.com:443:localhost:3000 sandhole.com.br 2222 force-https
-```
+You may do so globally with the `--force-https` [CLI flag](./cli.md), or [per service](./advanced_options.md#force-https) by passing `force-https` on the tunneling connection.
 
 ## How do I allow/block certain IP ranges?
 
-You may do so globally with the `--ip-allowlist` and `--ip-blocklist` [CLI flags](./cli.md) respectively, or per service by passing `ip-allowist=...` and/or `ip-blocklist=...` on the tunneling connection(s):
-
-```bash
-ssh -p 2222 -R website.com:80:localhost:3000 sandhole.com.br ip-allowlist=10.0.0.0/8 ip-blocklist=10.1.0.0/16
-```
+You may do so globally with the `--ip-allowlist` and `--ip-blocklist` [CLI flags](./cli.md) respectively, or [per service](./advanced_options.md#ip-allowlist--ip-blocklist) by passing `ip-allowist=...` and/or `ip-blocklist=...` on the tunneling connection.
 
 ## How do I run the Docker container without mounting root certificates from the host?
 

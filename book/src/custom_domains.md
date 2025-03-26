@@ -1,16 +1,4 @@
-# Advanced uses
-
-## Connecting to SSH via the HTTPS port
-
-In some networks, outbound connections to 22 (or 2222) may be blocked by the operator. In Sandhole, it's possible to get around this with the `--connect-ssh-on-https-port` option.
-
-Once your administrator has configured it, you can then expose your services with:
-
-```bash
-ssh -R example:80:localhost:3000 sandhole.com.br -p 443
-```
-
-## Custom domains
+# Custom domains
 
 You can also use your custom domains with Sandhole. For this, you'll need your SSH key's fingerprint and control over your domain's DNS.
 
@@ -37,7 +25,7 @@ Then, expose your service at the given domain:
 ssh -p 2222 -R my.domain.net:80:localhost:3000 sandhole.com.br
 ```
 
-### HTTPS support for custom domains
+## HTTPS support for custom domains
 
 If your administrator has configured [ACME support](./tls_support.md#acme-support), you don't need any extra steps to enable HTTPS support. It will be automatically provisioned for your custom domain.
 
