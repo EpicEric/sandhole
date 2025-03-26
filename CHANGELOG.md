@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add `sni-proxy` option for remote forwarding connections.
+
+### Fixed
+
+- Fix logging to remote forwarding sessions.
+
 ## 0.5.0 (2025-03-23)
 
 ### Added

@@ -45,6 +45,14 @@ impl ConnectionMapReactor<String> for HttpReactor {
     }
 }
 
+pub(crate) struct SniReactor(pub(crate) Arc<Telemetry>);
+
+impl ConnectionMapReactor<String> for SniReactor {
+    fn call(&self, identifiers: Vec<String>) {
+        self.0.sni_reactor(identifiers);
+    }
+}
+
 pub(crate) struct TcpReactor {
     pub(crate) handler: Arc<TcpHandler>,
     pub(crate) telemetry: Arc<Telemetry>,

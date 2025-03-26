@@ -186,7 +186,30 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4b. Switch tabs and validate SSH tab data
+        // 4b. Switch tabs and validate SNI tab data
+        writer
+            .write_all(&b"\t"[..])
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"System information",
+            r"  CPU%  ",
+            r" Memory ",
+            r"   TX   ",
+            r"   RX   ",
+            r"SNI proxies",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 4c. Switch tabs and validate SSH tab data
         writer
             .write_all(&b"\t"[..])
             .await
@@ -212,7 +235,7 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4c. Switch tabs again and validate TCP tab data
+        // 4d. Switch tabs again and validate TCP tab data
         writer
             .write_all(&b"\t"[..])
             .await
@@ -238,7 +261,7 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4d. Switch tabs again and validate alias tab data
+        // 4e. Switch tabs again and validate alias tab data
         writer
             .write_all(&b"\t"[..])
             .await
@@ -264,7 +287,7 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4e. Go back one tab
+        // 4f. Go back one tab
         writer
             .write_all(&b"\x1b[Z"[..])
             .await
@@ -290,7 +313,7 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4f. View user details
+        // 4g. View user details
         writer
             .write_all(&b"\x1b[A"[..])
             .await
@@ -319,7 +342,7 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4g. Close user details
+        // 4h. Close user details
         writer
             .write_all(&b"\x1b"[..])
             .await
@@ -345,7 +368,7 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4g. Quit the admin interface with Ctrl-C (ETX)
+        // 4i. Quit the admin interface with Ctrl-C (ETX)
         writer
             .write_all(&b"\x03"[..])
             .await

@@ -124,6 +124,8 @@ pub(crate) struct Telemetry {
     ssh_connections_per_minute: DashMap<String, Counter>,
     // Requests per minute for each HTTP host.
     http_requests_per_minute: DashMap<String, Counter>,
+    // Connections per minute for each SNI host.
+    sni_connections_per_minute: DashMap<String, Counter>,
     // Connections per minute for each TCP port.
     tcp_connections_per_minute: DashMap<u16, Counter>,
     // Connections per minute for each local-forwarded alias.
@@ -135,6 +137,7 @@ impl Telemetry {
         Telemetry {
             ssh_connections_per_minute: DashMap::new(),
             http_requests_per_minute: DashMap::new(),
+            sni_connections_per_minute: DashMap::new(),
             tcp_connections_per_minute: DashMap::new(),
             alias_connections_per_minute: DashMap::new(),
         }
@@ -152,6 +155,15 @@ impl Telemetry {
     // Take into account an HTTP request to the given hostname.
     pub(crate) fn add_http_request(&self, hostname: String) {
         self.http_requests_per_minute
+            .entry(hostname)
+            .or_insert_with(|| Counter::new(Duration::from_secs(120), Duration::from_secs(60)))
+            .value_mut()
+            .add(1);
+    }
+
+    // Take into account an SNI request to the given hostname.
+    pub(crate) fn add_sni_connection(&self, hostname: String) {
+        self.sni_connections_per_minute
             .entry(hostname)
             .or_insert_with(|| Counter::new(Duration::from_secs(120), Duration::from_secs(60)))
             .value_mut()
@@ -198,6 +210,17 @@ impl Telemetry {
             .collect()
     }
 
+    // Return data on all HTTP requests per minute.
+    pub(crate) fn get_sni_connections_per_minute(&self) -> HashMap<String, f64> {
+        self.sni_connections_per_minute
+            .iter_mut()
+            .map(|mut entry| {
+                let measure = entry.value_mut().measure();
+                (entry.key().clone(), measure)
+            })
+            .collect()
+    }
+
     // Return data on all TCP connections per minute.
     pub(crate) fn get_tcp_connections_per_minute(&self) -> HashMap<u16, f64> {
         self.tcp_connections_per_minute
@@ -229,6 +252,12 @@ impl Telemetry {
     pub(crate) fn http_reactor(&self, hostnames: Vec<String>) {
         let hostnames: HashSet<String> = hostnames.into_iter().collect();
         self.http_requests_per_minute
+            .retain(|key, _| hostnames.contains(key));
+    }
+
+    pub(crate) fn sni_reactor(&self, hostnames: Vec<String>) {
+        let hostnames: HashSet<String> = hostnames.into_iter().collect();
+        self.sni_connections_per_minute
             .retain(|key, _| hostnames.contains(key));
     }
 
@@ -307,6 +336,7 @@ mod telemetry_tests {
             "shouldn't have data for newly created telemetry"
         );
         telemetry.add_http_request("http".into());
+        telemetry.add_sni_connection("sni".into());
         telemetry.add_tcp_connection(12345);
         telemetry.add_alias_connection(TcpAlias("alias".into(), 42));
         assert!(
@@ -365,10 +395,70 @@ mod telemetry_tests {
             "shouldn't have data for newly created telemetry"
         );
         telemetry.add_ssh_connection("ssh".into());
+        telemetry.add_sni_connection("sni".into());
         telemetry.add_tcp_connection(12345);
         telemetry.add_alias_connection(TcpAlias("alias".into(), 42));
         assert!(
             telemetry.get_http_requests_per_minute().is_empty(),
+            "shouldn't have data for unaffected telemetry"
+        );
+    }
+
+    #[test]
+    fn includes_data_for_connections_on_sni_domains() {
+        let telemetry = Telemetry::new();
+        assert!(
+            telemetry.get_sni_connections_per_minute().is_empty(),
+            "shouldn't have data for newly created telemetry"
+        );
+        telemetry.add_sni_connection("foo".into());
+        telemetry.add_sni_connection("bar".into());
+        telemetry.add_sni_connection("qux".into());
+        telemetry.add_sni_connection("qux".into());
+        let data = telemetry.get_sni_connections_per_minute();
+        assert_eq!(data.len(), 3);
+        assert_eq!(data.get("foo").unwrap(), data.get("bar").unwrap());
+        assert_eq!(*data.get("qux").unwrap(), 2.0 * data.get("foo").unwrap());
+    }
+
+    #[test]
+    fn retains_sni_hostnames_that_are_still_active() {
+        let telemetry = Arc::new(Telemetry::new());
+        telemetry.sni_reactor(vec!["host1".into(), "host2".into(), "host3".into()]);
+        let data = telemetry.get_sni_connections_per_minute();
+        assert!(
+            data.is_empty(),
+            "shouldn't have data for newly created telemetry"
+        );
+        telemetry.add_sni_connection("host1".into());
+        telemetry.add_sni_connection("host3".into());
+        telemetry.add_sni_connection("host4".into());
+        telemetry.sni_reactor(vec!["host1".into(), "host4".into(), "host5".into()]);
+        let data = telemetry.get_sni_connections_per_minute();
+        assert_eq!(data.len(), 2);
+        assert!(
+            *data.get("host1").unwrap() > 0.0,
+            "should have data for host1"
+        );
+        assert!(
+            *data.get("host4").unwrap() > 0.0,
+            "should have data for host4"
+        );
+    }
+
+    #[test]
+    fn sni_data_isnt_affected_by_other_connections() {
+        let telemetry = Telemetry::new();
+        assert!(
+            telemetry.get_sni_connections_per_minute().is_empty(),
+            "shouldn't have data for newly created telemetry"
+        );
+        telemetry.add_http_request("http".into());
+        telemetry.add_ssh_connection("ssh".into());
+        telemetry.add_tcp_connection(12345);
+        telemetry.add_alias_connection(TcpAlias("alias".into(), 42));
+        assert!(
+            telemetry.get_sni_connections_per_minute().is_empty(),
             "shouldn't have data for unaffected telemetry"
         );
     }
@@ -416,8 +506,9 @@ mod telemetry_tests {
             telemetry.get_tcp_connections_per_minute().is_empty(),
             "shouldn't have data for newly created telemetry"
         );
-        telemetry.add_http_request("http".into());
         telemetry.add_ssh_connection("ssh".into());
+        telemetry.add_http_request("http".into());
+        telemetry.add_sni_connection("sni".into());
         telemetry.add_alias_connection(TcpAlias("alias".into(), 42));
         assert!(
             telemetry.get_tcp_connections_per_minute().is_empty(),
@@ -502,6 +593,7 @@ mod telemetry_tests {
         );
         telemetry.add_ssh_connection("ssh".into());
         telemetry.add_http_request("http".into());
+        telemetry.add_sni_connection("sni".into());
         telemetry.add_tcp_connection(12345);
         assert!(
             telemetry.get_alias_connections_per_minute().is_empty(),

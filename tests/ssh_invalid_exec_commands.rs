@@ -205,7 +205,28 @@ async fn ssh_invalid_exec_commands() {
     };
     assert_eq!(channel_id, channel.id());
     assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2i. Fail to run `ip-allowlist` with invalid CIDR
+    // 2i. Fail to run `sni-proxy` twice
+    channel
+        .exec(true, "sni-proxy sni-proxy")
+        .await
+        .expect("exec sni-proxy failed");
+    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+    else {
+        panic!("Timeout waiting for server to reply.");
+    };
+    assert_eq!(channel_id, channel.id());
+    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
+    channel
+        .exec(true, "sni-proxy")
+        .await
+        .expect("exec sni-proxy failed");
+    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+    else {
+        panic!("Timeout waiting for server to reply.");
+    };
+    assert_eq!(channel_id, channel.id());
+    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
+    // 2j. Fail to run `ip-allowlist` with invalid CIDR
     channel
         .exec(true, "ip-allowlist=10.0.0")
         .await
@@ -216,7 +237,7 @@ async fn ssh_invalid_exec_commands() {
     };
     assert_eq!(channel_id, channel.id());
     assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2j. Fail to run `ip-allowlist` with no CIDRs
+    // 2k. Fail to run `ip-allowlist` with no CIDRs
     channel
         .exec(true, "ip-allowlist=")
         .await
@@ -227,7 +248,7 @@ async fn ssh_invalid_exec_commands() {
     };
     assert_eq!(channel_id, channel.id());
     assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2k. Fail to run `ip-allowlist` twice
+    // 2l. Fail to run `ip-allowlist` twice
     channel
         .exec(
             true,
@@ -251,7 +272,7 @@ async fn ssh_invalid_exec_commands() {
     };
     assert_eq!(channel_id, channel.id());
     assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2l. Fail to run `ip-blocklist` with invalid CIDR
+    // 2m. Fail to run `ip-blocklist` with invalid CIDR
     channel
         .exec(true, "ip-blocklist=10.0.0")
         .await
@@ -262,7 +283,7 @@ async fn ssh_invalid_exec_commands() {
     };
     assert_eq!(channel_id, channel.id());
     assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2m. Fail to run `ip-blocklist` with no CIDRs
+    // 2n. Fail to run `ip-blocklist` with no CIDRs
     channel
         .exec(true, "ip-blocklist=")
         .await
@@ -273,7 +294,7 @@ async fn ssh_invalid_exec_commands() {
     };
     assert_eq!(channel_id, channel.id());
     assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2n. Fail to run `ip-blocklist` twice
+    // 2o. Fail to run `ip-blocklist` twice
     channel
         .exec(
             true,
@@ -297,7 +318,7 @@ async fn ssh_invalid_exec_commands() {
     };
     assert_eq!(channel_id, channel.id());
     assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2o. Fail to run an unknown command
+    // 2p. Fail to run an unknown command
     channel
         .exec(true, "unknown-command")
         .await

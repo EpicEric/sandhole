@@ -6,6 +6,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
+    convert::Infallible,
     future,
     marker::PhantomData,
     net::SocketAddr,
@@ -16,10 +17,11 @@ use std::{
 
 use addressing::AddressDelegatorData;
 use anyhow::Context;
+use axum::response::IntoResponse;
 use connection_handler::ConnectionHandler;
 use connections::HttpAliasingConnection;
 use http::{DomainRedirect, ProxyData, ProxyType};
-use hyper::{Request, body::Incoming, service::service_fn};
+use hyper::{Request, StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
@@ -30,7 +32,7 @@ use login::{ApiLogin, PlatformVerifierConfigurer};
 use quota::{DummyQuotaHandler, QuotaHandler, QuotaMap};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use reactor::{AliasReactor, HttpReactor, SshReactor, TcpReactor};
+use reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor};
 use russh::{
     ChannelStream,
     keys::{
@@ -40,20 +42,21 @@ use russh::{
     server::{Config, Msg},
 };
 use rustls::ServerConfig;
-use rustls_acme::is_tls_alpn_challenge;
+use rustls_acme::acme::ACME_TLS_ALPN_NAME;
 use rustrict::CensorStr;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
 use tcp::TcpHandler;
 use tcp_alias::TcpAlias;
 use telemetry::Telemetry;
+use tls::peek_sni_and_alpn;
 use tokio::{
     fs,
-    io::AsyncWriteExt,
+    io::{AsyncWriteExt, copy_bidirectional},
     net::{TcpListener, TcpStream},
     pin,
     time::{sleep, timeout},
 };
-use tokio_rustls::LazyConfigAcceptor;
+use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -91,6 +94,7 @@ mod ssh;
 mod tcp;
 mod tcp_alias;
 mod telemetry;
+mod tls;
 
 // Data collected from the system and displayed on the admin interface.
 #[derive(Default, Clone)]
@@ -124,15 +128,20 @@ pub(crate) struct SandholeServer {
     pub(crate) ssh: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, SshReactor>>,
     // The map for forwarded HTTP connections.
     pub(crate) http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
+    // The map for forwarded SNI connections.
+    pub(crate) sni: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, SniReactor>>,
     // The map for forwarded TCP connections.
     pub(crate) tcp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
     // The map for forwarded aliased connections.
     pub(crate) alias: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, AliasReactor>>,
+    // A collection of telemetry for the multiple systems, in order to display data in the admin interface.
     pub(crate) telemetry: Arc<Telemetry>,
     // Data related to the SSH forwardings for the admin interface.
     pub(crate) ssh_data: DataTable<String, (BTreeMap<SocketAddr, String>, f64)>,
     // Data related to the HTTP forwardings for the admin interface.
     pub(crate) http_data: DataTable<String, (BTreeMap<SocketAddr, String>, f64)>,
+    // Data related to the SNI forwardings for the admin interface.
+    pub(crate) sni_data: DataTable<String, (BTreeMap<SocketAddr, String>, f64)>,
     // Data related to the TCP forwardings for the admin interface.
     pub(crate) tcp_data: DataTable<u16, (BTreeMap<SocketAddr, String>, f64)>,
     // Data related to the alias forwardings for the admin interface.
@@ -161,6 +170,8 @@ pub(crate) struct SandholeServer {
     pub(crate) force_random_ports: bool,
     // If true, HTTP is disabled.
     pub(crate) disable_http: bool,
+    // If true, SNI is disabled.
+    pub(crate) disable_sni: bool,
     // If true, TCP is disabled for all ports except for HTTP.
     pub(crate) disable_tcp: bool,
     // If true, aliasing is disabled, including SSH and all local forwarding connections.
@@ -295,6 +306,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             telemetry: Arc::clone(&telemetry),
         }),
     ));
+    let sni_connections = Arc::new(ConnectionMap::new(
+        config.load_balancing,
+        Arc::clone(&quota_handler),
+        Some(SniReactor(Arc::clone(&telemetry))),
+    ));
     let ssh_connections = Arc::new(ConnectionMap::new(
         config.load_balancing,
         Arc::clone(&quota_handler),
@@ -379,6 +395,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         });
     }
     let http_data = Arc::new(RwLock::default());
+    let sni_data = Arc::new(RwLock::default());
     if !config.disable_http {
         let data_clone = Arc::clone(&http_data);
         let connections_clone = Arc::clone(&http_connections);
@@ -399,6 +416,27 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 *data_clone.write().unwrap() = data;
             }
         });
+        if !config.disable_sni {
+            let data_clone = Arc::clone(&sni_data);
+            let connections_clone = Arc::clone(&sni_connections);
+            let telemetry_clone = Arc::clone(&telemetry);
+            // Periodically update SNI data, based on the connection map and the telemetry counters.
+            tokio::spawn(async move {
+                loop {
+                    sleep(Duration::from_millis(3_000)).await;
+                    let data = connections_clone.data();
+                    let telemetry = telemetry_clone.get_sni_connections_per_minute();
+                    let data = data
+                        .into_iter()
+                        .map(|(hostname, addresses)| {
+                            let connections_per_minute = *telemetry.get(&hostname).unwrap_or(&0f64);
+                            (hostname, (addresses, connections_per_minute))
+                        })
+                        .collect();
+                    *data_clone.write().unwrap() = data;
+                }
+            });
+        }
     }
     let tcp_data = Arc::new(RwLock::default());
     if !config.disable_tcp {
@@ -508,11 +546,13 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         sessions_password: Mutex::default(),
         sessions_publickey: Mutex::default(),
         http: Arc::clone(&http_connections),
+        sni: sni_connections,
         ssh: ssh_connections,
         tcp: tcp_connections,
         alias: alias_connections,
         telemetry: Arc::clone(&telemetry),
         http_data,
+        sni_data,
         ssh_data,
         tcp_data,
         alias_data,
@@ -528,6 +568,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         ssh_port: config.ssh_port.into(),
         force_random_ports: !config.allow_requested_ports,
         disable_http: config.disable_http,
+        disable_sni: config.disable_sni,
         disable_tcp: config.disable_tcp,
         disable_aliasing: config.disable_aliasing,
         authentication_request_timeout: config.authentication_request_timeout,
@@ -672,13 +713,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 handle_https_connection(HandleHttpsConnectionConfig {
                     stream,
                     address,
-                    tcp_connection_timeout,
                     connect_ssh_on_https_port: config.connect_ssh_on_https_port,
                     proxy_data: Arc::clone(&https_proxy_data),
                     ssh_config: Arc::clone(&ssh_config_clone),
                     sandhole: Arc::clone(&sandhole_clone),
                     certificates: Arc::clone(&certificates_clone),
-                    http_connections: Arc::clone(&http_connections),
                     http2_server_config: Arc::clone(&http2_server_config),
                     http11_server_config: Arc::clone(&http11_server_config),
                 });
@@ -740,103 +779,118 @@ struct HandleHttpsConnectionConfig {
     address: SocketAddr,
     connect_ssh_on_https_port: bool,
     proxy_data: TunnelingProxyData,
-    tcp_connection_timeout: Option<Duration>,
     ssh_config: Arc<Config>,
     sandhole: Arc<SandholeServer>,
     certificates: Arc<CertificateResolver>,
-    http_connections: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
     http2_server_config: Arc<ServerConfig>,
     http11_server_config: Arc<ServerConfig>,
 }
 
 fn handle_https_connection(
     HandleHttpsConnectionConfig {
-        stream,
+        mut stream,
         address,
         connect_ssh_on_https_port,
-        tcp_connection_timeout,
         proxy_data,
         ssh_config,
         mut sandhole,
         certificates,
-        http_connections,
         http2_server_config,
         http11_server_config,
     }: HandleHttpsConnectionConfig,
 ) {
     tokio::spawn(async move {
-        if connect_ssh_on_https_port {
-            // Check if this is an SSH-2.0 handshake.
-            let mut buf = [0u8; 8];
-            if let Ok(n) = stream.peek(&mut buf).await {
-                if buf[..n].starts_with(b"SSH-2.0-") {
-                    // Handle as an SSH connection instead of HTTPS.
-                    handle_ssh_connection(HandleSshConnectionConfig {
-                        stream,
-                        address,
-                        config: Arc::clone(&ssh_config),
-                        server: &mut sandhole,
-                    });
-                    return;
+        let mut buf = [0u8; 4096];
+        let Ok(n) = stream.peek(&mut buf).await else {
+            return;
+        };
+        if connect_ssh_on_https_port && buf[..n].starts_with(b"SSH-2.0-") {
+            // Handle as an SSH connection instead of HTTPS.
+            handle_ssh_connection(HandleSshConnectionConfig {
+                stream,
+                address,
+                config: Arc::clone(&ssh_config),
+                server: &mut sandhole,
+            });
+            return;
+        }
+        let Some((sni, alpn)) = peek_sni_and_alpn(&buf[..n]) else {
+            return;
+        };
+        if alpn == [ACME_TLS_ALPN_NAME] {
+            if let Some(challenge_config) = certificates.challenge_rustls_config() {
+                let mut tls = TlsAcceptor::from(challenge_config)
+                    .accept(stream)
+                    .await
+                    .unwrap();
+                tls.shutdown().await.unwrap();
+            } else {
+                warn!("Unable to get ACME challenge TLS config");
+            }
+            return;
+        }
+        if let Some(tunnel_handler) = sandhole.sni.get(&sni) {
+            let Ok(mut channel) = tunnel_handler
+                .tunneling_channel(address.ip(), address.port())
+                .await
+            else {
+                let io = TokioIo::new(stream);
+                let service = service_fn(async move |_: Request<Incoming>| {
+                    Ok::<_, Infallible>((StatusCode::NOT_FOUND, "").into_response())
+                });
+                let server = auto::Builder::new(TokioExecutor::new());
+                let _ = server.serve_connection(io, service).await;
+                return;
+            };
+            sandhole.telemetry.add_sni_connection(sni);
+            match sandhole.tcp_connection_timeout {
+                Some(duration) => {
+                    let _ = timeout(duration, async {
+                        let _ = copy_bidirectional(&mut stream, &mut channel).await;
+                    })
+                    .await;
+                }
+                None => {
+                    let _ = copy_bidirectional(&mut stream, &mut channel).await;
                 }
             }
-        }
-        // Create a Hyper service and serve over the accepted TLS connection.
-        let service = service_fn(move |req: Request<Incoming>| {
-            proxy_handler(req, address, None, Arc::clone(&proxy_data))
-        });
-        // Create a ClientHello TLS stream from the TCP stream.
-        let acceptor = LazyConfigAcceptor::new(Default::default(), stream);
-        tokio::pin!(acceptor);
-        match acceptor.as_mut().await {
-            Ok(handshake) => {
-                let client_hello = handshake.client_hello();
-                if is_tls_alpn_challenge(&client_hello) {
-                    // Handle ALPN challenges with the ACME resolver.
-                    if let Some(challenge_config) = certificates.challenge_rustls_config() {
-                        let mut tls = handshake.into_stream(challenge_config).await.unwrap();
-                        tls.shutdown().await.unwrap();
+            return;
+        };
+        let tunnel_handler = sandhole.http.get(&sni);
+        let is_http2 = match tunnel_handler.as_ref() {
+            Some(conn) => conn
+                .http_data()
+                .await
+                .map(|data| data.http2)
+                .unwrap_or_default(),
+            None => false,
+        };
+        let server_config = if is_http2 {
+            http2_server_config
+        } else {
+            http11_server_config
+        };
+        match TlsAcceptor::from(server_config).accept(stream).await {
+            Ok(stream) => {
+                // Create a Hyper service and serve over the accepted TLS connection.
+                let io = TokioIo::new(stream);
+                let service = service_fn(move |req: Request<Incoming>| {
+                    proxy_handler(req, address, None, Arc::clone(&proxy_data))
+                });
+                let server = auto::Builder::new(TokioExecutor::new());
+                let conn = server.serve_connection_with_upgrades(io, service);
+                match sandhole.tcp_connection_timeout {
+                    Some(duration) => {
+                        let _ = timeout(duration, conn).await;
                     }
-                } else {
-                    // Handle regular HTTPS TLS stream.
-                    let is_http2 = match client_hello
-                        .server_name()
-                        .and_then(|host| http_connections.get(host))
-                    {
-                        Some(conn) => conn.http_data().await.is_some_and(|data| data.http2),
-                        None => false,
-                    };
-                    let server_config = if is_http2 {
-                        http2_server_config
-                    } else {
-                        http11_server_config
-                    };
-                    match handshake.into_stream(server_config).await {
-                        Ok(stream) => {
-                            let io = TokioIo::new(stream);
-                            let server = auto::Builder::new(TokioExecutor::new());
-                            let conn = server.serve_connection_with_upgrades(io, service);
-                            match tcp_connection_timeout {
-                                Some(duration) => {
-                                    let _ = timeout(duration, conn).await;
-                                }
-                                None => {
-                                    let _ = conn.await;
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            warn!(
-                                "Error establishing TLS connection with {}: {}",
-                                address, err
-                            );
-                        }
+                    None => {
+                        let _ = conn.await;
                     }
                 }
             }
             Err(err) => {
                 warn!(
-                    "Failed to establish TLS handshake with {}: {}",
+                    "Error establishing TLS connection with {}: {}",
                     address, err
                 );
             }

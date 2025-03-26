@@ -34,6 +34,16 @@ If you wish to change the default behavior, and allow users to provide their own
 
 Otherwise, if you wish the subdomains to still be random, but persist between requests/disconnections, check out the `--random-subdomain-seed` option in the [command-line interface](./cli.md).
 
+## Allow connecting to SSH via the HTTPS port
+
+In some networks, outbound connections to 22 (or 2222) may be blocked by the operators. In Sandhole, it's possible to get around this with the `--connect-ssh-on-https-port` option.
+
+Once you have configured it, users can then expose their services with the `-p 443` option:
+
+```bash
+ssh -R example:80:localhost:3000 sandhole.com.br -p 443
+```
+
 ## Alternative authentication with password
 
 In some scenarios, it makes more sense to authenticate users dynamically with a password, rather than manually adding public keys to a directory.

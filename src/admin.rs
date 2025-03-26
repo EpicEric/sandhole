@@ -22,20 +22,18 @@ use ratatui::{
     },
 };
 use russh::keys::ssh_key::Fingerprint;
-use tokio::{
-    sync::{mpsc::UnboundedSender, watch},
-    time::sleep,
-};
+use tokio::{sync::watch, time::sleep};
 
 use crate::{
     SandholeServer, SystemData,
     droppable_handle::DroppableHandle,
     fingerprints::{AuthenticationType, KeyData},
+    ssh::ServerHandlerSender,
     tcp_alias::TcpAlias,
 };
 
 struct BufferedSender {
-    tx: UnboundedSender<Vec<u8>>,
+    tx: ServerHandlerSender,
     buf: Vec<u8>,
 }
 
@@ -46,18 +44,14 @@ impl io::Write for BufferedSender {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        let result = self.tx.send(self.buf.drain(..).collect());
-        if let Err(err) = result {
-            Err(io::Error::new(io::ErrorKind::BrokenPipe, err))
-        } else {
-            Ok(())
-        }
+        self.tx.send(self.buf.drain(..).collect())
     }
 }
 
 #[derive(Clone, Copy)]
 enum Tab {
     Http,
+    Sni,
     Ssh,
     Tcp,
     Alias,
@@ -67,6 +61,7 @@ impl Tab {
     fn color(&self) -> Color {
         match self {
             Tab::Http => Color::Blue,
+            Tab::Sni => Color::Cyan,
             Tab::Ssh => Color::Yellow,
             Tab::Tcp => Color::Green,
             Tab::Alias => Color::Red,
@@ -87,6 +82,7 @@ impl TabData {
                 .iter()
                 .map(|tab| match tab {
                     Tab::Http => Line::from("  HTTP  ".black().bg(Tab::Http.color())),
+                    Tab::Sni => Line::from("  SNI  ".black().bg(Tab::Sni.color())),
                     Tab::Ssh => Line::from("  SSH  ".black().bg(Tab::Ssh.color())),
                     Tab::Tcp => Line::from("  TCP  ".black().bg(Tab::Tcp.color())),
                     Tab::Alias => Line::from("  Alias  ".black().bg(Tab::Alias.color())),
@@ -361,6 +357,41 @@ impl AdminState {
                     .block(title)
                     .row_highlight_style(Style::new().fg(color).reversed())
             }
+            Tab::Sni => {
+                // Get data for aliases
+                let data = self.server.sni_data.read().unwrap().clone();
+                self.vertical_scroll = self.vertical_scroll.content_length(data.len());
+                // Create rows for each socket or alias
+                let rows: Vec<Row<'_>> = data
+                    .iter()
+                    .map(|(host, (connections, conns_per_min))| {
+                        let len = connections.len() as u16;
+                        let (peers, users): (Vec<_>, Vec<_>) = connections.iter().unzip();
+                        Row::new(vec![
+                            host.clone(),
+                            conns_per_min.to_string(),
+                            users.iter().join("\n"),
+                            peers.iter().map(to_socket_addr_string).join("\n"),
+                        ])
+                        .height(len)
+                    })
+                    .collect();
+                let constraints = [
+                    Constraint::Min(25),
+                    Constraint::Length(7),
+                    Constraint::Length(50),
+                    Constraint::Length(47),
+                ];
+                let header = Row::new(["Alias", "Con/min", "User(s)", "Peer(s)"])
+                    .add_modifier(Modifier::UNDERLINED);
+                let title =
+                    Block::new().title(Line::from("SNI proxies".fg(color).bold()).centered());
+                Table::new(rows, constraints)
+                    .header(header)
+                    .column_spacing(1)
+                    .block(title)
+                    .row_highlight_style(Style::new().fg(color).reversed())
+            }
             Tab::Ssh => {
                 // Get data for SSH
                 let data = self.server.ssh_data.read().unwrap().clone();
@@ -543,7 +574,7 @@ pub(crate) struct AdminInterface {
 
 impl AdminInterface {
     // Create an admin interface and send its output to the provided UnboundedSender
-    pub(crate) fn new(tx: UnboundedSender<Vec<u8>>, server: Arc<SandholeServer>) -> Self {
+    pub(crate) fn new(tx: ServerHandlerSender, server: Arc<SandholeServer>) -> Self {
         let backend = CrosstermBackend::new(BufferedSender {
             tx,
             buf: Vec::new(),
@@ -556,6 +587,9 @@ impl AdminInterface {
         let mut tabs = Vec::new();
         if !server.disable_http {
             tabs.push(Tab::Http);
+            if !server.disable_sni {
+                tabs.push(Tab::Sni);
+            }
         }
         if !server.disable_aliasing {
             tabs.push(Tab::Ssh);
@@ -808,6 +842,15 @@ impl AdminInterface {
                                 .state
                                 .server
                                 .http_data
+                                .read()
+                                .unwrap()
+                                .values()
+                                .nth(row)
+                                .map(|value| value.0.values().cloned().collect()),
+                            Tab::Sni => interface
+                                .state
+                                .server
+                                .sni_data
                                 .read()
                                 .unwrap()
                                 .values()
