@@ -3,7 +3,8 @@ services:
     image: docker.io/epiceric/agnos:latest
     container_name: sandhole_agnos
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "53:53/udp"
     volumes:
       - ./agnos:/agnos:rw
       - ./config.toml:/config.toml:ro
