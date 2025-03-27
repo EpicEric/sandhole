@@ -8,7 +8,7 @@ If you're compiling from a separate workstation than the one that will be runnin
 git clone https://github.com/EpicEric/sandhole
 cd sandhole
 cargo build --release
-scp target/release/sandhole user@sandhole.com:/usr/local/bin/sandhole
+scp target/release/sandhole user@sandhole.com.br:/usr/local/bin/sandhole
 ```
 
 If you're compiling on the machine that'll be running Sandhole, you can install it directly with `cargo install`. This should also add `sandhole` to your `PATH`:
@@ -25,7 +25,7 @@ cargo install sandhole  # Installs from latest release sources uploaded to crate
 Once this is all done, you can start running Sandhole! Just make sure that it points to your own domain:
 
 ```bash
-sandhole --domain sandhole.com
+sandhole --domain sandhole.com.br
 ```
 
 By default, this will expose ports 80 (for HTTP), 443 (for HTTPS), and 2222 (for SSH). If it all succeeds, you should see the following:

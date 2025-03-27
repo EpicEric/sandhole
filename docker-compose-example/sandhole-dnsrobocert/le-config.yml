@@ -2,14 +2,14 @@
 
 # 1. Change this to your e-mail address
 acme:
-  email_account: admin@sandhole.com
+  email_account: admin@sandhole.com.br
 
-# 2. Change this from sandhole.com to your domain
+# 2. Change this from sandhole.com.br to your domain
 certificates:
   - domains:
-      - sandhole.com
-      - "*.sandhole.com"
-    name: sandhole.com
+      - sandhole.com.br
+      - "*.sandhole.com.br"
+    name: sandhole.com.br
     profile: hetzner
 
 # 3. Configure your DNS provider.

@@ -91,7 +91,7 @@ async fn ssh_ignore_data_on_non_session_channels() {
         .await
         .expect("channel_open_session_failed");
 
-    // 3. Send data through the TCP port of our proxy
+    // 3. Send exploit payload through the TCP port of our proxy
     let mut tcp_stream = TcpStream::connect("127.0.0.1:12345")
         .await
         .expect("TCP connection failed");
@@ -101,7 +101,7 @@ async fn ssh_ignore_data_on_non_session_channels() {
         .expect("should be able to send data");
     let mut buf = [0u8; 1];
     tcp_stream.read_exact(&mut buf).await.unwrap();
-    assert_eq!(&buf, &[9]);
+    assert_eq!(&buf, &[3]);
     sleep(Duration::from_millis(100)).await;
     assert!(!session.is_closed(), "session shouldn't have been closed");
 }
@@ -131,10 +131,7 @@ impl russh::client::Handler for SshClient {
             let mut channel = channel;
             match channel.wait().await.unwrap() {
                 russh::ChannelMsg::Data { data } => {
-                    channel
-                        .data(data.iter().map(|i| i * i).collect::<Vec<u8>>().as_ref())
-                        .await
-                        .unwrap();
+                    channel.data(data.as_ref()).await.unwrap();
                 }
                 _ => {
                     channel.exit_status(1).await.unwrap();

@@ -7,7 +7,7 @@ In some networks, outbound connections to 22 (or 2222) may be blocked by the ope
 Once your administrator has configured it, you can then expose your services with:
 
 ```bash
-ssh -R example:80:localhost:3000 sandhole.com -p 443
+ssh -R example:80:localhost:3000 sandhole.com.br -p 443
 ```
 
 ## Custom domains
@@ -24,7 +24,7 @@ Then, add the following entries to your DNS server (assuming that your custom do
 
 | Type  | Domain                              | Data                                                          |
 | ----- | ----------------------------------- | ------------------------------------------------------------- |
-| CNAME | <pre>my.domain.net</pre>            | <pre>sandhole.com</pre>                                       |
+| CNAME | <pre>my.domain.net</pre>            | <pre>sandhole.com.br</pre>                                    |
 | TXT   | <pre>\_sandhole.my.domain.net</pre> | <pre>SHA256:bwf4FDtNeZzFv8xHBzHJwRpDRxssCll8w2tCHFC9n1o</pre> |
 
 This instructs your DNS server to redirect requests to Sandhole, and tells Sandhole to authorize your SSH key for the given domain, respectively.
@@ -34,7 +34,7 @@ If you need to use multiple keys for the same domain, simply add a TXT record fo
 Then, expose your service at the given domain:
 
 ```bash
-ssh -p 2222 -R my.domain.net:80:localhost:3000 sandhole.com
+ssh -p 2222 -R my.domain.net:80:localhost:3000 sandhole.com.br
 ```
 
 ### HTTPS support for custom domains
@@ -43,8 +43,8 @@ If your administrator has configured [ACME support](./tls_support.md#acme-suppor
 
 However, if you require DNS challenges for your domain's certification for any reason, and your administrator is running [Agnos](./tls_support.md), you can simply set another DNS entry:
 
-| Type | Domain                                    | Data                             |
-| ---- | ----------------------------------------- | -------------------------------- |
-| NS   | <pre>\_acme-challenge.my.domain.net</pre> | <pre>agnos-ns.sandhole.com</pre> |
+| Type | Domain                                    | Data                                |
+| ---- | ----------------------------------------- | ----------------------------------- |
+| NS   | <pre>\_acme-challenge.my.domain.net</pre> | <pre>agnos-ns.sandhole.com.br</pre> |
 
 This lets Agnos manage the ACME challenge for you, as long as the admin updates [Agnos's configuration](https://github.com/krtab/agnos#agnos-configuration) with your domain.

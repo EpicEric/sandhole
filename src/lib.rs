@@ -106,9 +106,12 @@ struct SystemData {
 type SessionMap = HashMap<usize, CancellationToken>;
 // A generic table with data for the admin interface.
 type DataTable<K, V> = Arc<RwLock<BTreeMap<K, V>>>;
+// Helper type for HTTP proxy data types.
+type HttpProxyData<C> = Arc<ProxyData<Arc<C>, SshTunnelHandler, ChannelStream<Msg>>>;
+// HTTP proxy data used by the tunneling connections.
+type TunnelingProxyData = HttpProxyData<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>;
 // HTTP proxy data used by the local forwarding aliasing connections.
-type AliasingProxyData =
-    Arc<ProxyData<Arc<HttpAliasingConnection>, SshTunnelHandler, ChannelStream<Msg>>>;
+type AliasingProxyData = HttpProxyData<HttpAliasingConnection>;
 
 pub(crate) struct SandholeServer {
     // A unique ID assigned for each SSH session.
@@ -663,94 +666,21 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                     info!("Rejecting HTTPS connection for {}: not allowed", ip);
                     continue;
                 }
-                let proxy_data = Arc::clone(&https_proxy_data);
-                let ssh_config = Arc::clone(&ssh_config_clone);
-                let mut sandhole = Arc::clone(&sandhole_clone);
-                let certificates = Arc::clone(&certificates_clone);
-                let http_connections = Arc::clone(&http_connections);
-                let http2_server_config = Arc::clone(&http2_server_config);
-                let http11_server_config = Arc::clone(&http11_server_config);
-                tokio::spawn(async move {
-                    if let Err(err) = stream.set_nodelay(true) {
-                        warn!("Error setting nodelay for {}: {}", address, err);
-                    }
-                    if config.connect_ssh_on_https_port {
-                        // Check if this is an SSH-2.0 handshake.
-                        let mut buf = [0u8; 8];
-                        if let Ok(n) = stream.peek(&mut buf).await {
-                            if buf[..n].starts_with(b"SSH-2.0-") {
-                                // Handle as an SSH connection instead of HTTPS.
-                                handle_ssh_connection(stream, address, &ssh_config, &mut sandhole);
-                                return;
-                            }
-                        }
-                    }
-                    // Create a Hyper service and serve over the accepted TLS connection.
-                    let service = service_fn(move |req: Request<Incoming>| {
-                        proxy_handler(req, address, None, Arc::clone(&proxy_data))
-                    });
-                    // Create a ClientHello TLS stream from the TCP stream.
-                    let acceptor = LazyConfigAcceptor::new(Default::default(), stream);
-                    tokio::pin!(acceptor);
-                    match acceptor.as_mut().await {
-                        Ok(handshake) => {
-                            let client_hello = handshake.client_hello();
-                            if is_tls_alpn_challenge(&client_hello) {
-                                // Handle ALPN challenges with the ACME resolver.
-                                if let Some(challenge_config) =
-                                    certificates.challenge_rustls_config()
-                                {
-                                    let mut tls =
-                                        handshake.into_stream(challenge_config).await.unwrap();
-                                    tls.shutdown().await.unwrap();
-                                }
-                            } else {
-                                // Handle regular HTTPS TLS stream.
-                                let is_http2 = match client_hello
-                                    .server_name()
-                                    .and_then(|host| http_connections.get(host))
-                                {
-                                    Some(conn) => {
-                                        conn.http_data().await.is_some_and(|data| data.http2)
-                                    }
-                                    None => false,
-                                };
-                                let server_config = if is_http2 {
-                                    http2_server_config
-                                } else {
-                                    http11_server_config
-                                };
-                                match handshake.into_stream(server_config).await {
-                                    Ok(stream) => {
-                                        let io = TokioIo::new(stream);
-                                        let server = auto::Builder::new(TokioExecutor::new());
-                                        let conn =
-                                            server.serve_connection_with_upgrades(io, service);
-                                        match tcp_connection_timeout {
-                                            Some(duration) => {
-                                                let _ = timeout(duration, conn).await;
-                                            }
-                                            None => {
-                                                let _ = conn.await;
-                                            }
-                                        }
-                                    }
-                                    Err(err) => {
-                                        warn!(
-                                            "Error establishing TLS connection with {}: {}",
-                                            address, err
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            warn!(
-                                "Failed to establish TLS handshake with {}: {}",
-                                address, err
-                            );
-                        }
-                    }
+                if let Err(err) = stream.set_nodelay(true) {
+                    warn!("Error setting nodelay for {}: {}", address, err);
+                }
+                handle_https_connection(HandleHttpsConnectionConfig {
+                    stream,
+                    address,
+                    tcp_connection_timeout,
+                    connect_ssh_on_https_port: config.connect_ssh_on_https_port,
+                    proxy_data: Arc::clone(&https_proxy_data),
+                    ssh_config: Arc::clone(&ssh_config_clone),
+                    sandhole: Arc::clone(&sandhole_clone),
+                    certificates: Arc::clone(&certificates_clone),
+                    http_connections: Arc::clone(&http_connections),
+                    http2_server_config: Arc::clone(&http2_server_config),
+                    http11_server_config: Arc::clone(&http11_server_config),
                 });
             }
         }))
@@ -783,7 +713,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 if let Err(err) = stream.set_nodelay(true) {
                     warn!("Error setting nodelay for {}: {}", address, err);
                 }
-                handle_ssh_connection(stream, address, &ssh_config, &mut sandhole);
+                handle_ssh_connection(HandleSshConnectionConfig {
+                    stream,
+                    address,
+                    config: Arc::clone(&ssh_config),
+                    server: &mut sandhole,
+                });
             }
             _ = &mut signal_handler => {
                 break;
@@ -800,13 +735,130 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_ssh_connection(
+struct HandleHttpsConnectionConfig {
     stream: TcpStream,
     address: SocketAddr,
-    config: &Arc<Config>,
-    server: &mut Arc<SandholeServer>,
+    connect_ssh_on_https_port: bool,
+    proxy_data: TunnelingProxyData,
+    tcp_connection_timeout: Option<Duration>,
+    ssh_config: Arc<Config>,
+    sandhole: Arc<SandholeServer>,
+    certificates: Arc<CertificateResolver>,
+    http_connections: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
+    http2_server_config: Arc<ServerConfig>,
+    http11_server_config: Arc<ServerConfig>,
+}
+
+fn handle_https_connection(
+    HandleHttpsConnectionConfig {
+        stream,
+        address,
+        connect_ssh_on_https_port,
+        tcp_connection_timeout,
+        proxy_data,
+        ssh_config,
+        mut sandhole,
+        certificates,
+        http_connections,
+        http2_server_config,
+        http11_server_config,
+    }: HandleHttpsConnectionConfig,
 ) {
-    let config = Arc::clone(config);
+    tokio::spawn(async move {
+        if connect_ssh_on_https_port {
+            // Check if this is an SSH-2.0 handshake.
+            let mut buf = [0u8; 8];
+            if let Ok(n) = stream.peek(&mut buf).await {
+                if buf[..n].starts_with(b"SSH-2.0-") {
+                    // Handle as an SSH connection instead of HTTPS.
+                    handle_ssh_connection(HandleSshConnectionConfig {
+                        stream,
+                        address,
+                        config: Arc::clone(&ssh_config),
+                        server: &mut sandhole,
+                    });
+                    return;
+                }
+            }
+        }
+        // Create a Hyper service and serve over the accepted TLS connection.
+        let service = service_fn(move |req: Request<Incoming>| {
+            proxy_handler(req, address, None, Arc::clone(&proxy_data))
+        });
+        // Create a ClientHello TLS stream from the TCP stream.
+        let acceptor = LazyConfigAcceptor::new(Default::default(), stream);
+        tokio::pin!(acceptor);
+        match acceptor.as_mut().await {
+            Ok(handshake) => {
+                let client_hello = handshake.client_hello();
+                if is_tls_alpn_challenge(&client_hello) {
+                    // Handle ALPN challenges with the ACME resolver.
+                    if let Some(challenge_config) = certificates.challenge_rustls_config() {
+                        let mut tls = handshake.into_stream(challenge_config).await.unwrap();
+                        tls.shutdown().await.unwrap();
+                    }
+                } else {
+                    // Handle regular HTTPS TLS stream.
+                    let is_http2 = match client_hello
+                        .server_name()
+                        .and_then(|host| http_connections.get(host))
+                    {
+                        Some(conn) => conn.http_data().await.is_some_and(|data| data.http2),
+                        None => false,
+                    };
+                    let server_config = if is_http2 {
+                        http2_server_config
+                    } else {
+                        http11_server_config
+                    };
+                    match handshake.into_stream(server_config).await {
+                        Ok(stream) => {
+                            let io = TokioIo::new(stream);
+                            let server = auto::Builder::new(TokioExecutor::new());
+                            let conn = server.serve_connection_with_upgrades(io, service);
+                            match tcp_connection_timeout {
+                                Some(duration) => {
+                                    let _ = timeout(duration, conn).await;
+                                }
+                                None => {
+                                    let _ = conn.await;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                "Error establishing TLS connection with {}: {}",
+                                address, err
+                            );
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                warn!(
+                    "Failed to establish TLS handshake with {}: {}",
+                    address, err
+                );
+            }
+        }
+    });
+}
+
+struct HandleSshConnectionConfig<'a> {
+    stream: TcpStream,
+    address: SocketAddr,
+    config: Arc<Config>,
+    server: &'a mut Arc<SandholeServer>,
+}
+
+fn handle_ssh_connection(
+    HandleSshConnectionConfig {
+        stream,
+        address,
+        config,
+        server,
+    }: HandleSshConnectionConfig,
+) {
     let cancellation_token = CancellationToken::new();
     // Create a new SSH handler.
     let handler = server.new_client(address, cancellation_token.clone());

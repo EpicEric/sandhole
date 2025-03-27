@@ -20,8 +20,8 @@ services:
     # See also: https://sandhole.eric.dev.br/cli.html
     # Make sure to change at least --domain and --acme-contact-email below
     command: |
-      --domain=sandhole.com
-      --acme-contact-email=admin@sandhole.com
+      --domain=sandhole.com.br
+      --acme-contact-email=admin@sandhole.com.br
       --user-keys-directory=/deploy/user_keys/
       --admin-keys-directory=/deploy/admin_keys/
       --certificates-directory=/letsencrypt/live/

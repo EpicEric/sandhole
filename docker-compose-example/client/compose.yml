@@ -28,4 +28,4 @@ services:
       -o StrictHostKeyChecking=accept-new
       -o ServerAliveInterval=30
       -R example:80:nginx:80
-      sandhole.com
+      sandhole.com.br

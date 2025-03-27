@@ -4,12 +4,12 @@ dns_listen_addr = "[::]:53"
 
 [[accounts]]
 # 1. Change this to your e-mail address
-email = "admin@sandhole.com"
+email = "admin@sandhole.com.br"
 private_key_path = "agnos/letsencrypt_key.pem"
 
 [[accounts.certificates]]
-# 2. Change this from sandhole.com to your domain
-domains = ["sandhole.com", "*.sandhole.com"]
-fullchain_output_file = "agnos/sandhole.com/fullchain.pem"
-key_output_file = "agnos/sandhole.com/privkey.pem"
+# 2. Change this from sandhole.com.br to your domain
+domains = ["sandhole.com.br", "*.sandhole.com.br"]
+fullchain_output_file = "agnos/sandhole.com.br/fullchain.pem"
+key_output_file = "agnos/sandhole.com.br/privkey.pem"
 reuse_private_key = true
