@@ -3,8 +3,7 @@ services:
     image: docker.io/epiceric/agnos:latest
     container_name: sandhole_agnos
     restart: unless-stopped
-    ports:
-      - "53:53"
+    network_mode: host
     volumes:
       - ./agnos:/agnos:rw
       - ./config.toml:/config.toml:ro
@@ -14,6 +13,7 @@ services:
       - >
         agnos-generate-accounts-keys --key-size 4096 --no-confirm config.toml
         && agnos --no-staging config.toml
+        && echo 'Retrying in one hour...'
         && sleep 3600
 
   sandhole:
