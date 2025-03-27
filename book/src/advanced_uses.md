@@ -37,14 +37,14 @@ Then, expose your service at the given domain:
 ssh -p 2222 -R my.domain.net:80:localhost:3000 sandhole.com
 ```
 
-### HTTPS support
+### HTTPS support for custom domains
 
 If your administrator has configured [ACME support](./tls_support.md#acme-support), you don't need any extra steps to enable HTTPS support. It will be automatically provisioned for your custom domain.
 
-However, if you require DNS challenges for your domain's certification for any reason, and your administrator is running [dnsrobocert](./tls_support.md), you can simply set another DNS entry:
+However, if you require DNS challenges for your domain's certification for any reason, and your administrator is running [Agnos](./tls_support.md), you can simply set another DNS entry:
 
-| Type  | Domain                                    | Data                                                   |
-| ----- | ----------------------------------------- | ------------------------------------------------------ |
-| CNAME | <pre>\_acme-challenge.my.domain.net</pre> | <pre>\_acme-challenge.my.domain.net.sandhole.com</pre> |
+| Type | Domain                                    | Data                             |
+| ---- | ----------------------------------------- | -------------------------------- |
+| NS   | <pre>\_acme-challenge.my.domain.net</pre> | <pre>agnos-ns.sandhole.com</pre> |
 
-This lets dnsrobocert manage the ACME challenge for you, as long as the admin updates dnsrobocert's configuration with [`follow_cnames`](https://adferrand.github.io/dnsrobocert/configuration_reference.html#follow-cnames).
+This lets Agnos manage the ACME challenge for you, as long as the admin updates [Agnos's configuration](https://github.com/krtab/agnos#agnos-configuration) with your domain.

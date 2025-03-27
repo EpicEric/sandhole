@@ -1,0 +1,42 @@
+services:
+  agnos:
+    image: docker.io/epiceric/agnos:latest
+    container_name: sandhole_agnos
+    restart: unless-stopped
+    ports:
+      - "53:53"
+    volumes:
+      - ./agnos:/agnos:rw
+      - ./config.toml:/config.toml:ro
+    command:
+      - sh
+      - -c
+      - >
+        agnos-generate-accounts-keys --key-size 4096 --no-confirm config.toml
+        && agnos --no-staging config.toml
+        && sleep 3600
+
+  sandhole:
+    image: docker.io/epiceric/sandhole:latest
+    container_name: sandhole
+    restart: unless-stopped
+    volumes:
+      - ./deploy:/deploy:rw
+      - ./agnos:/agnos:ro
+      # Change this to where the CA certificates are on the host
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+    network_mode: host
+    # See also: https://sandhole.eric.dev.br/cli.html
+    # Make sure to change at least --domain and --acme-contact-email below
+    command: |
+      --domain=sandhole.com
+      --acme-contact-email=admin@sandhole.com
+      --user-keys-directory=/deploy/user_keys/
+      --admin-keys-directory=/deploy/admin_keys/
+      --certificates-directory=/agnos/
+      --acme-cache-directory=/deploy/acme_cache/
+      --private-key-file=/deploy/server_keys/ssh
+      --ssh-port=2222
+      --http-port=80
+      --https-port=443
+      --force-https

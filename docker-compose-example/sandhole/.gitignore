@@ -1,0 +1,4 @@
+*
+!/.gitignore
+!/compose.yml
+!/config.toml

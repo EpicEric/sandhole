@@ -14,7 +14,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding. A self-hosted ngrok / 
 ## Features
 
 - Reverse proxy that just works with an OpenSSH client. No extra software required!
-- Automatic HTTPS support (with [dnsrobocert](https://github.com/adferrand/dnsrobocert) and/or ACME), including HTTP/2.
+- Automatic HTTPS support (with [Agnos](https://github.com/krtab/agnos) and ACME), including HTTP/2.
 - Easily load-balance by pointing multiple services to the same domain/port.
 - Bring your own custom domains and authorize them via DNS records.
 - Random subdomain assignment by default, with options for deterministic assignment.
