@@ -8,7 +8,7 @@ ssh -p 2222 -R example.com:80:localhost:3000 -R www.example.com:80:localhost:300
 
 ## How do I connect to a forwarded SSH server?
 
-Use `ssh -p 2222 -J sandhole.com.br:2222 mysshserver.com ` (replace the ports with Sandhole's SSH port if not using the default `2222`).
+Use `ssh -p 2222 -J sandhole.com.br:2222 mysshserver.com` (replace the ports with Sandhole's SSH port if not using the default `2222`).
 
 If you'd like to avoid typing out the proxy jump command every time, make sure to edit your SSH config file (usually `~/.ssh/config`) and add the following entry (changing the port where appropriate):
 
