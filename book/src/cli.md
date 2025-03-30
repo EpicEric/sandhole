@@ -43,7 +43,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           Note that this setting ignores the --disable-directory-creation flag.
 
-          [default: ./deploy/acme_cache]
+          [default: ./deploy/acme_cache/]
 
       <b>--private-key-file</b> &lt;FILE&gt;
           File path to the server&#39;s secret key. If missing, it will be
@@ -93,8 +93,8 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           Contact e-mail to use with Let&#39;s Encrypt. If set, enables ACME for
           HTTPS certificates.
 
-          By providing your e-mail, you agree to the Let&#39;s Encrypt
-          Subscriber Agreement.
+          By providing your e-mail, you agree to the Let&#39;s Encrypt Subscriber
+          Agreement.
 
       <b>--acme-use-staging</b>
           Controls whether to use the staging directory for Let&#39;s Encrypt
@@ -162,6 +162,9 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
       <b>--disable-http</b>
           Disable all HTTP tunneling. By default, this is enabled globally
 
+      <b>--disable-sni</b>
+          Disable SNI proxy tunneling. By default, this is enabled globally
+
       <b>--disable-tcp</b>
           Disable all TCP port tunneling except HTTP. By default, this is
           enabled globally
@@ -171,8 +174,8 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           enabled globally
 
       <b>--quota-per-user</b> &lt;MAX&gt;
-          How many services can be exposed for a single user at once.
-          Doesn&#39;t apply to admin users.
+          How many services can be exposed for a single user at once. Doesn&#39;t
+          apply to admin users.
 
           Each user is distinguished by their key fingerprint or, in the case of
           API logins, by their username.
@@ -189,11 +192,10 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           If unset, defaults to a random seed.
 
           Possible values:
-          - <b>ip-and-user</b>: From IP address, SSH user, and requested
-                         address. Recommended if unsure
+          - <b>ip-and-user</b>: From IP address, SSH user, and requested address.
+                         Recommended if unsure
           - <b>user</b>:        From SSH user and requested address
-          - <b>fingerprint</b>: From SSH user, key fingerprint, and requested
-                         address.
+          - <b>fingerprint</b>: From SSH user, key fingerprint, and requested address
           - <b>address</b>:     From SSH connection socket (address + port) and
                          requested address
 
@@ -246,8 +248,6 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           Time until an outgoing HTTP request is automatically canceled.
 
           By default, outgoing requests are not terminated by Sandhole.
-
-          [default: 30s]
 
       <b>--tcp-connection-timeout</b> &lt;DURATION&gt;
           How long until TCP connections (including Websockets and local

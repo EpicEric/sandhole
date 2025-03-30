@@ -5,6 +5,7 @@
 ### Added
 
 - Add `sni-proxy` option for remote forwarding connections.
+- Add `--disable-sni` CLI flag.
 
 ### Fixed
 
