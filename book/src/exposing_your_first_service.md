@@ -1,12 +1,14 @@
 # Exposing your first service
 
-Once you have [an authorized public key](./configuration.md#adding-users-and-admins) in Sandhole, you can expose a local service. Assuming that your local HTTP service is running on port 3000, and that Sandhole is listening on `sandhole.com.br:2222`, all you have to do is run
+Once you have [an authorized public key](./configuration.md#adding-users-and-admins) in Sandhole, you can expose a local service. Assuming that your local HTTP service is running on port 3000, and that Sandhole is listening on `sandhole.com.br:2222`, all you have to do is run:
 
 ```bash
 ssh -i /your/private/key -p 2222 -R 80:localhost:3000 sandhole.com.br
 ```
 
 Yep, that's it! Sandhole will log that HTTP is being served for you on a certain subdomain, and you can access the URL printed to the console to see that your service is available to the public.
+
+You'll also receive logs about each incoming HTTP request if the administrator hasn't disabled the logging option.
 
 ## Requesting multiple tunnels
 
@@ -24,7 +26,9 @@ For example, to bind under `test.sandhole.com.br`, we could use either of these 
 
 ```bash
 ssh -i /your/private/key -p 2222 -R test:80:localhost:3000 sandhole.com.br
+#
 # -- OR --
+#
 ssh -i /your/private/key -p 2222 -R test.sandhole.com.br:80:localhost:3000 sandhole.com.br
 ```
 
@@ -32,7 +36,9 @@ And if we'd like to bind to a specific port, say 4321:
 
 ```bash
 ssh -i /your/private/key -p 2222 -R 4321:localhost:3000 sandhole.com.br
+#
 # -- OR --
+#
 ssh -i /your/private/key -p 2222 -R localhost:4321:localhost:3000 sandhole.com.br
 ```
 
@@ -48,4 +54,4 @@ ssh -p 2222 -o PubkeyAuthentication=no -o PreferredAuthentications=password user
 
 If you'd like to have persistent tunnels, use a tool like `autossh` to automatically reconnect when disconnected. Note that you might be assigned a new subdomain or port through disconnects, depending on the server configuration.
 
-For a container-based alternative, [check out the Docker Compose client example](https://github.com/EpicEric/sandhole/tree/main/docker-compose-example/client) in the repository.
+For a container-based alternative, [check out the Docker Compose example](https://github.com/EpicEric/sandhole/tree/main/docker-compose-example/client) in the repository.

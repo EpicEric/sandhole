@@ -24,3 +24,27 @@ Sandhole is essentially a reverse proxy. It leverages SSH for authentication and
 ![A diagram displaying Sandhole's usage as a reverse proxy. It's deployed to a public server, where a local service connects to its SSH port. A remote service in a private server also connects to the SSH port over the Internet. Meanwhile, a client's web browser connects to the HTTPS port of Sandhole over the Internet.](./how_it_works.svg)
 
 As such, it's possible to expose services publicly without needing a VPN, even behind NAT or firewalls.
+
+## Example flow
+
+Let's say client A wishes to expose a local service, running on port 8080, to the Internet.
+
+![A diagram showing a connection to Sandhole's HTTP proxy in six steps.](./example_flow.svg)
+
+1. Client A connects to a Sandhole instance while requesting a remote port forwarding:
+
+```bash
+ssh -p 2222 -R mytunnel:80:localhost:8080 sandhole.com.br
+```
+
+2. Sandhole handles the forwarding request and starts proxying requests from `http://mytunnel.sandhole.com.br` to client A's port 8080.
+
+3. Client B accesses `http://mytunnel.sandhole.com.br` through a web browser.
+
+4. Sandhole opens a tunneling channel over SSH to client A, simulating a TCP stream containing client B's request.
+
+5. Client A's HTTP server replies over the SSH channel.
+
+6. Sandhole forwards the reply to client B.
+
+To client A, requests arrive normally at the socket. To client B, Sandhole acts as if it were the service itself.

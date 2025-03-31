@@ -17,7 +17,7 @@ Then, add the following entries to your DNS server (assuming that your custom do
 
 This instructs your DNS server to redirect requests to Sandhole, and tells Sandhole to authorize your SSH key for the given domain, respectively.
 
-If you need to use multiple keys for the same domain, simply add a TXT record for each one.
+If you need to allow multiple keys for the same domain, simply add a TXT record for each one.
 
 Then, expose your service at the given domain:
 

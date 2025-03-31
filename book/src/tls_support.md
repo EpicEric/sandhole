@@ -18,4 +18,6 @@ sandhole --domain sandhole.com.br --certificates-directory ./letsencrypt/live
 
 ## ACME support
 
+ACME allows you to generate certificates for user-provided domains automatically, without having to edit your configuration for each one.
+
 Adding ACME support is as simple as adding your contact e-mail address via `--acme-contact-email you@your.email.com`, but first, make sure that you agree to the [Let's Encrypt Subscriber Agreement](https://letsencrypt.org/repository/). Sandhole will automatically manage the cache for your account and any certificates generated this way.

@@ -18,9 +18,9 @@ Then you can access `localhost:4000`, and all traffic will be redirected to port
 
 ## Enforcing aliasing
 
-Aliasing is always enabled for SSH hosts, and is conditionally enabled for TCP hosts that have requested a address different from `localhost` (for example, `my.tunnel` in the previous section).
+Aliasing is always enabled for SSH hosts, and is conditionally enabled for TCP hosts that have requested an address other than `localhost`.
 
-To enable aliasing for HTTP hosts, pass either the `tcp-alias` command to the remote forwarding command as follows:
+To enable aliasing for HTTP hosts, pass the `tcp-alias` command to the remote forwarding command as follows:
 
 ```bash
 ssh -p 2222 -R my.tunnel:80:localhost:8080 sandhole.com.br tcp-alias
@@ -37,7 +37,3 @@ ssh -p 2222 -R my.tunnel:3000:localhost:2000 sandhole.com.br allowed-fingerprint
 These fingerprints may belong to keys unrecognized by Sandhole, and they'll still be able to connect to your tunnel.
 
 This option will also enforce aliasing for HTTP hosts.
-
-## Disabling local forwarding
-
-The administrator can disable all local forwardings with the [`--disable-aliasing` CLI flag](./cli.md).
