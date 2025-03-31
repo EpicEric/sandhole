@@ -47,4 +47,4 @@ ssh -p 2222 -R mytunnel:80:localhost:8080 sandhole.com.br
 
 6. Sandhole forwards the reply to client B.
 
-To client A, requests arrive normally at the socket. To client B, Sandhole acts as if it were the service itself.
+To client A, requests arrive normally at the socket, despite only having an outbound SSH connection. To client B, Sandhole acts as if it were the service itself.
