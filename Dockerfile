@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM rust:1.85.1-alpine3.21 AS builder
+FROM --platform=$BUILDPLATFORM rust:1.86.0-alpine3.21 AS builder
 ENV PKGCONFIG_SYSROOTDIR=/
 RUN apk add --no-cache musl-dev libressl-dev perl build-base zig
 RUN cargo install --locked cargo-zigbuild

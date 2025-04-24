@@ -28,7 +28,7 @@ It's simple: just let Sandhole take care of that for you! Nothing stops you from
 
 ## How do I disable HTTP/TCP/aliasing?
 
-With the `--disable--http`, `--disable-tcp`, and `--disable-aliasing` [CLI flags](./cli.md) respectively. Note that you cannot disable all three at once, as that'd remove all of Sandhole's functionality.
+With the `--disable--http`, `--disable-tcp`, and `--disable-aliasing` [CLI flags](./cli.md) respectively. Note that you cannot disable all three at once, as that would remove all of Sandhole's functionality.
 
 ## How do I prevent multiple services from load-balancing?
 
@@ -49,8 +49,8 @@ Simply build an Alpine image with `ca-certificates` and `sandhole` installed, fo
 ```dockerfile
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
-COPY --from=epiceric/sandhole:latest /sandhole /sandhole
-ENTRYPOINT [ "/sandhole" ]
+COPY --from=epiceric/sandhole:latest /sandhole /usr/bin/sandhole
+ENTRYPOINT [ "sandhole" ]
 ```
 
 However, if you don't intend to use the [HTTPS login API functionality](./configuration.md#alternative-authentication-with-password), you can skip using certificates entirely.

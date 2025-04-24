@@ -9,6 +9,8 @@ An example configuration is provided in the repository's [docker-compose-example
 Then, simply run:
 
 ```bash
+docker compose up -d
+# ... which is shorthand for:
 docker compose up --detach
 ```
 
