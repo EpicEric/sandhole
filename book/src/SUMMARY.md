@@ -6,8 +6,8 @@
 - [Quick start](./quick_start.md)
   - [Using Docker Compose](./docker_compose.md)
   - [Compiling from source](./compiling_from_source.md)
-- [Configuration](./configuration.md)
 - [TLS support](./tls_support.md)
+- [Configuration](./configuration.md)
 - [Admin interface](./admin_interface.md)
 
 # User guide

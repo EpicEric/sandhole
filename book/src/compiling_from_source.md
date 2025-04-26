@@ -24,3 +24,5 @@ cargo install --locked --git https://github.com/EpicEric/sandhole
 ```
 
 Cargo should automatically add the binary to your `PATH`.
+
+Finally, make sure to configure [a TLS provider](./tls_support.md).

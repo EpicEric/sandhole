@@ -7,11 +7,11 @@ In order to run Sandhole, you'll need:
 
 ## 1. Configure your DNS
 
-Make sure to point the `A` and `AAAA` records to your server's IP address(es).
+Make sure to point the `A` and `AAAA` records to your server's IP address(es). If you intend to use Agnos (recommended), also set an `NS` record for `_acme-challenge.sandhole.com.br` to `agnos-ns.sandhole.com.br` (or any other domain that will reach your Sandhole instance).
 
-This step varies depending on your choice of DNS provider. For example, on DigitalOcean, this is what the configuration might look like:
+How to set up your DNS records depends on your choice of DNS provider. For example, on DigitalOcean, this is what the configuration might look like:
 
-![A table showing DNS records for "sandhole.com.br" and "*.sandhole.com.br" pointing to IPv4 and IPv6 addresses.](./digitalocean_dns.png)
+![A table showing DNS records for "sandhole.com.br" and "*.sandhole.com.br" pointing to IPv4 and IPv6 addresses, as well as "_acme-challenge.sandhole.com.br" having its nameservers redirected to "agnos-ns.sandhole.com.br".](./digitalocean_dns.png)
 
 ## 2. Get the executable
 
@@ -27,7 +27,7 @@ wget --output-document sandhole https://github.com/EpicEric/sandhole/releases/la
 wget --output-document sandhole https://github.com/EpicEric/sandhole/releases/latest/download/sandhole-linux-arm64
 ```
 
-If you prefer, you may also use [Docker Compose](./docker_compose.md) or [compile the binary yourself](./compiling_from_source.md).
+If you prefer, you may also use [Docker Compose](./docker_compose.md) (recommended) or [compile the binary yourself](./compiling_from_source.md).
 
 ## 3. Run Sandhole
 
