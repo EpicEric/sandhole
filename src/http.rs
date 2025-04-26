@@ -26,7 +26,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use log::{debug, warn};
 use russh::keys::ssh_key::Fingerprint;
 use tokio::{
-    io::{AsyncRead, AsyncWrite, copy_bidirectional},
+    io::{AsyncRead, AsyncWrite, copy_bidirectional_with_sizes},
     time::timeout,
 };
 
@@ -124,6 +124,8 @@ where
     pub(crate) protocol: Protocol,
     // Configuration on which type of channel to retrieve from the handler.
     pub(crate) proxy_type: ProxyType,
+    // Buffer size for bidirectional copying.
+    pub(crate) buffer_size: usize,
     // Optional duration until an outgoing request is canceled.
     pub(crate) http_request_timeout: Option<Duration>,
     // Optional duration until an established Websocket connection is canceled.
@@ -410,6 +412,7 @@ where
                             // Retrieve the upgraded connection from the response
                             let upgraded_response = hyper::upgrade::on(&mut response).await?;
                             let websocket_timeout = proxy_data.websocket_timeout;
+                            let buffer_size = proxy_data.buffer_size;
                             // Start a task to copy data between the two Upgraded parts
                             tokio::spawn(async move {
                                 let mut upgraded_request =
@@ -419,9 +422,11 @@ where
                                     // If there is a Websocket timeout, copy until the deadline is reached.
                                     Some(duration) => {
                                         let _ = timeout(duration, async {
-                                            copy_bidirectional(
+                                            copy_bidirectional_with_sizes(
                                                 &mut upgraded_response,
                                                 &mut upgraded_request,
+                                                buffer_size,
+                                                buffer_size,
                                             )
                                             .await
                                         })
@@ -429,9 +434,11 @@ where
                                     }
                                     // If there isn't a Websocket timeout, copy data between both sides unconditionally.
                                     None => {
-                                        let _ = copy_bidirectional(
+                                        let _ = copy_bidirectional_with_sizes(
                                             &mut upgraded_response,
                                             &mut upgraded_request,
+                                            buffer_size,
+                                            buffer_size,
                                         )
                                         .await;
                                     }
@@ -548,6 +555,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Http { port: 80 },
                 proxy_type: ProxyType::Tunneling,
+                buffer_size: 8_000,
                 http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -591,6 +599,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Http { port: 80 },
                 proxy_type: ProxyType::Tunneling,
+                buffer_size: 8_000,
                 http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -634,6 +643,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Http { port: 80 },
                 proxy_type: ProxyType::Tunneling,
+                buffer_size: 8_000,
                 http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -699,6 +709,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::TlsRedirect { from: 80, to: 443 },
                 proxy_type: ProxyType::Tunneling,
+                buffer_size: 8_000,
                 http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -764,6 +775,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::TlsRedirect { from: 80, to: 8443 },
                 proxy_type: ProxyType::Tunneling,
+                buffer_size: 8_000,
                 http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -830,6 +842,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Http { port: 80 },
                 proxy_type: ProxyType::Tunneling,
+                buffer_size: 8_000,
                 http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -895,6 +908,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Http { port: 80 },
                 proxy_type: ProxyType::Tunneling,
+                buffer_size: 8_000,
                 http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -986,6 +1000,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Https { port: 443 },
                 proxy_type: ProxyType::Tunneling,
+                buffer_size: 8_000,
                 http_request_timeout: Some(Duration::from_millis(500)),
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -1072,6 +1087,7 @@ mod proxy_handler_tests {
                     }),
                     protocol: Protocol::Https { port: 443 },
                     proxy_type: ProxyType::Tunneling,
+                    buffer_size: 8_000,
                     http_request_timeout: Some(Duration::from_millis(500)),
                     websocket_timeout: None,
                     disable_http_logs: false,
@@ -1179,6 +1195,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Https { port: 443 },
                 proxy_type: ProxyType::Tunneling,
+                buffer_size: 8_000,
                 http_request_timeout: Some(Duration::from_millis(500)),
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -1275,6 +1292,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Https { port: 443 },
                 proxy_type: ProxyType::Tunneling,
+                buffer_size: 8_000,
                 http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -1371,6 +1389,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Http { port: 80 },
                 proxy_type: ProxyType::Aliasing,
+                buffer_size: 8_000,
                 http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -1467,6 +1486,7 @@ mod proxy_handler_tests {
                 }),
                 protocol: Protocol::Https { port: 443 },
                 proxy_type: ProxyType::Tunneling,
+                buffer_size: 8_000,
                 http_request_timeout: None,
                 websocket_timeout: None,
                 disable_http_logs: false,
@@ -1552,6 +1572,7 @@ mod proxy_handler_tests {
                     }),
                     protocol: Protocol::Https { port: 443 },
                     proxy_type: ProxyType::Tunneling,
+                    buffer_size: 8_000,
                     http_request_timeout: None,
                     websocket_timeout: None,
                     disable_http_logs: false,
@@ -1657,6 +1678,7 @@ mod proxy_handler_tests {
                     }),
                     protocol: Protocol::Https { port: 443 },
                     proxy_type: ProxyType::Tunneling,
+                    buffer_size: 8_000,
                     http_request_timeout: None,
                     websocket_timeout: None,
                     disable_http_logs: false,

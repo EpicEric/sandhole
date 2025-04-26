@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use human_bytes::human_bytes;
+use bytesize::ByteSize;
 use itertools::Itertools;
 use ratatui::{
     Terminal, TerminalOptions, Viewport,
@@ -533,18 +533,18 @@ impl AdminState {
             " Memory ".bold().reversed(),
             format!(
                 " {} / {}",
-                human_bytes(used_memory as f64),
-                human_bytes(total_memory as f64)
+                ByteSize::b(used_memory).display().iec_short(),
+                ByteSize::b(total_memory).display().iec_short(),
             )
             .into(),
         ]);
         let network_tx = Line::from(vec![
             "   TX   ".bold().reversed(),
-            format!(" {}/s", human_bytes(network_tx as f64)).into(),
+            format!(" {}/s", ByteSize::b(network_tx).display().iec_short()).into(),
         ]);
         let network_rx = Line::from(vec![
             "   RX   ".bold().reversed(),
-            format!(" {}/s", human_bytes(network_rx as f64)).into(),
+            format!(" {}/s", ByteSize::b(network_rx).display().iec_short()).into(),
         ]);
         Widget::render(block, area, buf);
         Widget::render(cpu_usage, cpu_area, buf);

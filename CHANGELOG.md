@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add `--buffer-size` CLI flag.
+
 ## 0.5.1 (2025-03-31)
 
 ### Added

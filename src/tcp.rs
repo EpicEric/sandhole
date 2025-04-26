@@ -8,7 +8,25 @@ use crate::{
 use anyhow::Context;
 use dashmap::DashMap;
 use log::{error, info, warn};
-use tokio::{io::copy_bidirectional, net::TcpListener, time::timeout};
+use tokio::{io::copy_bidirectional_with_sizes, net::TcpListener, time::timeout};
+
+// Service that handles creating TCP sockets for reverse forwarding connections.
+pub(crate) struct TcpHandlerConfig {
+    // Address to listen to when creating sockets.
+    pub(crate) listen_address: IpAddr,
+    // Connection map to assign a tunneling service for each incoming connection.
+    pub(crate) conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
+    // Telemetry server to keep track of the total connections.
+    pub(crate) telemetry: Arc<Telemetry>,
+    // Service that identifies whether to allow or block a given IP address.
+    pub(crate) ip_filter: Arc<IpFilter>,
+    // Buffer size for bidirectional copying.
+    pub(crate) buffer_size: usize,
+    // Optional duration to time out TCP connections.
+    pub(crate) tcp_connection_timeout: Option<Duration>,
+    // Whether to send TCP logs to the SSH handles behind the forwarded connections.
+    pub(crate) disable_tcp_logs: bool,
+}
 
 // Service that handles creating TCP sockets for reverse forwarding connections.
 pub(crate) struct TcpHandler {
@@ -18,9 +36,12 @@ pub(crate) struct TcpHandler {
     sockets: DashMap<u16, DroppableHandle<()>>,
     // Connection map to assign a tunneling service for each incoming connection.
     conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
+    // Telemetry server to keep track of the total connections.
     telemetry: Arc<Telemetry>,
     // Service that identifies whether to allow or block a given IP address.
     ip_filter: Arc<IpFilter>,
+    // Buffer size for bidirectional copying.
+    buffer_size: usize,
     // Optional duration to time out TCP connections.
     tcp_connection_timeout: Option<Duration>,
     // Whether to send TCP logs to the SSH handles behind the forwarded connections.
@@ -29,12 +50,15 @@ pub(crate) struct TcpHandler {
 
 impl TcpHandler {
     pub(crate) fn new(
-        listen_address: IpAddr,
-        conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
-        telemetry: Arc<Telemetry>,
-        ip_filter: Arc<IpFilter>,
-        tcp_connection_timeout: Option<Duration>,
-        disable_tcp_logs: bool,
+        TcpHandlerConfig {
+            listen_address,
+            conn_manager,
+            telemetry,
+            ip_filter,
+            buffer_size,
+            tcp_connection_timeout,
+            disable_tcp_logs,
+        }: TcpHandlerConfig,
     ) -> Self {
         TcpHandler {
             listen_address,
@@ -42,6 +66,7 @@ impl TcpHandler {
             conn_manager,
             telemetry,
             ip_filter,
+            buffer_size,
             tcp_connection_timeout,
             disable_tcp_logs,
         }
@@ -103,12 +128,24 @@ impl PortHandler for Arc<TcpHandler> {
                                 match clone.tcp_connection_timeout {
                                     Some(duration) => {
                                         let _ = timeout(duration, async {
-                                            copy_bidirectional(&mut stream, &mut channel).await
+                                            copy_bidirectional_with_sizes(
+                                                &mut stream,
+                                                &mut channel,
+                                                clone.buffer_size,
+                                                clone.buffer_size,
+                                            )
+                                            .await
                                         })
                                         .await;
                                     }
                                     None => {
-                                        let _ = copy_bidirectional(&mut stream, &mut channel).await;
+                                        let _ = copy_bidirectional_with_sizes(
+                                            &mut stream,
+                                            &mut channel,
+                                            clone.buffer_size,
+                                            clone.buffer_size,
+                                        )
+                                        .await;
                                     }
                                 }
                             }

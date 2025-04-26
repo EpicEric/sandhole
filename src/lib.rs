@@ -45,13 +45,13 @@ use rustls::ServerConfig;
 use rustls_acme::acme::ACME_TLS_ALPN_NAME;
 use rustrict::CensorStr;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
-use tcp::TcpHandler;
+use tcp::{TcpHandler, TcpHandlerConfig};
 use tcp_alias::TcpAlias;
 use telemetry::Telemetry;
 use tls::peek_sni_and_alpn;
 use tokio::{
     fs,
-    io::{AsyncWriteExt, copy_bidirectional},
+    io::{AsyncWriteExt, copy_bidirectional_with_sizes},
     net::{TcpListener, TcpStream},
     pin,
     time::{sleep, timeout},
@@ -176,6 +176,8 @@ pub(crate) struct SandholeServer {
     pub(crate) disable_tcp: bool,
     // If true, aliasing is disabled, including SSH and all local forwarding connections.
     pub(crate) disable_aliasing: bool,
+    // Buffer size for bidirectional copying.
+    pub(crate) buffer_size: usize,
     // How long until a login API request is timed out.
     pub(crate) authentication_request_timeout: Duration,
     // How long until an unauthed connection is closed.
@@ -326,14 +328,15 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         Arc::clone(&quota_handler),
         Some(AliasReactor(Arc::clone(&telemetry))),
     ));
-    let tcp_handler: Arc<TcpHandler> = Arc::new(TcpHandler::new(
-        config.listen_address,
-        Arc::clone(&tcp_connections),
-        Arc::clone(&telemetry),
-        Arc::clone(&ip_filter),
+    let tcp_handler: Arc<TcpHandler> = Arc::new(TcpHandler::new(TcpHandlerConfig {
+        listen_address: config.listen_address,
+        conn_manager: Arc::clone(&tcp_connections),
+        telemetry: Arc::clone(&telemetry),
+        ip_filter: Arc::clone(&ip_filter),
+        buffer_size: config.buffer_size,
         tcp_connection_timeout,
-        config.disable_tcp_logs,
-    ));
+        disable_tcp_logs: config.disable_tcp_logs,
+    }));
     // Add TCP handler service as a listener for TCP port updates.
     tcp_connections.update_reactor(Some(TcpReactor {
         handler: Arc::clone(&tcp_handler),
@@ -536,6 +539,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         },
         // Always use aliasing channels instead of tunneling channels.
         proxy_type: ProxyType::Aliasing,
+        buffer_size: config.buffer_size,
         http_request_timeout,
         websocket_timeout: tcp_connection_timeout,
         disable_http_logs: config.disable_http_logs,
@@ -571,6 +575,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         disable_sni: config.disable_sni,
         disable_tcp: config.disable_tcp,
         disable_aliasing: config.disable_aliasing,
+        buffer_size: config.buffer_size,
         authentication_request_timeout: config.authentication_request_timeout,
         idle_connection_timeout: config.idle_connection_timeout,
         unproxied_connection_timeout: config
@@ -608,6 +613,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             },
             // Always use tunneling channels.
             proxy_type: ProxyType::Tunneling,
+            buffer_size: config.buffer_size,
             http_request_timeout,
             websocket_timeout: tcp_connection_timeout,
             disable_http_logs: config.disable_http_logs,
@@ -686,6 +692,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             },
             // Always use tunneling channels.
             proxy_type: ProxyType::Tunneling,
+            buffer_size: config.buffer_size,
             http_request_timeout,
             websocket_timeout: tcp_connection_timeout,
             disable_http_logs: config.disable_http_logs,
@@ -846,12 +853,24 @@ fn handle_https_connection(
             match sandhole.tcp_connection_timeout {
                 Some(duration) => {
                     let _ = timeout(duration, async {
-                        let _ = copy_bidirectional(&mut stream, &mut channel).await;
+                        let _ = copy_bidirectional_with_sizes(
+                            &mut stream,
+                            &mut channel,
+                            sandhole.buffer_size,
+                            sandhole.buffer_size,
+                        )
+                        .await;
                     })
                     .await;
                 }
                 None => {
-                    let _ = copy_bidirectional(&mut stream, &mut channel).await;
+                    let _ = copy_bidirectional_with_sizes(
+                        &mut stream,
+                        &mut channel,
+                        sandhole.buffer_size,
+                        sandhole.buffer_size,
+                    )
+                    .await;
                 }
             }
             return;

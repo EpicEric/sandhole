@@ -284,6 +284,17 @@ pub struct ApplicationConfig {
     #[arg(long, value_delimiter = ',', value_name = "CIDR")]
     pub ip_blocklist: Option<Vec<IpNet>>,
 
+    /// Size to use for bidirectional buffers.
+    ///
+    /// A higher value will lead to higher memory consumption.
+    #[arg(
+        long,
+        default_value = "8KB",
+        value_parser = validate_byte_size,
+        value_name = "SIZE"
+    )]
+    pub buffer_size: usize,
+
     /// Grace period for dangling/unauthenticated SSH connections before they are forcefully disconnected.
     ///
     /// A low value may cause valid proxy/tunnel connections to be erroneously removed.
@@ -346,6 +357,14 @@ fn validate_duration(value: &str) -> Result<Duration, String> {
         .into())
 }
 
+fn validate_byte_size(value: &str) -> Result<usize, String> {
+    Ok(bytesize::ByteSize::from_str(value)
+        .map_err(|_| "invalid byte size")?
+        .as_u64()
+        .try_into()
+        .map_err(|_| "cannot convert to usize")?)
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod application_config_tests {
@@ -397,6 +416,7 @@ mod application_config_tests {
                 requested_domain_filter_profanities: false,
                 ip_allowlist: None,
                 ip_blocklist: None,
+                buffer_size: 8_000,
                 idle_connection_timeout: Duration::from_secs(2),
                 unproxied_connection_timeout: None,
                 authentication_request_timeout: Duration::from_secs(5),
@@ -445,6 +465,7 @@ mod application_config_tests {
             "--requested-domain-filter-profanities",
             "--ip-allowlist=10.0.0.0/8",
             "--ip-blocklist=10.1.0.0/16,10.2.0.0/16",
+            "--buffer-size=4KB",
             "--idle-connection-timeout=3s",
             "--unproxied-connection-timeout=4s",
             "--authentication-request-timeout=6s",
@@ -492,6 +513,7 @@ mod application_config_tests {
                     IpNet::from_str("10.1.0.0/16").unwrap(),
                     IpNet::from_str("10.2.0.0/16").unwrap()
                 ]),
+                buffer_size: 4_000,
                 idle_connection_timeout: Duration::from_secs(3),
                 unproxied_connection_timeout: Some(Duration::from_secs(4)),
                 authentication_request_timeout: Duration::from_secs(6),
@@ -525,6 +547,18 @@ mod application_config_tests {
                 "sandhole",
                 "--domain=foobar.tld",
                 "--idle-connection-timeout=42"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn fails_to_parse_if_invalid_byte_size() {
+        assert!(
+            ApplicationConfig::try_parse_from([
+                "sandhole",
+                "--domain=foobar.tld",
+                "--buffer_size=42"
             ])
             .is_err()
         );

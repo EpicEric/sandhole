@@ -26,7 +26,7 @@ sandhole --domain server.com --ssh-port 22
 
 Without extra configuration, Sandhole will not let users bind to requested subdomains and ports, and will always allocate a random one instead.
 
-If you wish to change the default behavior, and allow users to provide their own subdomains/ports to bind to, add the options `--allow-provided-subdomains` and `--allow-requested-ports`, respectively.
+If you wish to change the default behavior, and allow users to provide their own subdomains/ports to bind to, add the options `--allow-requested-subdomains` and `--allow-requested-ports`, respectively.
 
 Otherwise, if you wish the subdomains to still be random, but persist between requests/disconnections, check out the `--random-subdomain-seed` option in the [command-line interface](./cli.md).
 

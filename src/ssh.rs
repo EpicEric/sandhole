@@ -42,7 +42,7 @@ use russh::{
     server::{Auth, Handler, Msg, Session},
 };
 use tokio::{
-    io::copy_bidirectional,
+    io::copy_bidirectional_with_sizes,
     sync::{
         Mutex, RwLock,
         mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -1854,17 +1854,30 @@ impl Handler for ServerHandler {
                                 self.server.unproxied_connection_timeout;
                             let cancellation_token = self.cancellation_token.clone();
                             let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                            let buffer_size = self.server.buffer_size;
                             tokio::spawn(async move {
                                 let mut stream = channel.into_stream();
                                 match tcp_connection_timeout {
                                     Some(duration) => {
                                         let _ = timeout(duration, async {
-                                            copy_bidirectional(&mut stream, &mut io).await
+                                            copy_bidirectional_with_sizes(
+                                                &mut stream,
+                                                &mut io,
+                                                buffer_size,
+                                                buffer_size,
+                                            )
+                                            .await
                                         })
                                         .await;
                                     }
                                     None => {
-                                        let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                        let _ = copy_bidirectional_with_sizes(
+                                            &mut stream,
+                                            &mut io,
+                                            buffer_size,
+                                            buffer_size,
+                                        )
+                                        .await;
                                     }
                                 }
                                 if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
@@ -1879,17 +1892,30 @@ impl Handler for ServerHandler {
                         // Serve SSH normally for authed user
                         _ => {
                             let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                            let buffer_size = self.server.buffer_size;
                             tokio::spawn(async move {
                                 let mut stream = channel.into_stream();
                                 match tcp_connection_timeout {
                                     Some(duration) => {
                                         let _ = timeout(duration, async {
-                                            copy_bidirectional(&mut stream, &mut io).await
+                                            copy_bidirectional_with_sizes(
+                                                &mut stream,
+                                                &mut io,
+                                                buffer_size,
+                                                buffer_size,
+                                            )
+                                            .await
                                         })
                                         .await;
                                     }
                                     None => {
-                                        let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                        let _ = copy_bidirectional_with_sizes(
+                                            &mut stream,
+                                            &mut io,
+                                            buffer_size,
+                                            buffer_size,
+                                        )
+                                        .await;
                                     }
                                 }
                             });
@@ -1922,16 +1948,29 @@ impl Handler for ServerHandler {
                         .telemetry
                         .add_sni_connection(host_to_connect.into());
                     let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                    let buffer_size = self.server.buffer_size;
                     tokio::spawn(async move {
                         match tcp_connection_timeout {
                             Some(duration) => {
                                 let _ = timeout(duration, async {
-                                    let _ = copy_bidirectional(&mut stream, &mut channel).await;
+                                    let _ = copy_bidirectional_with_sizes(
+                                        &mut stream,
+                                        &mut channel,
+                                        buffer_size,
+                                        buffer_size,
+                                    )
+                                    .await;
                                 })
                                 .await;
                             }
                             None => {
-                                let _ = copy_bidirectional(&mut stream, &mut channel).await;
+                                let _ = copy_bidirectional_with_sizes(
+                                    &mut stream,
+                                    &mut channel,
+                                    buffer_size,
+                                    buffer_size,
+                                )
+                                .await;
                             }
                         }
                     });
@@ -2046,17 +2085,30 @@ impl Handler for ServerHandler {
                                 self.server.unproxied_connection_timeout;
                             let cancellation_token = self.cancellation_token.clone();
                             let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                            let buffer_size = self.server.buffer_size;
                             tokio::spawn(async move {
                                 let mut stream = channel.into_stream();
                                 match tcp_connection_timeout {
                                     Some(duration) => {
                                         let _ = timeout(duration, async {
-                                            copy_bidirectional(&mut stream, &mut io).await
+                                            copy_bidirectional_with_sizes(
+                                                &mut stream,
+                                                &mut io,
+                                                buffer_size,
+                                                buffer_size,
+                                            )
+                                            .await
                                         })
                                         .await;
                                     }
                                     None => {
-                                        let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                        let _ = copy_bidirectional_with_sizes(
+                                            &mut stream,
+                                            &mut io,
+                                            buffer_size,
+                                            buffer_size,
+                                        )
+                                        .await;
                                     }
                                 }
                                 if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
@@ -2071,17 +2123,30 @@ impl Handler for ServerHandler {
                         // Serve TCP normally for authed user
                         _ => {
                             let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                            let buffer_size = self.server.buffer_size;
                             tokio::spawn(async move {
                                 let mut stream = channel.into_stream();
                                 match tcp_connection_timeout {
                                     Some(duration) => {
                                         let _ = timeout(duration, async {
-                                            copy_bidirectional(&mut stream, &mut io).await
+                                            copy_bidirectional_with_sizes(
+                                                &mut stream,
+                                                &mut io,
+                                                buffer_size,
+                                                buffer_size,
+                                            )
+                                            .await
                                         })
                                         .await;
                                     }
                                     None => {
-                                        let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                        let _ = copy_bidirectional_with_sizes(
+                                            &mut stream,
+                                            &mut io,
+                                            buffer_size,
+                                            buffer_size,
+                                        )
+                                        .await;
                                     }
                                 }
                             });
@@ -2136,17 +2201,30 @@ impl Handler for ServerHandler {
                                 self.server.unproxied_connection_timeout;
                             let cancellation_token = self.cancellation_token.clone();
                             let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                            let buffer_size = self.server.buffer_size;
                             tokio::spawn(async move {
                                 let mut stream = channel.into_stream();
                                 match tcp_connection_timeout {
                                     Some(duration) => {
                                         let _ = timeout(duration, async {
-                                            copy_bidirectional(&mut stream, &mut io).await
+                                            copy_bidirectional_with_sizes(
+                                                &mut stream,
+                                                &mut io,
+                                                buffer_size,
+                                                buffer_size,
+                                            )
+                                            .await
                                         })
                                         .await;
                                     }
                                     None => {
-                                        let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                        let _ = copy_bidirectional_with_sizes(
+                                            &mut stream,
+                                            &mut io,
+                                            buffer_size,
+                                            buffer_size,
+                                        )
+                                        .await;
                                     }
                                 }
                                 if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
@@ -2161,17 +2239,30 @@ impl Handler for ServerHandler {
                         // Serve TCP normally for authed user
                         _ => {
                             let tcp_connection_timeout = self.server.tcp_connection_timeout;
+                            let buffer_size = self.server.buffer_size;
                             tokio::spawn(async move {
                                 let mut stream = channel.into_stream();
                                 match tcp_connection_timeout {
                                     Some(duration) => {
                                         let _ = timeout(duration, async {
-                                            copy_bidirectional(&mut stream, &mut io).await
+                                            copy_bidirectional_with_sizes(
+                                                &mut stream,
+                                                &mut io,
+                                                buffer_size,
+                                                buffer_size,
+                                            )
+                                            .await
                                         })
                                         .await;
                                     }
                                     None => {
-                                        let _ = copy_bidirectional(&mut stream, &mut io).await;
+                                        let _ = copy_bidirectional_with_sizes(
+                                            &mut stream,
+                                            &mut io,
+                                            buffer_size,
+                                            buffer_size,
+                                        )
+                                        .await;
                                     }
                                 }
                             });
