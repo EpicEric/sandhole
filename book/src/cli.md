@@ -220,6 +220,13 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           Comma-separated list of IP networks to block. Setting this will allow
           unknown IPs to connect, unless --ip-allowlist is set
 
+      <b>--buffer-size</b> &lt;SIZE&gt;
+          Size to use for bidirectional buffers.
+
+          A higher value will lead to higher memory consumption.
+
+          [default: 8KB]
+
       <b>--idle-connection-timeout</b> &lt;DURATION&gt;
           Grace period for dangling/unauthenticated SSH connections before they
           are forcefully disconnected.

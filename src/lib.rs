@@ -28,7 +28,7 @@ use hyper_util::{
 };
 use ip::{IpFilter, IpFilterConfig};
 use log::{debug, error, info, warn};
-use login::{ApiLogin, PlatformVerifierConfigurer};
+use login::{ApiLogin, WebpkiVerifierConfigurer};
 use quota::{DummyQuotaHandler, QuotaHandler, QuotaMap};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -153,7 +153,7 @@ pub(crate) struct SandholeServer {
     // Service for validating fingerprint authentications and automatically update its data when the filesystem changes.
     pub(crate) fingerprints_validator: FingerprintsValidator,
     // Service for user+password authentication via a login API via a config-provided URL.
-    pub(crate) api_login: Option<ApiLogin<PlatformVerifierConfigurer>>,
+    pub(crate) api_login: Option<ApiLogin<WebpkiVerifierConfigurer>>,
     // Service for assigning automatic addresses according to the addressing policies.
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
     // Service for handling opening and closing TCP sockets for non-aliased services.
@@ -258,7 +258,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     // Initialize the login API service if a URL has been set.
     let api_login = config
         .password_authentication_url
-        .map(|url| ApiLogin::from(PlatformVerifierConfigurer, url, http_request_timeout))
+        .map(|url| ApiLogin::from(WebpkiVerifierConfigurer, url, http_request_timeout))
         .transpose()
         .with_context(|| "Error intializing login API")?;
     // Initialize the ACME ALPN service if a contact email has been provided.

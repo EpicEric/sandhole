@@ -6,6 +6,11 @@
 
 - Add `--buffer-size` CLI flag.
 
+### Changed
+
+- Change `rustls-platform-verifier` dependency for `webpki-roots`.
+- Update dependencies.
+
 ## 0.5.1 (2025-03-31)
 
 ### Added

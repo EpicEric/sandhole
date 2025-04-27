@@ -41,16 +41,3 @@ You may do so globally with the `--force-https` [CLI flag](./cli.md), or [per se
 ## How do I allow/block certain IP ranges?
 
 You may do so globally with the `--ip-allowlist` and `--ip-blocklist` [CLI flags](./cli.md) respectively, or [per service](./advanced_options.md#ip-allowlist--ip-blocklist) by passing `ip-allowist=...` and/or `ip-blocklist=...` on the tunneling connection.
-
-## How do I run the Docker container without mounting root certificates from the host?
-
-Simply build an Alpine image with `ca-certificates` and `sandhole` installed, for example:
-
-```dockerfile
-FROM alpine:3.21
-RUN apk add --no-cache ca-certificates
-COPY --from=epiceric/sandhole:latest /sandhole /usr/bin/sandhole
-ENTRYPOINT [ "sandhole" ]
-```
-
-However, if you don't intend to use the [HTTPS login API functionality](./configuration.md#alternative-authentication-with-password), you can skip using certificates entirely.

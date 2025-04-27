@@ -6,9 +6,9 @@ use hyper::Uri;
 #[cfg(test)]
 use mockall::automock;
 use reqwest::Client;
-use rustls::{ClientConfig, crypto::CryptoProvider};
-use rustls_platform_verifier::BuilderVerifierExt;
+use rustls::{ClientConfig, RootCertStore, client::WebPkiServerVerifier, crypto::CryptoProvider};
 use serde::Serialize;
+use webpki_roots::TLS_SERVER_ROOTS;
 
 use crate::error::ServerError;
 
@@ -36,14 +36,16 @@ pub(crate) trait Configurer {
     fn get_client_config(&self, provider: CryptoProvider) -> Result<ClientConfig>;
 }
 
-pub(crate) struct PlatformVerifierConfigurer;
+pub(crate) struct WebpkiVerifierConfigurer;
 
-impl Configurer for PlatformVerifierConfigurer {
+impl Configurer for WebpkiVerifierConfigurer {
     // Returns the CA certificate chain from the operating system.
     fn get_client_config(&self, provider: CryptoProvider) -> Result<ClientConfig> {
+        let mut store = RootCertStore::empty();
+        store.extend(TLS_SERVER_ROOTS.iter().map(|ta| ta.to_owned()));
         Ok(ClientConfig::builder_with_provider(Arc::new(provider))
             .with_safe_default_protocol_versions()?
-            .with_platform_verifier()
+            .with_webpki_verifier(WebPkiServerVerifier::builder(Arc::new(store)).build()?)
             .with_no_client_auth())
     }
 }
