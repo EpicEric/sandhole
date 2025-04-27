@@ -4,7 +4,7 @@
 acme:
   email_account: admin@sandhole.com.br
 
-# 2. Change this from sandhole.com.br to your domain
+# 2. Change these from sandhole.com.br to your domain
 certificates:
   - domains:
       - sandhole.com.br

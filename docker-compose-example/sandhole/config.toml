@@ -8,7 +8,7 @@ email = "admin@sandhole.com.br"
 private_key_path = "agnos/letsencrypt_key.pem"
 
 [[accounts.certificates]]
-# 2. Change this from sandhole.com.br to your domain
+# 2. Change these from sandhole.com.br to your domain
 domains = ["sandhole.com.br", "*.sandhole.com.br"]
 fullchain_output_file = "agnos/sandhole.com.br/fullchain.pem"
 key_output_file = "agnos/sandhole.com.br/privkey.pem"
