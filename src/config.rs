@@ -289,7 +289,7 @@ pub struct ApplicationConfig {
     /// A higher value will lead to higher memory consumption.
     #[arg(
         long,
-        default_value = "8KB",
+        default_value = "32KB",
         value_parser = validate_byte_size,
         value_name = "SIZE"
     )]
@@ -416,7 +416,7 @@ mod application_config_tests {
                 requested_domain_filter_profanities: false,
                 ip_allowlist: None,
                 ip_blocklist: None,
-                buffer_size: 8_000,
+                buffer_size: 32_000,
                 idle_connection_timeout: Duration::from_secs(2),
                 unproxied_connection_timeout: None,
                 authentication_request_timeout: Duration::from_secs(5),

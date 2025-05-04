@@ -225,7 +225,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           A higher value will lead to higher memory consumption.
 
-          [default: 8KB]
+          [default: 32KB]
 
       <b>--idle-connection-timeout</b> &lt;DURATION&gt;
           Grace period for dangling/unauthenticated SSH connections before they

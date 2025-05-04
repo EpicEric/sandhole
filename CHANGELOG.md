@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Change default `--buffer-size` to 32KB.
+
 ## 0.5.2 (2025-04-27)
 
 ### Added
