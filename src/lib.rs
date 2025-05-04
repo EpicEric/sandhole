@@ -15,6 +15,7 @@ use std::{
     time::Duration,
 };
 
+use acme::AlpnAcmeResolver;
 use addressing::AddressDelegatorData;
 use anyhow::Context;
 use axum::response::IntoResponse;
@@ -265,6 +266,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     let alpn_resolver: Box<dyn AlpnChallengeResolver> = match config.acme_contact_email {
         Some(contact) if config.https_port == NonZero::new(443).unwrap() => {
             Box::new(AcmeResolver::new(
+                AlpnAcmeResolver,
                 config.acme_cache_directory,
                 contact,
                 config.acme_use_staging,
