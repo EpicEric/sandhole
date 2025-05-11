@@ -5,6 +5,7 @@
 ### Added
 
 - Add `--disable-https` CLI flag.
+- Add keepalive interval for SSH connections.
 
 ### Changed
 

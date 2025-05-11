@@ -525,6 +525,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         inactivity_timeout: Some(Duration::from_secs(3_600)),
         auth_rejection_time: Duration::from_secs(2),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
+        keepalive_interval: Some(Duration::from_secs(30)),
+        keepalive_max: 4,
         keys: vec![key],
         ..Default::default()
     });
