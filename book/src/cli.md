@@ -162,6 +162,9 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
       <b>--disable-http</b>
           Disable all HTTP tunneling. By default, this is enabled globally
 
+      <b>--disable-http</b>
+          Disable all HTTPS tunneling. By default, this is enabled globally
+
       <b>--disable-sni</b>
           Disable SNI proxy tunneling. By default, this is enabled globally
 

@@ -227,6 +227,10 @@ pub struct ApplicationConfig {
     #[arg(long, default_value_t = false)]
     pub disable_http: bool,
 
+    /// Disable all HTTPS tunneling. By default, this is enabled globally.
+    #[arg(long, default_value_t = false)]
+    pub disable_https: bool,
+
     /// Disable SNI proxy tunneling. By default, this is enabled globally.
     #[arg(long, default_value_t = false)]
     pub disable_sni: bool,
@@ -406,6 +410,7 @@ mod application_config_tests {
                 allow_requested_subdomains: false,
                 allow_requested_ports: false,
                 disable_http: false,
+                disable_https: false,
                 disable_sni: false,
                 disable_tcp: false,
                 disable_aliasing: false,
@@ -455,6 +460,7 @@ mod application_config_tests {
             "--allow-requested-subdomains",
             "--allow-requested-ports",
             "--disable-http",
+            "--disable-https",
             "--disable-sni",
             "--disable-tcp",
             "--disable-aliasing",
@@ -500,6 +506,7 @@ mod application_config_tests {
                 allow_requested_subdomains: true,
                 allow_requested_ports: true,
                 disable_http: true,
+                disable_https: true,
                 disable_sni: true,
                 disable_tcp: true,
                 disable_aliasing: true,

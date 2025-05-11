@@ -264,6 +264,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         .with_context(|| "Error intializing login API")?;
     // Initialize the ACME ALPN service if a contact email has been provided.
     let alpn_resolver: Box<dyn AlpnChallengeResolver> = match config.acme_contact_email {
+        _ if config.disable_https => Box::new(DummyAlpnChallengeResolver),
         Some(contact) if config.https_port == NonZero::new(443).unwrap() => {
             Box::new(AcmeResolver::new(
                 AlpnAcmeResolver,
@@ -661,7 +662,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     };
 
     // HTTPS handler (with optional SSH handling)
-    let mut join_handle_https = if config.disable_http {
+    let mut join_handle_https = if config.disable_http || config.disable_https {
         DroppableHandle(tokio::spawn(future::pending()))
     } else {
         let https_listener = TcpListener::bind((config.listen_address, config.https_port.into()))

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Add `--disable-https` CLI flag.
+
 ### Changed
 
 - Change default `--buffer-size` to 32KB.
