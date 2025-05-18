@@ -60,7 +60,7 @@ reqwest = { version = "0.12.15", default-features = false, features = [
   "json",
   "rustls-tls-manual-roots",
 ] }
-russh = "0.52.0"
+russh = "0.52.1"
 rustls = "0.23.26"
 rustls-acme = "0.13.0"
 rustls-pki-types = "1.11.0"
@@ -79,6 +79,7 @@ webpki-roots = "0.26.8"
 
 [dev-dependencies]
 axum = { version = "0.8.3", features = ["macros", "ws"] }
+criterion = { version = "0.6.0", features = ["async_tokio"] }
 futures-util = { version = "0.3.31", default-features = false, features = [
   "std",
 ] }
@@ -99,3 +100,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
 
 [package.metadata.cargo-udeps.ignore]
 normal = ["openssl"]
+
+[[bench]]
+name = "ssh_transfer"
+harness = false
