@@ -161,7 +161,7 @@ async fn ssh_proxy_jump() {
         panic!("Timeout waiting for proxy server to reply.")
     };
 
-    // 3. Connect to the SSH port of our proxy with known user
+    // 4. Connect to the SSH port of our proxy with known user
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
         None,

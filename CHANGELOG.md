@@ -10,6 +10,7 @@
 ### Changed
 
 - Change default `--buffer-size` to 32KB.
+- Match SSH's maximum packet size to `--buffer-size`.
 
 ## 0.5.2 (2025-04-27)
 

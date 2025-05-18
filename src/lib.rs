@@ -526,6 +526,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         auth_rejection_time: Duration::from_secs(2),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
         keepalive_interval: Some(Duration::from_secs(30)),
+        maximum_packet_size: config
+            .buffer_size
+            .try_into()
+            .with_context(|| "buffer_size must fit in 32 bits")?,
         keepalive_max: 4,
         keys: vec![key],
         ..Default::default()

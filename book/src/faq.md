@@ -22,9 +22,9 @@ Host mysshserver.com
 
 Websockets are always enabled for HTTP services.
 
-## What if I need to run another service on the HTTP/HTTPS port?
+## What if I need to run another HTTP/HTTPS service on the machine instead of Sandhole?
 
-It's simple: just let Sandhole take care of that for you! Nothing stops you from connecting to Sandhole on the localhost, and just like any reverse proxy, it will redirect the traffic appropriately for you.
+It's simple: just let Sandhole take care of that for you! Nothing stops you from connecting to Sandhole on localhost, and just like any reverse proxy, it will redirect the traffic appropriately for you.
 
 ## How do I disable HTTP/TCP/aliasing?
 
