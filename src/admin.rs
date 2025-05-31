@@ -7,11 +7,12 @@ use std::{
 };
 
 use bytesize::ByteSize;
+use crossterm::ExecutableCommand;
 use itertools::Itertools;
 use ratatui::{
     Terminal, TerminalOptions, Viewport,
     buffer::Buffer,
-    layout::{Constraint, Flex, Layout, Margin, Position, Rect},
+    layout::{Constraint, Flex, Layout, Margin, Rect},
     prelude::CrosstermBackend,
     style::{Color, Modifier, Style, Stylize},
     symbols::border,
@@ -575,7 +576,7 @@ pub(crate) struct AdminInterface {
 impl AdminInterface {
     // Create an admin interface and send its output to the provided UnboundedSender
     pub(crate) fn new(tx: ServerHandlerSender, server: Arc<SandholeServer>) -> Self {
-        let backend = CrosstermBackend::new(BufferedSender {
+        let mut backend = CrosstermBackend::new(BufferedSender {
             tx,
             buf: Vec::new(),
         });
@@ -600,6 +601,7 @@ impl AdminInterface {
         if !server.disable_aliasing {
             tabs.push(Tab::Alias);
         }
+        let _ = backend.execute(crossterm::terminal::EnterAlternateScreen);
         let interface = Arc::new(Mutex::new(AdminTerminal {
             terminal: Terminal::with_options(backend, options).unwrap(),
             state: AdminState {
@@ -619,8 +621,8 @@ impl AdminInterface {
                 {
                     let mut interface = interface.lock().unwrap();
                     let AdminTerminal { terminal, state } = interface.deref_mut();
-                    if state.enabled
-                        && terminal
+                    if !state.enabled
+                        || terminal
                             .draw(|frame| {
                                 // Render the terminal
                                 state.render(frame.area(), frame.buffer_mut());
@@ -959,8 +961,10 @@ impl AdminInterface {
     pub(crate) fn disable(&mut self) {
         let mut interface = self.interface.lock().unwrap();
         let _ = interface.terminal.show_cursor();
-        let _ = interface.terminal.set_cursor_position(Position::ORIGIN);
-        let _ = interface.terminal.flush();
+        let _ = interface
+            .terminal
+            .backend_mut()
+            .execute(crossterm::terminal::LeaveAlternateScreen);
         interface.state.enabled = false;
     }
 }

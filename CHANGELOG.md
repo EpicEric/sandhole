@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Improvements to admin interface shutdown.
+
 ## 0.5.3 (2025-05-24)
 
 ### Added
