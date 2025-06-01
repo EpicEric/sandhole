@@ -18,6 +18,7 @@ anyhow = "1.0.98"
 aws-lc-rs = "1.13.0"
 axum = { version = "0.8.3", default-features = false }
 block-id = "0.2.1"
+bon = "3.6.3"
 bytes = "1.10.1"
 bytesize = "2.0.1"
 chrono = "0.4.40"

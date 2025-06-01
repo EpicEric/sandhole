@@ -6,6 +6,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use bon::Builder;
 use dashmap::DashMap;
 use rand::{rng, seq::IndexedRandom};
 
@@ -31,15 +32,30 @@ struct ConnectionMapEntry<H> {
 }
 
 // Map that stores handlers to be randomly selected and returned.
-pub(crate) struct ConnectionMap<K, H, R = DummyConnectionMapReactor> {
+#[derive(Builder)]
+pub(crate) struct ConnectionMap<K: Eq + Hash, H, R = DummyConnectionMapReactor> {
     // Policy on how to handle new services getting added to this map.
     load_balancing: LoadBalancing,
     // The actual data structure storing connections, selected by key.
+    #[builder(skip = DashMap::new())]
     map: DashMap<K, Vec<ConnectionMapEntry<H>>>,
     // Service to generate new QuotaTokens.
     quota_handler: Arc<Box<dyn QuotaHandler + Send + Sync>>,
     // Optional callable to send data to when the list of connection keys changes.
+    #[builder(setters(vis = "", name = reactor_internal), default = RwLock::new(None))]
     reactor: RwLock<Option<R>>,
+}
+
+impl<K: Eq + Hash, H, R, S: connection_map_builder::State> ConnectionMapBuilder<K, H, R, S> {
+    pub(crate) fn reactor(
+        self,
+        value: R,
+    ) -> ConnectionMapBuilder<K, H, R, connection_map_builder::SetReactor<S>>
+    where
+        S::Reactor: connection_map_builder::IsUnset,
+    {
+        self.reactor_internal(RwLock::new(Some(value)))
+    }
 }
 
 impl<K, H, R> ConnectionMap<K, H, R>
@@ -48,19 +64,6 @@ where
     H: Clone,
     R: ConnectionMapReactor<K> + Send + 'static,
 {
-    pub(crate) fn new(
-        load_balancing: LoadBalancing,
-        quota_handler: Arc<Box<dyn QuotaHandler + Send + Sync>>,
-        reactor: Option<R>,
-    ) -> Self {
-        ConnectionMap {
-            load_balancing,
-            map: DashMap::new(),
-            quota_handler,
-            reactor: RwLock::new(reactor),
-        }
-    }
-
     // Add an entry to this map.
     // This may fail if the LoadBalancing::Deny policy is in place, and an entry already exists for the given key.
     pub(crate) fn insert(
@@ -288,11 +291,11 @@ mod connection_map_tests {
             .expect_get_token()
             .once()
             .returning(|_| Some(get_test_token()));
-        let map = ConnectionMap::<String, usize, _>::new(
-            LoadBalancing::Allow,
-            Arc::new(Box::new(mock_quota)),
-            Some(mock_reactor),
-        );
+        let map = ConnectionMap::<String, usize, _>::builder()
+            .load_balancing(LoadBalancing::Allow)
+            .quota_handler(Arc::new(Box::new(mock_quota)))
+            .reactor(mock_reactor)
+            .build();
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
@@ -321,11 +324,11 @@ mod connection_map_tests {
             .expect_get_token()
             .times(2)
             .returning(|_| Some(get_test_token()));
-        let map = ConnectionMap::<String, usize, _>::new(
-            LoadBalancing::Allow,
-            Arc::new(Box::new(mock_quota)),
-            Some(mock_reactor),
-        );
+        let map = ConnectionMap::<String, usize, _>::builder()
+            .load_balancing(LoadBalancing::Allow)
+            .quota_handler(Arc::new(Box::new(mock_quota)))
+            .reactor(mock_reactor)
+            .build();
         map.insert(
             "host1".into(),
             "127.0.0.1:2".parse().unwrap(),
@@ -365,11 +368,11 @@ mod connection_map_tests {
             .expect_get_token()
             .times(4)
             .returning(|_| Some(get_test_token()));
-        let map = ConnectionMap::<String, usize, _>::new(
-            LoadBalancing::Allow,
-            Arc::new(Box::new(mock_quota)),
-            Some(mock_reactor),
-        );
+        let map = ConnectionMap::<String, usize, _>::builder()
+            .load_balancing(LoadBalancing::Allow)
+            .quota_handler(Arc::new(Box::new(mock_quota)))
+            .reactor(mock_reactor)
+            .build();
         map.insert(
             "host1".into(),
             "127.0.0.1:2".parse().unwrap(),
@@ -420,11 +423,11 @@ mod connection_map_tests {
             .expect_get_token()
             .times(2)
             .returning(|_| Some(get_test_token()));
-        let map = ConnectionMap::<String, usize, _>::new(
-            LoadBalancing::Allow,
-            Arc::new(Box::new(mock_quota)),
-            Some(mock_reactor),
-        );
+        let map = ConnectionMap::<String, usize, _>::builder()
+            .load_balancing(LoadBalancing::Allow)
+            .quota_handler(Arc::new(Box::new(mock_quota)))
+            .reactor(mock_reactor)
+            .build();
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
@@ -455,11 +458,11 @@ mod connection_map_tests {
             .expect_get_token()
             .times(3)
             .returning(|_| Some(get_test_token()));
-        let map = ConnectionMap::<String, usize, _>::new(
-            LoadBalancing::Allow,
-            Arc::new(Box::new(mock_quota)),
-            Some(mock_reactor),
-        );
+        let map = ConnectionMap::<String, usize, _>::builder()
+            .load_balancing(LoadBalancing::Allow)
+            .quota_handler(Arc::new(Box::new(mock_quota)))
+            .reactor(mock_reactor)
+            .build();
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
@@ -536,11 +539,11 @@ mod connection_map_tests {
             .expect_get_token()
             .times(2)
             .returning(|_| Some(get_test_token()));
-        let map = ConnectionMap::<String, usize, _>::new(
-            LoadBalancing::Replace,
-            Arc::new(Box::new(mock_quota)),
-            Some(mock_reactor),
-        );
+        let map = ConnectionMap::<String, usize, _>::builder()
+            .load_balancing(LoadBalancing::Replace)
+            .quota_handler(Arc::new(Box::new(mock_quota)))
+            .reactor(mock_reactor)
+            .build();
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
@@ -574,11 +577,11 @@ mod connection_map_tests {
             .expect_get_token()
             .once()
             .returning(|_| Some(get_test_token()));
-        let map = ConnectionMap::<String, usize, _>::new(
-            LoadBalancing::Deny,
-            Arc::new(Box::new(mock_quota)),
-            Some(mock_reactor),
-        );
+        let map = ConnectionMap::<String, usize, _>::builder()
+            .load_balancing(LoadBalancing::Deny)
+            .quota_handler(Arc::new(Box::new(mock_quota)))
+            .reactor(mock_reactor)
+            .build();
         map.insert(
             "host".into(),
             "127.0.0.1:1".parse().unwrap(),
@@ -631,11 +634,11 @@ mod connection_map_tests {
                     None
                 }
             });
-        let map = ConnectionMap::<String, usize, _>::new(
-            LoadBalancing::Allow,
-            Arc::new(Box::new(mock_quota)),
-            Some(mock_reactor),
-        );
+        let map = ConnectionMap::<String, usize, _>::builder()
+            .load_balancing(LoadBalancing::Allow)
+            .quota_handler(Arc::new(Box::new(mock_quota)))
+            .reactor(mock_reactor)
+            .build();
         // Accepted and added
         map.insert(
             "host".into(),
@@ -707,11 +710,11 @@ mod connection_map_tests {
                     None
                 }
             });
-        let map = ConnectionMap::<String, usize, _>::new(
-            LoadBalancing::Replace,
-            Arc::new(Box::new(mock_quota)),
-            Some(mock_reactor),
-        );
+        let map = ConnectionMap::<String, usize, _>::builder()
+            .load_balancing(LoadBalancing::Replace)
+            .quota_handler(Arc::new(Box::new(mock_quota)))
+            .reactor(mock_reactor)
+            .build();
         // Accepted and added
         map.insert(
             "host".into(),
@@ -762,11 +765,11 @@ mod connection_map_tests {
                     Some(get_test_token())
                 }
             });
-        let map = ConnectionMap::<String, usize, _>::new(
-            LoadBalancing::Deny,
-            Arc::new(Box::new(mock_quota)),
-            Some(mock_reactor),
-        );
+        let map = ConnectionMap::<String, usize, _>::builder()
+            .load_balancing(LoadBalancing::Deny)
+            .quota_handler(Arc::new(Box::new(mock_quota)))
+            .reactor(mock_reactor)
+            .build();
         // Denied by quota
         assert!(
             map.insert(

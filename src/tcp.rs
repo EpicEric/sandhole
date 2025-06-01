@@ -6,33 +6,18 @@ use crate::{
     telemetry::Telemetry,
 };
 use anyhow::Context;
+use bon::Builder;
 use dashmap::DashMap;
 use log::{error, info, warn};
 use tokio::{io::copy_bidirectional_with_sizes, net::TcpListener, time::timeout};
 
 // Service that handles creating TCP sockets for reverse forwarding connections.
-pub(crate) struct TcpHandlerConfig {
-    // Address to listen to when creating sockets.
-    pub(crate) listen_address: IpAddr,
-    // Connection map to assign a tunneling service for each incoming connection.
-    pub(crate) conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
-    // Telemetry server to keep track of the total connections.
-    pub(crate) telemetry: Arc<Telemetry>,
-    // Service that identifies whether to allow or block a given IP address.
-    pub(crate) ip_filter: Arc<IpFilter>,
-    // Buffer size for bidirectional copying.
-    pub(crate) buffer_size: usize,
-    // Optional duration to time out TCP connections.
-    pub(crate) tcp_connection_timeout: Option<Duration>,
-    // Whether to send TCP logs to the SSH handles behind the forwarded connections.
-    pub(crate) disable_tcp_logs: bool,
-}
-
-// Service that handles creating TCP sockets for reverse forwarding connections.
+#[derive(Builder)]
 pub(crate) struct TcpHandler {
     // Address to listen to when creating sockets.
     listen_address: IpAddr,
     // Map containing spawned tasks of connections for each socket.
+    #[builder(skip = DashMap::new())]
     sockets: DashMap<u16, DroppableHandle<()>>,
     // Connection map to assign a tunneling service for each incoming connection.
     conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
@@ -46,31 +31,6 @@ pub(crate) struct TcpHandler {
     tcp_connection_timeout: Option<Duration>,
     // Whether to send TCP logs to the SSH handles behind the forwarded connections.
     disable_tcp_logs: bool,
-}
-
-impl TcpHandler {
-    pub(crate) fn new(
-        TcpHandlerConfig {
-            listen_address,
-            conn_manager,
-            telemetry,
-            ip_filter,
-            buffer_size,
-            tcp_connection_timeout,
-            disable_tcp_logs,
-        }: TcpHandlerConfig,
-    ) -> Self {
-        TcpHandler {
-            listen_address,
-            sockets: DashMap::new(),
-            conn_manager,
-            telemetry,
-            ip_filter,
-            buffer_size,
-            tcp_connection_timeout,
-            disable_tcp_logs,
-        }
-    }
 }
 
 pub(crate) trait PortHandler {

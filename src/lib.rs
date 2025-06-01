@@ -15,25 +15,16 @@ use std::{
     time::Duration,
 };
 
-use acme::AlpnAcmeResolver;
-use addressing::AddressDelegatorData;
 use anyhow::Context;
 use axum::response::IntoResponse;
-use connection_handler::ConnectionHandler;
-use connections::HttpAliasingConnection;
-use http::{DomainRedirect, ProxyData, ProxyType};
 use hyper::{Request, StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
 };
-use ip::{IpFilter, IpFilterConfig};
 use log::{debug, error, info, warn};
-use login::{ApiLogin, WebpkiVerifierConfigurer};
-use quota::{DummyQuotaHandler, QuotaHandler, QuotaMap};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor};
 use russh::{
     ChannelStream,
     keys::{
@@ -46,10 +37,6 @@ use rustls::ServerConfig;
 use rustls_acme::acme::ACME_TLS_ALPN_NAME;
 use rustrict::CensorStr;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
-use tcp::{TcpHandler, TcpHandlerConfig};
-use tcp_alias::TcpAlias;
-use telemetry::Telemetry;
-use tls::peek_sni_and_alpn;
 use tokio::{
     fs,
     io::{AsyncWriteExt, copy_bidirectional_with_sizes},
@@ -62,14 +49,26 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     acme::AcmeResolver,
+    acme::AlpnAcmeResolver,
     addressing::{AddressDelegator, DnsResolver},
     certificates::{AlpnChallengeResolver, CertificateResolver, DummyAlpnChallengeResolver},
+    connection_handler::ConnectionHandler,
     connections::ConnectionMap,
+    connections::HttpAliasingConnection,
     droppable_handle::DroppableHandle,
     error::ServerError,
     fingerprints::FingerprintsValidator,
+    http::{DomainRedirect, ProxyData, ProxyType},
     http::{Protocol, proxy_handler},
+    ip::{IpFilter, IpFilterConfig},
+    login::{ApiLogin, WebpkiVerifierConfigurer},
+    quota::{DummyQuotaHandler, QuotaHandler, QuotaMap},
+    reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
     ssh::{Server, SshTunnelHandler},
+    tcp::TcpHandler,
+    tcp_alias::TcpAlias,
+    telemetry::Telemetry,
+    tls::peek_sni_and_alpn,
 };
 
 #[doc(hidden)]
@@ -303,43 +302,54 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         Some(max_quota) => Arc::new(Box::new(Arc::new(QuotaMap::new(max_quota.into())))),
         None => Arc::new(Box::new(DummyQuotaHandler)),
     };
-    let http_connections = Arc::new(ConnectionMap::new(
-        config.load_balancing,
-        Arc::clone(&quota_handler),
-        Some(HttpReactor {
-            certificates: Arc::clone(&certificates),
-            telemetry: Arc::clone(&telemetry),
-        }),
-    ));
-    let sni_connections = Arc::new(ConnectionMap::new(
-        config.load_balancing,
-        Arc::clone(&quota_handler),
-        Some(SniReactor(Arc::clone(&telemetry))),
-    ));
-    let ssh_connections = Arc::new(ConnectionMap::new(
-        config.load_balancing,
-        Arc::clone(&quota_handler),
-        Some(SshReactor(Arc::clone(&telemetry))),
-    ));
-    let tcp_connections = Arc::new(ConnectionMap::new(
-        config.load_balancing,
-        Arc::clone(&quota_handler),
-        None,
-    ));
-    let alias_connections = Arc::new(ConnectionMap::new(
-        config.load_balancing,
-        Arc::clone(&quota_handler),
-        Some(AliasReactor(Arc::clone(&telemetry))),
-    ));
-    let tcp_handler: Arc<TcpHandler> = Arc::new(TcpHandler::new(TcpHandlerConfig {
-        listen_address: config.listen_address,
-        conn_manager: Arc::clone(&tcp_connections),
-        telemetry: Arc::clone(&telemetry),
-        ip_filter: Arc::clone(&ip_filter),
-        buffer_size: config.buffer_size,
-        tcp_connection_timeout,
-        disable_tcp_logs: config.disable_tcp_logs,
-    }));
+    let http_connections = Arc::new(
+        ConnectionMap::builder()
+            .load_balancing(config.load_balancing)
+            .quota_handler(Arc::clone(&quota_handler))
+            .reactor(HttpReactor {
+                certificates: Arc::clone(&certificates),
+                telemetry: Arc::clone(&telemetry),
+            })
+            .build(),
+    );
+    let sni_connections = Arc::new(
+        ConnectionMap::builder()
+            .load_balancing(config.load_balancing)
+            .quota_handler(Arc::clone(&quota_handler))
+            .reactor(SniReactor(Arc::clone(&telemetry)))
+            .build(),
+    );
+    let ssh_connections = Arc::new(
+        ConnectionMap::builder()
+            .load_balancing(config.load_balancing)
+            .quota_handler(Arc::clone(&quota_handler))
+            .reactor(SshReactor(Arc::clone(&telemetry)))
+            .build(),
+    );
+    let tcp_connections = Arc::new(
+        ConnectionMap::builder()
+            .load_balancing(config.load_balancing)
+            .quota_handler(Arc::clone(&quota_handler))
+            .build(),
+    );
+    let alias_connections = Arc::new(
+        ConnectionMap::builder()
+            .load_balancing(config.load_balancing)
+            .quota_handler(Arc::clone(&quota_handler))
+            .reactor(AliasReactor(Arc::clone(&telemetry)))
+            .build(),
+    );
+    let tcp_handler: Arc<TcpHandler> = Arc::new(
+        TcpHandler::builder()
+            .listen_address(config.listen_address)
+            .conn_manager(Arc::clone(&tcp_connections))
+            .telemetry(Arc::clone(&telemetry))
+            .ip_filter(Arc::clone(&ip_filter))
+            .buffer_size(config.buffer_size)
+            .disable_tcp_logs(config.disable_tcp_logs)
+            .maybe_tcp_connection_timeout(tcp_connection_timeout)
+            .build(),
+    );
     // Add TCP handler service as a listener for TCP port updates.
     tcp_connections.update_reactor(Some(TcpReactor {
         handler: Arc::clone(&tcp_handler),
@@ -360,17 +370,19 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         } else {
             None
         };
-    let addressing = Arc::new(AddressDelegator::new(AddressDelegatorData {
-        resolver: DnsResolver::new(),
-        txt_record_prefix: config.txt_record_prefix,
-        root_domain: config.domain.clone(),
-        bind_hostnames: config.bind_hostnames,
-        force_random_subdomains: !config.allow_requested_subdomains,
-        random_subdomain_seed: config.random_subdomain_seed,
-        random_subdomain_length: config.random_subdomain_length,
-        random_subdomain_filter_profanities: config.random_subdomain_filter_profanities,
-        requested_domain_filter,
-    }));
+    let addressing = Arc::new(
+        AddressDelegator::builder()
+            .resolver(DnsResolver::new())
+            .txt_record_prefix(config.txt_record_prefix)
+            .root_domain(config.domain.clone())
+            .bind_hostnames(config.bind_hostnames)
+            .force_random_subdomains(!config.allow_requested_subdomains)
+            .maybe_random_subdomain_seed(config.random_subdomain_seed)
+            .random_subdomain_length(config.random_subdomain_length)
+            .random_subdomain_filter_profanities(config.random_subdomain_filter_profanities)
+            .maybe_requested_domain_filter(requested_domain_filter)
+            .build(),
+    );
     // Configure the default domain redirect for Sandhole.
     let domain_redirect = Arc::new(DomainRedirect {
         from: config.domain.clone(),
