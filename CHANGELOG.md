@@ -9,6 +9,7 @@
 ### Fixed
 
 - Improvements to admin interface shutdown.
+- Fix SNI proxies not being removed on disconnect.
 
 ## 0.5.3 (2025-05-24)
 

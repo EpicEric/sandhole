@@ -2308,6 +2308,7 @@ impl Drop for ServerHandler {
                 tokio::task::spawn_blocking(move || {
                     // Remove all proxy connections from this session
                     server.http.remove_by_address(&peer);
+                    server.sni.remove_by_address(&peer);
                     server.ssh.remove_by_address(&peer);
                     server.tcp.remove_by_address(&peer);
                     server.alias.remove_by_address(&peer);
