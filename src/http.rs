@@ -6,7 +6,6 @@ use std::{net::SocketAddr, sync::Arc};
 
 use crate::connection_handler::ConnectionHandler;
 use crate::connections::ConnectionGetByHttpHost;
-use crate::error::ServerError;
 use crate::ssh::ServerHandlerSender;
 use crate::tcp_alias::TcpAlias;
 use crate::telemetry::Telemetry;
@@ -109,7 +108,48 @@ pub(crate) enum ProxyType {
     Aliasing,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum HttpError {
+    #[error("Hyper error: {0}")]
+    HyperError(#[from] hyper::Error),
+    #[error("Handler not found")]
+    HandlerNotFound,
+    #[error("Header to string error: {0}")]
+    HeaderToStrError(#[from] http::header::ToStrError),
+    #[error("Missing URI host")]
+    MissingUriHost,
+    #[error("Missing Host header")]
+    MissingHostHeader,
+    #[error("Invalid Host header")]
+    InvalidHostHeader,
+    #[error("Invalid HTTP version {0:?}")]
+    InvalidHttpVersion(Version),
+    #[error("Missing Upgrade header")]
+    MissingUpgradeHeader,
+    #[error("Request timeout")]
+    RequestTimeout,
+}
+
+impl IntoResponse for HttpError {
+    fn into_response(self) -> axum::response::Response {
+        debug!("HTTP proxy error: {:?}", &self);
+        match self {
+            HttpError::HeaderToStrError(_)
+            | HttpError::MissingUriHost
+            | HttpError::MissingHostHeader
+            | HttpError::InvalidHostHeader
+            | HttpError::InvalidHttpVersion(_)
+            | HttpError::MissingUpgradeHeader => StatusCode::BAD_REQUEST,
+            HttpError::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
+            HttpError::HandlerNotFound => StatusCode::NOT_FOUND,
+            HttpError::HyperError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+        .into_response()
+    }
+}
+
 // Data commonly reused between HTTP proxy requests.
+#[derive(Builder)]
 pub(crate) struct ProxyData<M, H, T>
 where
     M: ConnectionGetByHttpHost<Arc<H>>,
@@ -117,33 +157,65 @@ where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
     // An HTTP connection manager (usually ConnectionMap) that returns a tunneling/aliasing handler.
-    pub(crate) conn_manager: M,
+    conn_manager: M,
     // Telemetry service, where HTTP requests are tracked.
-    pub(crate) telemetry: Arc<Telemetry>,
+    telemetry: Arc<Telemetry>,
     // Tuple containing where to redirect requests from the main domain to.
-    pub(crate) domain_redirect: Arc<DomainRedirect>,
+    domain_redirect: Arc<DomainRedirect>,
     // The HTTP protocol for the current connection.
-    pub(crate) protocol: Protocol,
+    protocol: Protocol,
     // Configuration on which type of channel to retrieve from the handler.
-    pub(crate) proxy_type: ProxyType,
+    proxy_type: ProxyType,
     // Buffer size for bidirectional copying.
-    pub(crate) buffer_size: usize,
+    buffer_size: usize,
     // Optional duration until an outgoing request is canceled.
-    pub(crate) http_request_timeout: Option<Duration>,
+    http_request_timeout: Option<Duration>,
     // Optional duration until an established Websocket connection is canceled.
-    pub(crate) websocket_timeout: Option<Duration>,
+    websocket_timeout: Option<Duration>,
     // If set, disables sending HTTP logs to the handler.
-    pub(crate) disable_http_logs: bool,
-    pub(crate) _phantom_data: PhantomData<(H, T)>,
+    disable_http_logs: bool,
+    #[builder(skip)]
+    _phantom_data: PhantomData<(H, T)>,
+}
+
+impl<M, H, T> ProxyData<M, H, T>
+where
+    M: ConnectionGetByHttpHost<Arc<H>>,
+    H: ConnectionHandler<T>,
+    T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+{
+    pub(crate) fn conn_manager(&self) -> &M {
+        &self.conn_manager
+    }
 }
 
 // Receive an HTTP request and appropriately proxy it, with a possible upgrade to WebSocket.
 pub(crate) async fn proxy_handler<B, M, H, T>(
-    mut request: Request<B>,
+    request: Request<B>,
     tcp_address: SocketAddr,
     fingerprint: Option<Fingerprint>,
     proxy_data: Arc<ProxyData<M, H, T>>,
 ) -> anyhow::Result<Response<AxumBody>>
+where
+    M: ConnectionGetByHttpHost<Arc<H>>,
+    H: ConnectionHandler<T>,
+    T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    B: Body + Send + Unpin + 'static,
+    <B as Body>::Data: Send + Sync + 'static,
+    <B as Body>::Error: Error + Send + Sync + 'static,
+{
+    match proxy_handler_inner(request, tcp_address, fingerprint, proxy_data).await {
+        Ok(response) => Ok(response),
+        Err(error) => Ok(error.into_response()),
+    }
+}
+
+async fn proxy_handler_inner<B, M, H, T>(
+    mut request: Request<B>,
+    tcp_address: SocketAddr,
+    fingerprint: Option<Fingerprint>,
+    proxy_data: Arc<ProxyData<M, H, T>>,
+) -> Result<Response<AxumBody>, HttpError>
 where
     M: ConnectionGetByHttpHost<Arc<H>>,
     H: ConnectionHandler<T>,
@@ -160,26 +232,20 @@ where
     let timer = Instant::now();
     // Retrieve host from the headers
     let host = match request.version() {
-        Version::HTTP_2 => request.uri().host().ok_or(ServerError::MissingUriHost),
+        Version::HTTP_2 => request.uri().host().ok_or(HttpError::MissingUriHost)?,
         Version::HTTP_11 => match request.headers().get(HOST) {
             Some(header_value) => match header_value.to_str() {
                 Ok(header) => header
                     .split(':')
                     .next()
-                    .ok_or(ServerError::InvalidHostHeader),
-                Err(_) => Err(ServerError::InvalidHostHeader),
+                    .ok_or(HttpError::InvalidHostHeader)?,
+                Err(_) => return Err(HttpError::InvalidHostHeader),
             },
-            None => Err(ServerError::MissingHostHeader),
+            None => return Err(HttpError::MissingHostHeader),
         },
-        version => Err(ServerError::InvalidHttpVersion(version)),
+        version => return Err(HttpError::InvalidHttpVersion(version)),
     };
-    let host = match host {
-        Ok(host) => host.to_owned(),
-        Err(err) => {
-            debug!("Failed to parse host: {:?}", err);
-            return Ok((StatusCode::BAD_REQUEST, "").into_response());
-        }
-    };
+    let host = host.to_owned();
     let ip = tcp_address.ip().to_canonical().to_string();
     let method = request.method().to_owned();
     let uri = request.uri().to_owned();
@@ -206,7 +272,7 @@ where
             return Ok(response);
         }
         // No handler was found, return 404
-        return Ok((StatusCode::NOT_FOUND, "").into_response());
+        return Err(HttpError::HandlerNotFound);
     };
     let http_data = handler.http_data().await;
     let redirect_http_to_https_port =
@@ -287,7 +353,7 @@ where
         }
     }) else {
         // If getting the handler failed, return 404 (they may have an allowlist for fingerprints/IP networks)
-        return Ok((StatusCode::NOT_FOUND, "").into_response());
+        return Err(HttpError::HandlerNotFound);
     };
     let tx = handler.log_channel();
     let is_http2 = http_data.as_ref().map(|data| data.http2).unwrap_or(false);
@@ -308,7 +374,16 @@ where
                     if let Ok(response) = timeout(duration, sender.send_request(request)).await {
                         response?.into_response()
                     } else {
-                        (StatusCode::REQUEST_TIMEOUT, "").into_response()
+                        let elapsed_time = timer.elapsed();
+                        http_log(
+                            http_log_builder
+                                .status(StatusCode::REQUEST_TIMEOUT.as_u16())
+                                .elapsed_time(elapsed_time)
+                                .build(),
+                            Some(tx),
+                            disable_http_logs,
+                        );
+                        return Err(HttpError::RequestTimeout);
                     }
                 }
                 None => sender.send_request(request).await?.into_response(),
@@ -376,7 +451,16 @@ where
                         {
                             response?.into_response()
                         } else {
-                            (StatusCode::REQUEST_TIMEOUT, "").into_response()
+                            let elapsed_time = timer.elapsed();
+                            http_log(
+                                http_log_builder
+                                    .status(StatusCode::REQUEST_TIMEOUT.as_u16())
+                                    .elapsed_time(elapsed_time)
+                                    .build(),
+                                Some(tx),
+                                disable_http_logs,
+                            );
+                            return Err(HttpError::RequestTimeout);
                         }
                     }
                     None => sender.send_request(request).await?.into_response(),
@@ -397,7 +481,7 @@ where
                             == response
                                 .headers()
                                 .get(UPGRADE)
-                                .ok_or(ServerError::MissingUpgradeHeader)?
+                                .ok_or(HttpError::MissingUpgradeHeader)?
                                 .to_str()?
                         {
                             // Retrieve the upgraded connection from the response
@@ -455,7 +539,16 @@ where
                         {
                             response?.into_response()
                         } else {
-                            (StatusCode::REQUEST_TIMEOUT, "").into_response()
+                            let elapsed_time = timer.elapsed();
+                            http_log(
+                                http_log_builder
+                                    .status(StatusCode::REQUEST_TIMEOUT.as_u16())
+                                    .elapsed_time(elapsed_time)
+                                    .build(),
+                                Some(tx),
+                                disable_http_logs,
+                            );
+                            return Err(HttpError::RequestTimeout);
                         }
                     }
                     None => sender.send_request(request).await?.into_response(),
@@ -473,10 +566,7 @@ where
                 Ok(response)
             }
         }
-        version => {
-            warn!("Unsupported HTTP version {:?}", version);
-            Ok((StatusCode::BAD_REQUEST, "").into_response())
-        }
+        version => Err(HttpError::InvalidHttpVersion(version)),
     }
 }
 
@@ -494,7 +584,7 @@ mod proxy_handler_tests {
     use http_body_util::{BodyExt, Empty};
     use hyper::{HeaderMap, Request, StatusCode, body::Incoming, service::service_fn};
     use hyper_util::rt::{TokioExecutor, TokioIo};
-    use std::{marker::PhantomData, sync::Arc, time::Duration};
+    use std::{sync::Arc, time::Duration};
     use tokio::{io::DuplexStream, sync::mpsc, time::sleep};
     use tokio_tungstenite::client_async;
     use tower::Service;
@@ -534,21 +624,20 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             None,
-            Arc::new(ProxyData {
-                conn_manager: Arc::clone(&conn_manager),
-                telemetry: Arc::new(Telemetry::new()),
-                domain_redirect: Arc::new(DomainRedirect {
-                    from: "main.domain".into(),
-                    to: "https://example.com".into(),
-                }),
-                protocol: Protocol::Http { port: 80 },
-                proxy_type: ProxyType::Tunneling,
-                buffer_size: 8_000,
-                http_request_timeout: None,
-                websocket_timeout: None,
-                disable_http_logs: false,
-                _phantom_data: PhantomData,
-            }),
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .telemetry(Arc::new(Telemetry::new()))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }))
+                    .protocol(Protocol::Http { port: 80 })
+                    .proxy_type(ProxyType::Tunneling)
+                    .buffer_size(8_000)
+                    .disable_http_logs(false)
+                    .build(),
+            ),
         )
         .await;
         let response = response.expect("should return response when missing host header");
@@ -579,21 +668,20 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             None,
-            Arc::new(ProxyData {
-                conn_manager: Arc::clone(&conn_manager),
-                telemetry: Arc::new(Telemetry::new()),
-                domain_redirect: Arc::new(DomainRedirect {
-                    from: "main.domain".into(),
-                    to: "https://example.com".into(),
-                }),
-                protocol: Protocol::Http { port: 80 },
-                proxy_type: ProxyType::Tunneling,
-                buffer_size: 8_000,
-                http_request_timeout: None,
-                websocket_timeout: None,
-                disable_http_logs: false,
-                _phantom_data: PhantomData,
-            }),
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .telemetry(Arc::new(Telemetry::new()))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }))
+                    .protocol(Protocol::Http { port: 80 })
+                    .proxy_type(ProxyType::Tunneling)
+                    .buffer_size(8_000)
+                    .disable_http_logs(false)
+                    .build(),
+            ),
         )
         .await;
         let response = response.expect("should return response when not found");
@@ -624,21 +712,20 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             None,
-            Arc::new(ProxyData {
-                conn_manager: Arc::clone(&conn_manager),
-                telemetry: Arc::new(Telemetry::new()),
-                domain_redirect: Arc::new(DomainRedirect {
-                    from: "main.domain".into(),
-                    to: "https://example.com".into(),
-                }),
-                protocol: Protocol::Http { port: 80 },
-                proxy_type: ProxyType::Tunneling,
-                buffer_size: 8_000,
-                http_request_timeout: None,
-                websocket_timeout: None,
-                disable_http_logs: false,
-                _phantom_data: PhantomData,
-            }),
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .telemetry(Arc::new(Telemetry::new()))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }))
+                    .protocol(Protocol::Http { port: 80 })
+                    .proxy_type(ProxyType::Tunneling)
+                    .buffer_size(8_000)
+                    .disable_http_logs(false)
+                    .build(),
+            ),
         )
         .await;
         let response = response.expect("should return response when redirect");
@@ -691,21 +778,20 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             None,
-            Arc::new(ProxyData {
-                conn_manager: Arc::clone(&conn_manager),
-                telemetry: Arc::new(Telemetry::new()),
-                domain_redirect: Arc::new(DomainRedirect {
-                    from: "main.domain".into(),
-                    to: "https://example.com".into(),
-                }),
-                protocol: Protocol::TlsRedirect { from: 80, to: 443 },
-                proxy_type: ProxyType::Tunneling,
-                buffer_size: 8_000,
-                http_request_timeout: None,
-                websocket_timeout: None,
-                disable_http_logs: false,
-                _phantom_data: PhantomData,
-            }),
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .telemetry(Arc::new(Telemetry::new()))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }))
+                    .protocol(Protocol::TlsRedirect { from: 80, to: 443 })
+                    .proxy_type(ProxyType::Tunneling)
+                    .buffer_size(8_000)
+                    .disable_http_logs(false)
+                    .build(),
+            ),
         )
         .await;
         let response = response.expect("should return response when HTTPS redirect");
@@ -758,21 +844,20 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             None,
-            Arc::new(ProxyData {
-                conn_manager: Arc::clone(&conn_manager),
-                telemetry: Arc::new(Telemetry::new()),
-                domain_redirect: Arc::new(DomainRedirect {
-                    from: "main.domain".into(),
-                    to: "https://example.com".into(),
-                }),
-                protocol: Protocol::TlsRedirect { from: 80, to: 8443 },
-                proxy_type: ProxyType::Tunneling,
-                buffer_size: 8_000,
-                http_request_timeout: None,
-                websocket_timeout: None,
-                disable_http_logs: false,
-                _phantom_data: PhantomData,
-            }),
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .telemetry(Arc::new(Telemetry::new()))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }))
+                    .protocol(Protocol::TlsRedirect { from: 80, to: 8443 })
+                    .proxy_type(ProxyType::Tunneling)
+                    .buffer_size(8_000)
+                    .disable_http_logs(false)
+                    .build(),
+            ),
         )
         .await;
         let response =
@@ -826,21 +911,20 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             None,
-            Arc::new(ProxyData {
-                conn_manager: Arc::clone(&conn_manager),
-                telemetry: Arc::new(Telemetry::new()),
-                domain_redirect: Arc::new(DomainRedirect {
-                    from: "main.domain".into(),
-                    to: "https://example.com".into(),
-                }),
-                protocol: Protocol::Http { port: 80 },
-                proxy_type: ProxyType::Tunneling,
-                buffer_size: 8_000,
-                http_request_timeout: None,
-                websocket_timeout: None,
-                disable_http_logs: false,
-                _phantom_data: PhantomData,
-            }),
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .telemetry(Arc::new(Telemetry::new()))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }))
+                    .protocol(Protocol::Http { port: 80 })
+                    .proxy_type(ProxyType::Tunneling)
+                    .buffer_size(8_000)
+                    .disable_http_logs(false)
+                    .build(),
+            ),
         )
         .await;
         let response = response.expect("should return response when HTTPS redirect");
@@ -893,21 +977,20 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             None,
-            Arc::new(ProxyData {
-                conn_manager: Arc::clone(&conn_manager),
-                telemetry: Arc::new(Telemetry::new()),
-                domain_redirect: Arc::new(DomainRedirect {
-                    from: "main.domain".into(),
-                    to: "https://example.com".into(),
-                }),
-                protocol: Protocol::Http { port: 80 },
-                proxy_type: ProxyType::Tunneling,
-                buffer_size: 8_000,
-                http_request_timeout: None,
-                websocket_timeout: None,
-                disable_http_logs: false,
-                _phantom_data: PhantomData,
-            }),
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .telemetry(Arc::new(Telemetry::new()))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }))
+                    .protocol(Protocol::Http { port: 80 })
+                    .proxy_type(ProxyType::Tunneling)
+                    .buffer_size(8_000)
+                    .disable_http_logs(false)
+                    .build(),
+            ),
         )
         .await;
         let response =
@@ -986,21 +1069,21 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             None,
-            Arc::new(ProxyData {
-                conn_manager: Arc::clone(&conn_manager),
-                telemetry: Arc::new(Telemetry::new()),
-                domain_redirect: Arc::new(DomainRedirect {
-                    from: "main.domain".into(),
-                    to: "https://example.com".into(),
-                }),
-                protocol: Protocol::Https { port: 443 },
-                proxy_type: ProxyType::Tunneling,
-                buffer_size: 8_000,
-                http_request_timeout: Some(Duration::from_millis(500)),
-                websocket_timeout: None,
-                disable_http_logs: false,
-                _phantom_data: PhantomData,
-            }),
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .telemetry(Arc::new(Telemetry::new()))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }))
+                    .protocol(Protocol::Https { port: 443 })
+                    .proxy_type(ProxyType::Tunneling)
+                    .buffer_size(8_000)
+                    .http_request_timeout(Duration::from_millis(500))
+                    .disable_http_logs(false)
+                    .build(),
+            ),
         )
         .await;
         assert!(
@@ -1074,21 +1157,21 @@ mod proxy_handler_tests {
                 request,
                 "127.0.0.1:12345".parse().unwrap(),
                 None,
-                Arc::new(ProxyData {
-                    conn_manager: Arc::clone(&conn_manager),
-                    telemetry: Arc::new(Telemetry::new()),
-                    domain_redirect: Arc::new(DomainRedirect {
-                        from: "main.domain".into(),
-                        to: "https://example.com".into(),
-                    }),
-                    protocol: Protocol::Https { port: 443 },
-                    proxy_type: ProxyType::Tunneling,
-                    buffer_size: 8_000,
-                    http_request_timeout: Some(Duration::from_millis(500)),
-                    websocket_timeout: None,
-                    disable_http_logs: false,
-                    _phantom_data: PhantomData,
-                }),
+                Arc::new(
+                    ProxyData::builder()
+                        .conn_manager(Arc::clone(&conn_manager))
+                        .telemetry(Arc::new(Telemetry::new()))
+                        .domain_redirect(Arc::new(DomainRedirect {
+                            from: "main.domain".into(),
+                            to: "https://example.com".into(),
+                        }))
+                        .protocol(Protocol::Https { port: 443 })
+                        .proxy_type(ProxyType::Tunneling)
+                        .buffer_size(8_000)
+                        .http_request_timeout(Duration::from_millis(500))
+                        .disable_http_logs(false)
+                        .build(),
+                ),
             )
         });
         let jh2 = tokio::spawn(async move {
@@ -1097,8 +1180,12 @@ mod proxy_handler_tests {
                 .await
                 .expect("Invalid request");
         });
-        let Err(err) = client_async("ws://with.websocket/ws", stream).await else {
-            panic!("should've errored when establishing Websocket connection");
+        let err = match client_async("ws://with.websocket/ws", stream).await {
+            Err(err) => err,
+            Ok(res) => panic!(
+                "should've errored when establishing Websocket connection: {:?}",
+                res
+            ),
         };
         match err {
             tokio_tungstenite::tungstenite::Error::Http(response) => {
@@ -1183,21 +1270,21 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             None,
-            Arc::new(ProxyData {
-                conn_manager: Arc::clone(&conn_manager),
-                telemetry: Arc::new(Telemetry::new()),
-                domain_redirect: Arc::new(DomainRedirect {
-                    from: "main.domain".into(),
-                    to: "https://example.com".into(),
-                }),
-                protocol: Protocol::Https { port: 443 },
-                proxy_type: ProxyType::Tunneling,
-                buffer_size: 8_000,
-                http_request_timeout: Some(Duration::from_millis(500)),
-                websocket_timeout: None,
-                disable_http_logs: false,
-                _phantom_data: PhantomData,
-            }),
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .telemetry(Arc::new(Telemetry::new()))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }))
+                    .protocol(Protocol::Https { port: 443 })
+                    .proxy_type(ProxyType::Tunneling)
+                    .buffer_size(8_000)
+                    .http_request_timeout(Duration::from_millis(500))
+                    .disable_http_logs(false)
+                    .build(),
+            ),
         )
         .await;
         assert!(
@@ -1281,26 +1368,25 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             None,
-            Arc::new(ProxyData {
-                conn_manager: Arc::clone(&conn_manager),
-                telemetry: Arc::new(Telemetry::new()),
-                domain_redirect: Arc::new(DomainRedirect {
-                    from: "main.domain".into(),
-                    to: "https://example.com".into(),
-                }),
-                protocol: Protocol::Https { port: 443 },
-                proxy_type: ProxyType::Tunneling,
-                buffer_size: 8_000,
-                http_request_timeout: None,
-                websocket_timeout: None,
-                disable_http_logs: false,
-                _phantom_data: PhantomData,
-            }),
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .telemetry(Arc::new(Telemetry::new()))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }))
+                    .protocol(Protocol::Https { port: 443 })
+                    .proxy_type(ProxyType::Tunneling)
+                    .buffer_size(8_000)
+                    .disable_http_logs(false)
+                    .build(),
+            ),
         )
         .await;
         assert!(!logging_rx.is_empty(), "should log after proxying request");
         let response = response.expect("should return response after proxy");
-        assert_eq!(response.status(), hyper::StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body();
         let body = axum::body::to_bytes(body, 32).await.unwrap();
         assert_eq!(body, bytes::Bytes::from("Success."));
@@ -1379,26 +1465,25 @@ mod proxy_handler_tests {
             request,
             "127.0.0.1:12345".parse().unwrap(),
             None,
-            Arc::new(ProxyData {
-                conn_manager: Arc::clone(&conn_manager),
-                telemetry: Arc::new(Telemetry::new()),
-                domain_redirect: Arc::new(DomainRedirect {
-                    from: "main.domain".into(),
-                    to: "https://example.com".into(),
-                }),
-                protocol: Protocol::Http { port: 80 },
-                proxy_type: ProxyType::Aliasing,
-                buffer_size: 8_000,
-                http_request_timeout: None,
-                websocket_timeout: None,
-                disable_http_logs: false,
-                _phantom_data: PhantomData,
-            }),
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .telemetry(Arc::new(Telemetry::new()))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }))
+                    .protocol(Protocol::Http { port: 80 })
+                    .proxy_type(ProxyType::Aliasing)
+                    .buffer_size(8_000)
+                    .disable_http_logs(false)
+                    .build(),
+            ),
         )
         .await;
         assert!(!logging_rx.is_empty(), "should log after proxying request");
         let response = response.expect("should return response after proxy");
-        assert_eq!(response.status(), hyper::StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body();
         let body = axum::body::to_bytes(body, 32).await.unwrap();
         assert_eq!(body, bytes::Bytes::from("Success."));
@@ -1477,26 +1562,25 @@ mod proxy_handler_tests {
             request,
             "192.168.0.1:12345".parse().unwrap(),
             None,
-            Arc::new(ProxyData {
-                conn_manager: Arc::clone(&conn_manager),
-                telemetry: Arc::new(Telemetry::new()),
-                domain_redirect: Arc::new(DomainRedirect {
-                    from: "root.domain".into(),
-                    to: "https://this.is.ignored".into(),
-                }),
-                protocol: Protocol::Https { port: 443 },
-                proxy_type: ProxyType::Tunneling,
-                buffer_size: 8_000,
-                http_request_timeout: None,
-                websocket_timeout: None,
-                disable_http_logs: false,
-                _phantom_data: PhantomData,
-            }),
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .telemetry(Arc::new(Telemetry::new()))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "root.domain".into(),
+                        to: "https://this.is.ignored".into(),
+                    }))
+                    .protocol(Protocol::Https { port: 443 })
+                    .proxy_type(ProxyType::Tunneling)
+                    .buffer_size(8_000)
+                    .disable_http_logs(false)
+                    .build(),
+            ),
         )
         .await;
         assert!(!logging_rx.is_empty(), "should log after proxying request");
         let response = response.expect("should return response after proxying request");
-        assert_eq!(response.status(), hyper::StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body();
         let body = axum::body::to_bytes(body, 32).await.unwrap();
         assert_eq!(body, bytes::Bytes::from("Success."));
@@ -1564,21 +1648,20 @@ mod proxy_handler_tests {
                 request,
                 "127.0.0.1:12345".parse().unwrap(),
                 None,
-                Arc::new(ProxyData {
-                    conn_manager: Arc::clone(&conn_manager),
-                    telemetry: Arc::new(Telemetry::new()),
-                    domain_redirect: Arc::new(DomainRedirect {
-                        from: "main.domain".into(),
-                        to: "https://example.com".into(),
-                    }),
-                    protocol: Protocol::Https { port: 443 },
-                    proxy_type: ProxyType::Tunneling,
-                    buffer_size: 8_000,
-                    http_request_timeout: None,
-                    websocket_timeout: None,
-                    disable_http_logs: false,
-                    _phantom_data: PhantomData,
-                }),
+                Arc::new(
+                    ProxyData::builder()
+                        .conn_manager(Arc::clone(&conn_manager))
+                        .telemetry(Arc::new(Telemetry::new()))
+                        .domain_redirect(Arc::new(DomainRedirect {
+                            from: "main.domain".into(),
+                            to: "https://example.com".into(),
+                        }))
+                        .protocol(Protocol::Https { port: 443 })
+                        .proxy_type(ProxyType::Tunneling)
+                        .buffer_size(8_000)
+                        .disable_http_logs(false)
+                        .build(),
+                ),
             )
         });
         let jh2 = tokio::spawn(async move {
@@ -1671,21 +1754,20 @@ mod proxy_handler_tests {
                 request,
                 "127.0.0.1:12345".parse().unwrap(),
                 None,
-                Arc::new(ProxyData {
-                    conn_manager: Arc::clone(&conn_manager),
-                    telemetry: Arc::new(Telemetry::new()),
-                    domain_redirect: Arc::new(DomainRedirect {
-                        from: "main.domain".into(),
-                        to: "https://example.com".into(),
-                    }),
-                    protocol: Protocol::Https { port: 443 },
-                    proxy_type: ProxyType::Tunneling,
-                    buffer_size: 8_000,
-                    http_request_timeout: None,
-                    websocket_timeout: None,
-                    disable_http_logs: false,
-                    _phantom_data: PhantomData,
-                }),
+                Arc::new(
+                    ProxyData::builder()
+                        .conn_manager(Arc::clone(&conn_manager))
+                        .telemetry(Arc::new(Telemetry::new()))
+                        .domain_redirect(Arc::new(DomainRedirect {
+                            from: "main.domain".into(),
+                            to: "https://example.com".into(),
+                        }))
+                        .protocol(Protocol::Https { port: 443 })
+                        .proxy_type(ProxyType::Tunneling)
+                        .buffer_size(8_000)
+                        .disable_http_logs(false)
+                        .build(),
+                ),
             )
         });
         let jh2 = tokio::spawn(async move {
@@ -1709,7 +1791,7 @@ mod proxy_handler_tests {
             .await
             .expect("should return response after proxy");
         assert!(!logging_rx.is_empty(), "should log after proxying request");
-        assert_eq!(response.status(), hyper::StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::OK);
         let body = String::from_utf8(
             response
                 .into_body()

@@ -8,7 +8,6 @@ use std::{
     collections::{BTreeMap, HashMap},
     convert::Infallible,
     future,
-    marker::PhantomData,
     net::SocketAddr,
     num::NonZero,
     sync::{Arc, Mutex, RwLock, atomic::AtomicUsize},
@@ -547,25 +546,26 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         ..Default::default()
     });
     // Create the local forwarding-specific HTTP proxy data.
-    let aliasing_proxy_data = Arc::new(ProxyData {
-        conn_manager: Arc::new(HttpAliasingConnection::new(
-            Arc::clone(&http_connections),
-            Arc::clone(&alias_connections),
-        )),
-        telemetry: Arc::clone(&telemetry),
-        domain_redirect: Arc::clone(&domain_redirect),
-        // HTTP only.
-        protocol: Protocol::Http {
-            port: config.http_port.into(),
-        },
-        // Always use aliasing channels instead of tunneling channels.
-        proxy_type: ProxyType::Aliasing,
-        buffer_size: config.buffer_size,
-        http_request_timeout,
-        websocket_timeout: tcp_connection_timeout,
-        disable_http_logs: config.disable_http_logs,
-        _phantom_data: PhantomData,
-    });
+    let aliasing_proxy_data = Arc::new(
+        ProxyData::builder()
+            .conn_manager(Arc::new(HttpAliasingConnection::new(
+                Arc::clone(&http_connections),
+                Arc::clone(&alias_connections),
+            )))
+            .telemetry(Arc::clone(&telemetry))
+            .domain_redirect(Arc::clone(&domain_redirect))
+            // HTTP only.
+            .protocol(Protocol::Http {
+                port: config.http_port.into(),
+            })
+            // Always use aliasing channels instead of tunneling channels.
+            .proxy_type(ProxyType::Aliasing)
+            .buffer_size(config.buffer_size)
+            .maybe_http_request_timeout(http_request_timeout)
+            .maybe_websocket_timeout(tcp_connection_timeout)
+            .disable_http_logs(config.disable_http_logs)
+            .build(),
+    );
     let mut sandhole = Arc::new(SandholeServer {
         session_id: AtomicUsize::new(0),
         sessions_password: Mutex::default(),
@@ -617,29 +617,30 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             config.http_port
         );
         let ip_filter_clone = Arc::clone(&ip_filter);
-        let http_proxy_data = Arc::new(ProxyData {
-            conn_manager: Arc::clone(&http_connections),
-            telemetry: Arc::clone(&telemetry),
-            domain_redirect: Arc::clone(&domain_redirect),
-            // Use TLS redirect if --force-https is set, otherwise allow HTTP.
-            protocol: if config.force_https {
-                Protocol::TlsRedirect {
-                    from: config.http_port.into(),
-                    to: config.https_port.into(),
-                }
-            } else {
-                Protocol::Http {
-                    port: config.http_port.into(),
-                }
-            },
-            // Always use tunneling channels.
-            proxy_type: ProxyType::Tunneling,
-            buffer_size: config.buffer_size,
-            http_request_timeout,
-            websocket_timeout: tcp_connection_timeout,
-            disable_http_logs: config.disable_http_logs,
-            _phantom_data: PhantomData,
-        });
+        let http_proxy_data = Arc::new(
+            ProxyData::builder()
+                .conn_manager(Arc::clone(&http_connections))
+                .telemetry(Arc::clone(&telemetry))
+                .domain_redirect(Arc::clone(&domain_redirect))
+                // Use TLS redirect if --force-https is set, otherwise allow HTTP.
+                .protocol(if config.force_https {
+                    Protocol::TlsRedirect {
+                        from: config.http_port.into(),
+                        to: config.https_port.into(),
+                    }
+                } else {
+                    Protocol::Http {
+                        port: config.http_port.into(),
+                    }
+                })
+                // Always use tunneling channels.
+                .proxy_type(ProxyType::Tunneling)
+                .buffer_size(config.buffer_size)
+                .maybe_http_request_timeout(http_request_timeout)
+                .maybe_websocket_timeout(tcp_connection_timeout)
+                .disable_http_logs(config.disable_http_logs)
+                .build(),
+        );
         DroppableHandle(tokio::spawn(async move {
             loop {
                 let proxy_data = Arc::clone(&http_proxy_data);
@@ -704,21 +705,22 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             .extend_from_slice(&[b"h2".to_vec(), b"http/1.1".to_vec()]);
         let http2_server_config = Arc::new(http2_server_config);
         let ip_filter_clone = Arc::clone(&ip_filter);
-        let https_proxy_data = Arc::new(ProxyData {
-            conn_manager: Arc::clone(&http_connections),
-            telemetry: Arc::clone(&telemetry),
-            domain_redirect: Arc::clone(&domain_redirect),
-            protocol: Protocol::Https {
-                port: config.https_port.into(),
-            },
-            // Always use tunneling channels.
-            proxy_type: ProxyType::Tunneling,
-            buffer_size: config.buffer_size,
-            http_request_timeout,
-            websocket_timeout: tcp_connection_timeout,
-            disable_http_logs: config.disable_http_logs,
-            _phantom_data: PhantomData,
-        });
+        let https_proxy_data = Arc::new(
+            ProxyData::builder()
+                .conn_manager(Arc::clone(&http_connections))
+                .telemetry(Arc::clone(&telemetry))
+                .domain_redirect(Arc::clone(&domain_redirect))
+                .protocol(Protocol::Https {
+                    port: config.https_port.into(),
+                })
+                // Always use tunneling channels.
+                .proxy_type(ProxyType::Tunneling)
+                .buffer_size(config.buffer_size)
+                .maybe_http_request_timeout(http_request_timeout)
+                .maybe_websocket_timeout(tcp_connection_timeout)
+                .disable_http_logs(config.disable_http_logs)
+                .build(),
+        );
         let sandhole_clone = Arc::clone(&sandhole);
         let ssh_config_clone = Arc::clone(&ssh_config);
         DroppableHandle(tokio::spawn(async move {

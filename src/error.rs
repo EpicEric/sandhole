@@ -1,22 +1,11 @@
 use std::path::PathBuf;
 
-use http::Version;
 use ipnet::IpNet;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ServerError {
     #[error("Invalid config: {0}")]
     InvalidConfig(String),
-    #[error("Missing URI host")]
-    MissingUriHost,
-    #[error("Missing Host header")]
-    MissingHostHeader,
-    #[error("Invalid Host header")]
-    InvalidHostHeader,
-    #[error("Invalid HTTP version {0:?}")]
-    InvalidHttpVersion(Version),
-    #[error("Missing Upgrade header")]
-    MissingUpgradeHeader,
     #[error("Invalid file path")]
     InvalidFilePath,
     #[error("Already bound by another service")]

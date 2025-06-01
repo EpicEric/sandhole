@@ -1979,7 +1979,7 @@ impl Handler for ServerHandler {
             } else if let Some(handler) = self
                 .server
                 .aliasing_proxy_data
-                .conn_manager
+                .conn_manager()
                 .get_by_http_host(host_to_connect)
             {
                 if handler

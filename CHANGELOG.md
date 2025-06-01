@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Update Docker base image.
+
 ### Fixed
 
 - Improvements to admin interface shutdown.
