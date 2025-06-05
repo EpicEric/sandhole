@@ -29,6 +29,7 @@ pub(crate) struct DummyAlpnChallengeResolver;
 #[cfg_attr(test, automock)]
 pub(crate) trait AlpnChallengeResolver: Debug + Send + Sync {
     fn update_domains(&mut self, domains: Vec<String>);
+    #[allow(clippy::needless_lifetimes)]
     fn resolve<'a>(&self, client: ClientHello<'a>) -> Option<Arc<CertifiedKey>>;
     fn challenge_rustls_config(&self) -> Option<Arc<ServerConfig>>;
 }
