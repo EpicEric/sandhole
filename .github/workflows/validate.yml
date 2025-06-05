@@ -26,7 +26,7 @@ jobs:
           rustup component add rustfmt
           cargo fmt --check --all
   clippy:
-    name: Check Clippy lints on nightly
+    name: Check Clippy lints on MSRV
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,8 +35,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run Clippy
         run: |
-          rustup toolchain install nightly-x86_64-unknown-linux-gnu
-          rustup override set nightly-x86_64-unknown-linux-gnu
+          rustup toolchain install ${RUST_MSRV}-x86_64-unknown-linux-gnu
+          rustup override set ${RUST_MSRV}-x86_64-unknown-linux-gnu
           rustup component add clippy
           cargo clippy --all-targets -- -D warnings
   build-msrv:

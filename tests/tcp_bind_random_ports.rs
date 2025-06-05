@@ -104,7 +104,7 @@ async fn tcp_bind_random_ports() {
                         return port;
                     }
                 }
-                message => panic!("Unexpected message {:?}", message),
+                message => panic!("Unexpected message {message:?}"),
             }
         }
         panic!("Unexpected end of channel");

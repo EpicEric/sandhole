@@ -136,7 +136,7 @@ async fn tcp_allow_requested_ports() {
             russh::ChannelMsg::Data { data } => {
                 assert_eq!(data.to_vec(), b"Hello, world!");
             }
-            msg => panic!("Unexpected message {:?}", msg),
+            msg => panic!("Unexpected message {msg:?}"),
         }
     })
     .await
@@ -183,7 +183,7 @@ async fn tcp_allow_requested_ports() {
             russh::ChannelMsg::Data { data } => {
                 assert_eq!(data.to_vec(), b"Hello, world!");
             }
-            msg => panic!("Unexpected message {:?}", msg),
+            msg => panic!("Unexpected message {msg:?}"),
         }
     })
     .await

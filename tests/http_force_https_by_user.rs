@@ -145,7 +145,7 @@ async fn http_force_https_by_user() {
         .expect("HTTP handshake failed");
     tokio::spawn(async move {
         if let Err(err) = conn.await {
-            eprintln!("Connection failed: {:?}", err);
+            eprintln!("Connection failed: {err:?}");
         }
     });
     let request = Request::builder()
@@ -186,7 +186,7 @@ async fn http_force_https_by_user() {
         .expect("HTTP handshake failed");
     tokio::spawn(async move {
         if let Err(err) = conn.await {
-            eprintln!("Connection failed: {:?}", err);
+            eprintln!("Connection failed: {err:?}");
         }
     });
     let request = Request::builder()
@@ -245,7 +245,7 @@ async fn http_force_https_by_user() {
             .expect("HTTP handshake failed");
     tokio::spawn(async move {
         if let Err(err) = conn.await {
-            eprintln!("Connection failed: {:?}", err);
+            eprintln!("Connection failed: {err:?}");
         }
     });
     let request = Request::builder()

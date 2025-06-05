@@ -132,7 +132,7 @@ async fn alias_aliasing_tunnel() {
             russh::ChannelMsg::Data { data } => {
                 assert_eq!(data.to_vec(), b"Poor man's VPN...");
             }
-            msg => panic!("Unexpected message {:?}", msg),
+            msg => panic!("Unexpected message {msg:?}"),
         }
     })
     .await

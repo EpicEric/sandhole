@@ -271,15 +271,13 @@ mod certificate_resolver_tests {
         for domain in DOMAINS_FOOBAR {
             assert!(
                 resolver.resolve_server_name(domain).is_some(),
-                "couldn't resolve valid domain {}",
-                domain
+                "couldn't resolve valid domain {domain}"
             );
         }
         for domain in DOMAINS_LOCALHOST {
             assert!(
                 resolver.resolve_server_name(domain).is_some(),
-                "couldn't resolve valid domain {}",
-                domain
+                "couldn't resolve valid domain {domain}"
             );
         }
     }
@@ -295,8 +293,7 @@ mod certificate_resolver_tests {
         for domain in UNKNOWN_DOMAINS {
             assert!(
                 resolver.resolve_server_name(domain).is_none(),
-                "shouldn't have resolved unknown domain {}",
-                domain
+                "shouldn't have resolved unknown domain {domain}"
             );
         }
     }

@@ -86,7 +86,7 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
         ip,
         pretty_duration::pretty_duration(&elapsed_time, None)
     );
-    print!("{}", line);
+    print!("{line}");
     if !disable_http_logs {
         let _ = tx.map(|tx| tx.send(line.into_bytes()));
     }
@@ -365,7 +365,7 @@ where
                     .await?;
             tokio::spawn(Box::pin(async move {
                 if let Err(err) = conn.await {
-                    warn!("HTTP/2 connection failed: {:?}", err);
+                    warn!("HTTP/2 connection failed: {err:?}");
                 }
             }));
             let response = match proxy_data.http_request_timeout {
@@ -438,7 +438,7 @@ where
                 // If there is an Upgrade header, make sure that it's a valid Websocket upgrade.
                 tokio::spawn(async move {
                     if let Err(err) = conn.with_upgrades().await {
-                        warn!("HTTP/1.1 connection with upgrades failed: {:?}", err);
+                        warn!("HTTP/1.1 connection with upgrades failed: {err:?}");
                     }
                 });
                 let request_type = request_upgrade.to_str()?.to_string();
@@ -529,7 +529,7 @@ where
                 // If Upgrade header is not present, simply handle the request
                 tokio::spawn(async move {
                     if let Err(err) = conn.await {
-                        warn!("HTTP/1.1 connection failed: {:?}", err);
+                        warn!("HTTP/1.1 connection failed: {err:?}");
                     }
                 });
                 let response = match proxy_data.http_request_timeout {
@@ -1182,10 +1182,7 @@ mod proxy_handler_tests {
         });
         let err = match client_async("ws://with.websocket/ws", stream).await {
             Err(err) => err,
-            Ok(res) => panic!(
-                "should've errored when establishing Websocket connection: {:?}",
-                res
-            ),
+            Ok(res) => panic!("should've errored when establishing Websocket connection: {res:?}"),
         };
         match err {
             tokio_tungstenite::tungstenite::Error::Http(response) => {

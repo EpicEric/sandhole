@@ -15,3 +15,7 @@ cli:
 
 clippy:
   cargo clippy --all-targets --fix --allow-dirty --allow-staged && cargo fmt --all
+
+clippy-nightly:
+  cargo +nightly clippy --all-targets --fix --allow-dirty --allow-staged && cargo fmt --all
+

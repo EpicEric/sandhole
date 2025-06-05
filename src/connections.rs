@@ -491,7 +491,7 @@ mod connection_map_tests {
                 Some(key @ 1) | Some(key @ 2) | Some(key @ 3) => {
                     *results.entry(key).or_default() += 1;
                 }
-                unknown => panic!("Unexpected {:?}", unknown),
+                unknown => panic!("Unexpected {unknown:?}"),
             }
         }
         assert_eq!(results.len(), 3);
@@ -514,7 +514,7 @@ mod connection_map_tests {
                 Some(key @ 1) | Some(key @ 3) => {
                     *results.entry(key).or_default() += 1;
                 }
-                unknown => panic!("Unexpected {:?}", unknown),
+                unknown => panic!("Unexpected {unknown:?}"),
             }
         }
         assert_eq!(results.len(), 2);
@@ -673,7 +673,7 @@ mod connection_map_tests {
                 Some(key @ 1) | Some(key @ 2) => {
                     *results.entry(key).or_default() += 1;
                 }
-                unknown => panic!("Unexpected {:?}", unknown),
+                unknown => panic!("Unexpected {unknown:?}"),
             }
         }
         assert_eq!(results.len(), 2);

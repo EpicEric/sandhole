@@ -647,17 +647,17 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 let (stream, address) = match http_listener.accept().await {
                     Ok((stream, address)) => (stream, address),
                     Err(err) => {
-                        error!("Unable to accept HTTP connection: {}", err);
+                        error!("Unable to accept HTTP connection: {err}");
                         break;
                     }
                 };
                 let ip = address.ip();
                 if !ip_filter_clone.is_allowed(ip) {
-                    info!("Rejecting HTTP connection for {}: not allowed", ip);
+                    info!("Rejecting HTTP connection for {ip}: not allowed");
                     continue;
                 }
                 if let Err(err) = stream.set_nodelay(true) {
-                    warn!("Error setting nodelay for {}: {}", address, err);
+                    warn!("Error setting nodelay for {address}: {err}");
                 }
                 // Create a Hyper service and serve over the accepted TCP connection.
                 let service = service_fn(move |req: Request<Incoming>| {
@@ -728,17 +728,17 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 let (stream, address) = match https_listener.accept().await {
                     Ok((stream, address)) => (stream, address),
                     Err(err) => {
-                        error!("Unable to accept HTTPS connection: {}", err);
+                        error!("Unable to accept HTTPS connection: {err}");
                         break;
                     }
                 };
                 let ip = address.ip();
                 if !ip_filter_clone.is_allowed(ip) {
-                    info!("Rejecting HTTPS connection for {}: not allowed", ip);
+                    info!("Rejecting HTTPS connection for {ip}: not allowed");
                     continue;
                 }
                 if let Err(err) = stream.set_nodelay(true) {
-                    warn!("Error setting nodelay for {}: {}", address, err);
+                    warn!("Error setting nodelay for {address}: {err}");
                 }
                 handle_https_connection(HandleHttpsConnectionConfig {
                     stream,
@@ -770,17 +770,17 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 let (stream, address) = match conn {
                     Ok((stream, address)) => (stream, address),
                     Err(err) => {
-                        error!("Unable to accept SSH connection: {}", err);
+                        error!("Unable to accept SSH connection: {err}");
                         break;
                     },
                 };
                 let ip = address.ip();
                 if !ip_filter.is_allowed(ip) {
-                    info!("Rejecting SSH connection for {}: not allowed", ip);
+                    info!("Rejecting SSH connection for {ip}: not allowed");
                     continue;
                 }
                 if let Err(err) = stream.set_nodelay(true) {
-                    warn!("Error setting nodelay for {}: {}", address, err);
+                    warn!("Error setting nodelay for {address}: {err}");
                 }
                 handle_ssh_connection(HandleSshConnectionConfig {
                     stream,
@@ -931,10 +931,7 @@ fn handle_https_connection(
                 }
             }
             Err(err) => {
-                warn!(
-                    "Error establishing TLS connection with {}: {}",
-                    address, err
-                );
+                warn!("Error establishing TLS connection with {address}: {err}");
             }
         }
     });
@@ -962,18 +959,18 @@ fn handle_ssh_connection(
         let mut session = match russh::server::run_stream(config, stream, handler).await {
             Ok(session) => session,
             Err(err) => {
-                warn!("Connection setup failed: {}", err);
+                warn!("Connection setup failed: {err}");
                 return;
             }
         };
         tokio::select! {
             result = &mut session => {
                 if let Err(err) = result {
-                    warn!("Connection with {} closed with error: {}", address, err);
+                    warn!("Connection with {address} closed with error: {err}");
                 }
             }
             _ = cancellation_token.cancelled() => {
-                info!("Disconnecting client {}...", address);
+                info!("Disconnecting client {address}...");
                 let _ = session.handle().disconnect(russh::Disconnect::ByApplication, "".into(), "English".into()).await;
             },
         }

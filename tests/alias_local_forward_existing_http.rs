@@ -132,7 +132,7 @@ async fn alias_local_forward_existing_http() {
             .expect("HTTP handshake failed");
     tokio::spawn(async move {
         if let Err(err) = conn.await {
-            eprintln!("Connection failed: {:?}", err);
+            eprintln!("Connection failed: {err:?}");
         }
     });
     let request = Request::builder()

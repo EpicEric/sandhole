@@ -51,7 +51,7 @@ impl Resolver for AlpnAcmeResolver {
     ) -> Self::State {
         AlpnAcmeResolverState(
             AcmeConfig::new(domains)
-                .contact_push(format!("mailto:{}", contact_email))
+                .contact_push(format!("mailto:{contact_email}"))
                 .cache(DirCache::new(cache_dir.to_owned()))
                 .directory_lets_encrypt(!use_staging)
                 .challenge_type(UseChallenge::TlsAlpn01)
@@ -86,7 +86,7 @@ impl ResolverState for AlpnAcmeResolverState {
         DroppableHandle(tokio::spawn(async move {
             while let Some(msg) = self.0.next().await {
                 if let Err(err) = msg {
-                    warn!("ACME listener error: {:?}", err);
+                    warn!("ACME listener error: {err:?}");
                 }
             }
         }))

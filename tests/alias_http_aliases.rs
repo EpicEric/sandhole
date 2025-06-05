@@ -283,7 +283,7 @@ async fn alias_http_aliases() {
                 .expect("HTTP handshake failed");
         tokio::spawn(async move {
             if let Err(err) = conn.await {
-                eprintln!("Connection failed: {:?}", err);
+                eprintln!("Connection failed: {err:?}");
             }
         });
         let request = Request::builder()

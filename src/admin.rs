@@ -528,7 +528,7 @@ impl AdminState {
             Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(right_area);
         let cpu_usage = Line::from(vec![
             "  CPU%  ".bold().reversed(),
-            format!(" {:.1} %", cpu_usage).into(),
+            format!(" {cpu_usage:.1} %").into(),
         ]);
         let memory_usage = Line::from(vec![
             " Memory ".bold().reversed(),
@@ -780,7 +780,7 @@ impl AdminInterface {
                             .fingerprints_validator
                             .remove_user_key(&fingerprint)
                         {
-                            text = format!("Error: {}", err);
+                            text = format!("Error: {err}");
                         }
                         if let Some(sessions) = interface
                             .state

@@ -55,7 +55,7 @@ impl Resolver for DnsResolver {
         // Find the TXT entries.
         match self
             .0
-            .txt_lookup(format!("{}.{}.", txt_record_prefix, requested_address))
+            .txt_lookup(format!("{txt_record_prefix}.{requested_address}."))
             .await
         {
             Ok(lookup) => {
@@ -79,7 +79,7 @@ impl Resolver for DnsResolver {
         // Find the CNAME entries
         match self
             .0
-            .lookup(format!("{}.", requested_address), RecordType::CNAME)
+            .lookup(format!("{requested_address}."), RecordType::CNAME)
             .await
         {
             Ok(lookup) => {
@@ -176,10 +176,7 @@ impl<R: Resolver> AddressDelegator<R> {
                     .analyze()
                     .is(Type::INAPPROPRIATE)
             }) {
-                warn!(
-                    "Profane address requested ({}), defaulting to random",
-                    requested_address
-                );
+                warn!("Profane address requested ({requested_address}), defaulting to random");
             } else {
                 // If we bind all hostnames, return the provided address
                 if matches!(self.bind_hostnames, BindHostnames::All) {
@@ -223,17 +220,13 @@ impl<R: Resolver> AddressDelegator<R> {
                         return format!("{}.{}", address, self.root_domain);
                     } else {
                         warn!(
-                            "Invalid address requested ({}), defaulting to random",
-                            requested_address
+                            "Invalid address requested ({requested_address}), defaulting to random"
                         );
                     }
                 }
             }
         } else {
-            warn!(
-                "Invalid address requested ({}), defaulting to random",
-                requested_address
-            );
+            warn!("Invalid address requested ({requested_address}), defaulting to random");
         }
         // Assign random subdomain under the root domain
         format!(
@@ -384,8 +377,7 @@ mod address_delegator_tests {
         assert_eq!(address, "some.address");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address
+            "non DNS-compatible address {address}"
         );
     }
 
@@ -413,8 +405,7 @@ mod address_delegator_tests {
         assert_eq!(address, "root.tld");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address
+            "non DNS-compatible address {address}"
         );
     }
 
@@ -445,8 +436,7 @@ mod address_delegator_tests {
         assert_eq!(address, "some.address");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address
+            "non DNS-compatible address {address}"
         );
     }
 
@@ -483,8 +473,7 @@ mod address_delegator_tests {
         assert_eq!(address, "some.address");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address
+            "non DNS-compatible address {address}"
         );
     }
 
@@ -518,8 +507,7 @@ mod address_delegator_tests {
         assert_eq!(address, "some.address");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address
+            "non DNS-compatible address {address}"
         );
     }
 
@@ -549,8 +537,7 @@ mod address_delegator_tests {
         assert_eq!(address, "subdomain.root.tld");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address
+            "non DNS-compatible address {address}"
         );
     }
 
@@ -584,8 +571,7 @@ mod address_delegator_tests {
         assert_eq!(address, "something.root.tld");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address
+            "non DNS-compatible address {address}"
         );
     }
 
@@ -613,8 +599,7 @@ mod address_delegator_tests {
         assert_eq!(address, "prefix.root.tld");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address
+            "non DNS-compatible address {address}"
         );
     }
 
@@ -648,8 +633,7 @@ mod address_delegator_tests {
         assert_eq!(address, "root.tld");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address
+            "non DNS-compatible address {address}"
         );
     }
 
@@ -684,13 +668,11 @@ mod address_delegator_tests {
             Regex::new(r"^[0-9a-z]{6}\.root\.tld$")
                 .unwrap()
                 .is_match(&address),
-            "invalid address {}",
-            address
+            "invalid address {address}"
         );
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address
+            "non DNS-compatible address {address}"
         );
     }
 
@@ -725,13 +707,11 @@ mod address_delegator_tests {
             Regex::new(r"^[0-9a-z]{6}\.root\.tld$")
                 .unwrap()
                 .is_match(&address),
-            "invalid address {}",
-            address
+            "invalid address {address}"
         );
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address
+            "non DNS-compatible address {address}"
         );
     }
 
@@ -764,13 +744,11 @@ mod address_delegator_tests {
             Regex::new(r"^[0-9a-z]{6}\.root\.tld$")
                 .unwrap()
                 .is_match(&address),
-            "invalid address {}",
-            address
+            "invalid address {address}"
         );
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address
+            "non DNS-compatible address {address}"
         );
     }
 
@@ -805,16 +783,14 @@ mod address_delegator_tests {
                     &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
                 )
                 .await;
-            assert!(regex.is_match(&address), "invalid address {}", address);
+            assert!(regex.is_match(&address), "invalid address {address}");
             assert!(
                 DnsName::try_from(address.clone()).is_ok(),
-                "non DNS-compatible address {}",
-                address
+                "non DNS-compatible address {address}"
             );
             assert!(
                 !set.contains(&address),
-                "generated non-unique address: {}",
-                address
+                "generated non-unique address: {address}"
             );
             set.insert(address);
         }
@@ -853,16 +829,14 @@ mod address_delegator_tests {
                     &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
                 )
                 .await;
-            assert!(regex.is_match(&address), "invalid address {}", address);
+            assert!(regex.is_match(&address), "invalid address {address}");
             assert!(
                 DnsName::try_from(address.clone()).is_ok(),
-                "non DNS-compatible address {}",
-                address
+                "non DNS-compatible address {address}"
             );
             assert!(
                 !set.contains(&address),
-                "generated non-unique address: {}",
-                address
+                "generated non-unique address: {address}"
             );
             set.insert(address);
         }
@@ -899,8 +873,7 @@ mod address_delegator_tests {
             Regex::new(r"^[0-9a-z]{8}\.root\.tld$")
                 .unwrap()
                 .is_match(&address),
-            "invalid address {}",
-            address
+            "invalid address {address}"
         );
         assert!(
             !address.contains("fuck"),
@@ -908,8 +881,7 @@ mod address_delegator_tests {
         );
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address
+            "non DNS-compatible address {address}"
         );
     }
 
@@ -965,23 +937,19 @@ mod address_delegator_tests {
         assert_ne!(address3_u2_a1, address4_u1_a2);
         assert!(
             DnsName::try_from(address1_u1_a1.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address1_u1_a1
+            "non DNS-compatible address {address1_u1_a1}"
         );
         assert!(
             DnsName::try_from(address2_u1_a1.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address2_u1_a1
+            "non DNS-compatible address {address2_u1_a1}"
         );
         assert!(
             DnsName::try_from(address3_u2_a1.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address3_u2_a1
+            "non DNS-compatible address {address3_u2_a1}"
         );
         assert!(
             DnsName::try_from(address4_u1_a2.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address4_u1_a2
+            "non DNS-compatible address {address4_u1_a2}"
         );
     }
 
@@ -1125,63 +1093,51 @@ mod address_delegator_tests {
 
         assert!(
             DnsName::try_from(address1_f1_a1_u0.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address1_f1_a1_u0
+            "non DNS-compatible address {address1_f1_a1_u0}"
         );
         assert!(
             DnsName::try_from(address2_f1_a1_u0.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address2_f1_a1_u0
+            "non DNS-compatible address {address2_f1_a1_u0}"
         );
         assert!(
             DnsName::try_from(address3_f2_a1_u0.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address3_f2_a1_u0
+            "non DNS-compatible address {address3_f2_a1_u0}"
         );
         assert!(
             DnsName::try_from(address4_f1_a2_u0.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address4_f1_a2_u0
+            "non DNS-compatible address {address4_f1_a2_u0}"
         );
         assert!(
             DnsName::try_from(address5_f1_a1_u1.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address5_f1_a1_u1
+            "non DNS-compatible address {address5_f1_a1_u1}"
         );
         assert!(
             DnsName::try_from(address6_f1_a1_u1.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address6_f1_a1_u1
+            "non DNS-compatible address {address6_f1_a1_u1}"
         );
         assert!(
             DnsName::try_from(address7_f2_a1_u1.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address7_f2_a1_u1
+            "non DNS-compatible address {address7_f2_a1_u1}"
         );
         assert!(
             DnsName::try_from(address8_f1_a2_u1.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address8_f1_a2_u1
+            "non DNS-compatible address {address8_f1_a2_u1}"
         );
         assert!(
             DnsName::try_from(address9_f1_a1_u2.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address9_f1_a1_u2
+            "non DNS-compatible address {address9_f1_a1_u2}"
         );
         assert!(
             DnsName::try_from(address10_f1_a1_u2.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address10_f1_a1_u2
+            "non DNS-compatible address {address10_f1_a1_u2}"
         );
         assert!(
             DnsName::try_from(address11_f2_a1_u2.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address11_f2_a1_u2
+            "non DNS-compatible address {address11_f2_a1_u2}"
         );
         assert!(
             DnsName::try_from(address12_f1_a2_u2.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address12_f1_a2_u2
+            "non DNS-compatible address {address12_f1_a2_u2}"
         );
     }
 
@@ -1237,23 +1193,19 @@ mod address_delegator_tests {
         assert_ne!(address3_u2_i1, address4_u1_i2);
         assert!(
             DnsName::try_from(address1_u1_i1.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address1_u1_i1
+            "non DNS-compatible address {address1_u1_i1}"
         );
         assert!(
             DnsName::try_from(address2_u1_i1.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address2_u1_i1
+            "non DNS-compatible address {address2_u1_i1}"
         );
         assert!(
             DnsName::try_from(address3_u2_i1.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address3_u2_i1
+            "non DNS-compatible address {address3_u2_i1}"
         );
         assert!(
             DnsName::try_from(address4_u1_i2.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address4_u1_i2
+            "non DNS-compatible address {address4_u1_i2}"
         );
     }
 
@@ -1309,23 +1261,19 @@ mod address_delegator_tests {
         assert_ne!(address3_s2_a1, address4_s1_a2);
         assert!(
             DnsName::try_from(address1_s1_a1.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address1_s1_a1
+            "non DNS-compatible address {address1_s1_a1}"
         );
         assert!(
             DnsName::try_from(address2_s1_a1.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address2_s1_a1
+            "non DNS-compatible address {address2_s1_a1}"
         );
         assert!(
             DnsName::try_from(address3_s2_a1.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address3_s2_a1
+            "non DNS-compatible address {address3_s2_a1}"
         );
         assert!(
             DnsName::try_from(address4_s1_a2.clone()).is_ok(),
-            "non DNS-compatible address {}",
-            address4_s1_a2
+            "non DNS-compatible address {address4_s1_a2}"
         );
     }
 }

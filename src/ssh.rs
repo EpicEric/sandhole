@@ -331,7 +331,7 @@ impl Server for Arc<SandholeServer> {
         cancellation_token: CancellationToken,
     ) -> ServerHandler {
         let id = self.session_id.fetch_add(1, Ordering::AcqRel);
-        info!("{} connected", peer_address);
+        info!("{peer_address} connected");
         let (tx, rx) = mpsc::unbounded_channel();
         ServerHandler {
             id,
@@ -549,7 +549,7 @@ impl Handler for ServerHandler {
             .channel_id
             .is_some_and(|channel_id| channel_id == channel)
         {
-            debug!("received data {:?}", data);
+            debug!("received data {data:?}");
             match &mut self.auth_data {
                 // Ignore other commands for non-admin users
                 AuthenticatedData::None { .. } | AuthenticatedData::User { .. } => (),
@@ -593,7 +593,7 @@ impl Handler for ServerHandler {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
-        debug!("exec_request data {:?}", data);
+        debug!("exec_request data {data:?}");
         let mut success = true;
         let cmd = String::from_utf8_lossy(data);
         // Split commands by whitespace and handle each.
@@ -671,7 +671,7 @@ impl Handler for ServerHandler {
                         Ok(set) => set,
                         Err(err) => {
                             let _ = self.tx.send(
-                                format!("Error parsing fingerprints: {}\r\n", err).into_bytes(),
+                                format!("Error parsing fingerprints: {err}\r\n").into_bytes(),
                             );
                             success = false;
                             break;
@@ -702,8 +702,7 @@ impl Handler for ServerHandler {
                         if !self.server.is_alias(&address) {
                             let _ = self.tx.send(
                                 format!(
-                                    "Cannot listen to HTTP alias of '{}' (must be alias, not localhost)\r\n",
-                                    address
+                                    "Cannot listen to HTTP alias of '{address}' (must be alias, not localhost)\r\n"
                                 )
                                 .into_bytes(),
                             );
@@ -783,8 +782,7 @@ impl Handler for ServerHandler {
                         if !self.server.is_alias(&address) {
                             let _ = self.tx.send(
                                 format!(
-                                    "Cannot listen to HTTP alias of '{}' (must be alias, not localhost)\r\n",
-                                    address
+                                    "Cannot listen to HTTP alias of '{address}' (must be alias, not localhost)\r\n"
                                 )
                                 .into_bytes(),
                             );
@@ -890,8 +888,7 @@ impl Handler for ServerHandler {
                         if !self.server.is_alias(&address) {
                             let _ = self.tx.send(
                                 format!(
-                                    "Cannot listen to SNI proxy of '{}' (must be alias, not localhost)\r\n",
-                                    address
+                                    "Cannot listen to SNI proxy of '{address}' (must be alias, not localhost)\r\n"
                                 )
                                 .into_bytes(),
                             );
@@ -950,8 +947,7 @@ impl Handler for ServerHandler {
                         Ok(list) => list,
                         Err(err) => {
                             let _ = self.tx.send(
-                                format!("Error parsing allowlist networks: {}\r\n", err)
-                                    .into_bytes(),
+                                format!("Error parsing allowlist networks: {err}\r\n").into_bytes(),
                             );
                             success = false;
                             break;
@@ -991,8 +987,7 @@ impl Handler for ServerHandler {
                         Ok(list) => list,
                         Err(err) => {
                             let _ = self.tx.send(
-                                format!("Error parsing blocklist networks: {}\r\n", err)
-                                    .into_bytes(),
+                                format!("Error parsing blocklist networks: {err}\r\n").into_bytes(),
                             );
                             success = false;
                             break;
@@ -1014,7 +1009,7 @@ impl Handler for ServerHandler {
                     );
                     let _ = self
                         .tx
-                        .send(format!("Error: invalid command {}...", command).into_bytes());
+                        .send(format!("Error: invalid command {command}...").into_bytes());
                     success = false;
                     break;
                 }
@@ -1046,7 +1041,7 @@ impl Handler for ServerHandler {
                         }
                         Err(err) => {
                             let _ = self.tx.send(
-                                format!("Failed to create IP filter for connection ({})\r\n", err)
+                                format!("Failed to create IP filter for connection ({err})\r\n")
                                     .into_bytes(),
                             );
                             success = false;
@@ -1241,8 +1236,7 @@ impl Handler for ServerHandler {
                     if !self.server.is_alias(address) {
                         let _ = self.tx.send(
                             format!(
-                                "Failed to bind HTTP alias '{}' (must be alias, not localhost)\r\n",
-                                address
+                                "Failed to bind HTTP alias '{address}' (must be alias, not localhost)\r\n"
                             )
                             .into_bytes(),
                         );
@@ -1271,7 +1265,7 @@ impl Handler for ServerHandler {
                                 address, self.peer, err
                             );
                             let _ = self.tx.send(
-                                format!("Failed to bind HTTP alias {} ({})\r\n", address, err)
+                                format!("Failed to bind HTTP alias {address} ({err})\r\n")
                                     .into_bytes(),
                             );
                             Ok(false)
@@ -1285,7 +1279,7 @@ impl Handler for ServerHandler {
                                     address,
                                     match self.server.http_port {
                                         80 => "".into(),
-                                        port => format!(":{}", port),
+                                        port => format!(":{port}"),
                                     }
                                 )
                                 .into_bytes(),
@@ -1327,7 +1321,7 @@ impl Handler for ServerHandler {
                                 address, self.peer, err
                             );
                             let _ = self.tx.send(
-                                format!("Failed to bind SNI proxy '{}' ({})\r\n", address, err)
+                                format!("Failed to bind SNI proxy '{address}' ({err})\r\n")
                                     .into_bytes(),
                             );
                             Ok(false)
@@ -1341,7 +1335,7 @@ impl Handler for ServerHandler {
                                     address,
                                     match self.server.https_port {
                                         443 => "".into(),
-                                        port => format!(":{}", port),
+                                        port => format!(":{port}"),
                                     }
                                 )
                                 .into_bytes(),
@@ -1359,11 +1353,8 @@ impl Handler for ServerHandler {
                         address, self.peer
                     );
                     let _ = self.tx.send(
-                        format!(
-                            "Cannot listen to HTTP host {} (HTTP is disabled)\r\n",
-                            address,
-                        )
-                        .into_bytes(),
+                        format!("Cannot listen to HTTP host {address} (HTTP is disabled)\r\n",)
+                            .into_bytes(),
                     );
                     Ok(false)
                 // Handle regular tunneling for HTTP services
@@ -1402,7 +1393,7 @@ impl Handler for ServerHandler {
                                     &assigned_host,
                                     match self.server.http_port {
                                         80 => "".into(),
-                                        port => format!(":{}", port),
+                                        port => format!(":{port}"),
                                     },
                                     address,
                                     err,
@@ -1420,7 +1411,7 @@ impl Handler for ServerHandler {
                                     &assigned_host,
                                     match self.server.http_port {
                                         80 => "".into(),
-                                        port => format!(":{}", port),
+                                        port => format!(":{port}"),
                                     },
                                     address,
                                 )
@@ -1432,7 +1423,7 @@ impl Handler for ServerHandler {
                                     &assigned_host,
                                     match self.server.https_port {
                                         443 => "".into(),
-                                        port => format!(":{}", port),
+                                        port => format!(":{port}"),
                                     },
                                     address,
                                 )
@@ -1503,8 +1494,7 @@ impl Handler for ServerHandler {
                                 );
                                 let _ = self.tx.send(
                                     format!(
-                                        "Cannot listen to TCP on random port of {} ({})\r\n",
-                                        address, err,
+                                        "Cannot listen to TCP on random port of {address} ({err})\r\n",
                                     )
                                     .into_bytes(),
                                 );
@@ -1525,8 +1515,7 @@ impl Handler for ServerHandler {
                                 );
                                 let _ = self.tx.send(
                                     format!(
-                                        "Cannot listen to TCP on random port of {} ({})\r\n",
-                                        port, err
+                                        "Cannot listen to TCP on random port of {port} ({err})\r\n"
                                     )
                                     .into_bytes(),
                                 );
@@ -1603,9 +1592,8 @@ impl Handler for ServerHandler {
                     );
                     let _ = self.tx.send(
                         format!(
-                            "Cannot listen to TCP on random port of {} (cannot assign random port to alias)\r\n\
+                            "Cannot listen to TCP on random port of {address} (cannot assign random port to alias)\r\n\
                             Please specify the desired port.\r\n",
-                            address,
                         )
                         .into_bytes(),
                     );
@@ -1838,8 +1826,7 @@ impl Handler for ServerHandler {
                         .add_ssh_connection(host_to_connect.into());
                     let _ = handler.log_channel().send(
                         format!(
-                            "New SSH proxy from {}:{} => {}:{}\r\n",
-                            originator_address, originator_port, host_to_connect, port_to_connect
+                            "New SSH proxy from {originator_address}:{originator_port} => {host_to_connect}:{port_to_connect}\r\n"
                         )
                         .into_bytes(),
                     );
@@ -1927,13 +1914,13 @@ impl Handler for ServerHandler {
                     );
                     let _ = self
                         .tx
-                        .send(format!("Forwarding SSH from {}\r\n", host_to_connect).into_bytes());
+                        .send(format!("Forwarding SSH from {host_to_connect}\r\n").into_bytes());
                     return Ok(true);
                 }
             }
             let _ = self
                 .tx
-                .send(format!("Unknown SSH alias '{}'\r\n", host_to_connect).into_bytes());
+                .send(format!("Unknown SSH alias '{host_to_connect}'\r\n").into_bytes());
         // Handle local forwarding for HTTP
         } else if port_to_connect == self.server.http_port
             || port_to_connect == self.server.https_port
@@ -2054,7 +2041,7 @@ impl Handler for ServerHandler {
             }
             let _ = self
                 .tx
-                .send(format!("Unknown HTTP alias '{}'\r\n", host_to_connect).into_bytes());
+                .send(format!("Unknown HTTP alias '{host_to_connect}'\r\n").into_bytes());
         // Handle local forwarding for TCP
         } else if !self.server.is_alias(host_to_connect) {
             if let Some(handler) = self.server.tcp.get(&port_to_connect) {
@@ -2069,8 +2056,7 @@ impl Handler for ServerHandler {
                     self.server.telemetry.add_tcp_connection(port_to_connect);
                     let _ = handler.log_channel().send(
                         format!(
-                            "New TCP proxy from {}:{} => {}:{}\r\n",
-                            originator_address, originator_port, host_to_connect, port_to_connect
+                            "New TCP proxy from {originator_address}:{originator_port} => {host_to_connect}:{port_to_connect}\r\n"
                         )
                         .into_bytes(),
                     );
@@ -2158,13 +2144,13 @@ impl Handler for ServerHandler {
                     );
                     let _ = self
                         .tx
-                        .send(format!("Forwarding TCP from {}\r\n", host_to_connect).into_bytes());
+                        .send(format!("Forwarding TCP from {host_to_connect}\r\n").into_bytes());
                     return Ok(true);
                 }
             }
             let _ = self
                 .tx
-                .send(format!("Unknown TCP port '{}'\r\n", port_to_connect).into_bytes());
+                .send(format!("Unknown TCP port '{port_to_connect}'\r\n").into_bytes());
         // Handle local forwarding for alias
         } else {
             if let Some(handler) = self
@@ -2185,8 +2171,7 @@ impl Handler for ServerHandler {
                         .add_alias_connection(TcpAlias(host_to_connect.into(), port_to_connect));
                     let _ = handler.log_channel().send(
                         format!(
-                            "New TCP proxy from {}:{} => {}:{}\r\n",
-                            originator_address, originator_port, host_to_connect, port_to_connect
+                            "New TCP proxy from {originator_address}:{originator_port} => {host_to_connect}:{port_to_connect}\r\n"
                         )
                         .into_bytes(),
                     );
@@ -2274,16 +2259,12 @@ impl Handler for ServerHandler {
                     );
                     let _ = self
                         .tx
-                        .send(format!("Forwarding TCP from {}\r\n", host_to_connect).into_bytes());
+                        .send(format!("Forwarding TCP from {host_to_connect}\r\n").into_bytes());
                     return Ok(true);
                 }
             }
             let _ = self.tx.send(
-                format!(
-                    "Unknown alias '{}:{}'\r\n",
-                    host_to_connect, port_to_connect
-                )
-                .into_bytes(),
+                format!("Unknown alias '{host_to_connect}:{port_to_connect}'\r\n").into_bytes(),
             );
         }
         if let AuthenticatedData::None { ref proxy_count } = self.auth_data {

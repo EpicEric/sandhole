@@ -116,7 +116,7 @@ async fn http_addressing_profanities() {
                         return (address, hostname);
                     }
                 }
-                message => panic!("Unexpected message {:?}", message),
+                message => panic!("Unexpected message {message:?}"),
             }
         }
         panic!("Unexpected end of channel");
@@ -150,7 +150,7 @@ async fn http_addressing_profanities() {
             .expect("HTTP handshake failed");
         tokio::spawn(async move {
             if let Err(err) = conn.await {
-                eprintln!("Connection failed: {:?}", err);
+                eprintln!("Connection failed: {err:?}");
             }
         });
         let request = Request::builder()

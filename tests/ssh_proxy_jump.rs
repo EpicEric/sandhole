@@ -152,7 +152,7 @@ async fn ssh_proxy_jump() {
             russh::ChannelMsg::Data { data } => {
                 assert_eq!(data.to_vec(), b"Hello, world!");
             }
-            msg => panic!("Unexpected message {:?}", msg),
+            msg => panic!("Unexpected message {msg:?}"),
         }
     })
     .await
@@ -215,7 +215,7 @@ async fn ssh_proxy_jump() {
             russh::ChannelMsg::Data { data } => {
                 assert_eq!(data.to_vec(), b"Hello, world!");
             }
-            msg => panic!("Unexpected message {:?}", msg),
+            msg => panic!("Unexpected message {msg:?}"),
         }
     })
     .await

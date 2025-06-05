@@ -140,7 +140,7 @@ async fn alias_require_allowed_fingerprints() {
             russh::ChannelMsg::Data { data } => {
                 assert_eq!(data.to_vec(), b"Hello, some of the world!");
             }
-            msg => panic!("Unexpected message {:?}", msg),
+            msg => panic!("Unexpected message {msg:?}"),
         }
     })
     .await

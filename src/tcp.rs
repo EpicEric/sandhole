@@ -59,11 +59,11 @@ impl PortHandler for Arc<TcpHandler> {
                     Ok((mut stream, address)) => {
                         let ip = address.ip();
                         if !clone.ip_filter.is_allowed(ip) {
-                            info!("Rejecting TCP connection for {}: not allowed", ip);
+                            info!("Rejecting TCP connection for {ip}: not allowed");
                             continue;
                         }
                         if let Err(err) = stream.set_nodelay(true) {
-                            warn!("Error setting nodelay for {}: {}", address, err);
+                            warn!("Error setting nodelay for {address}: {err}");
                         }
                         // Get the handler for this port
                         if let Some(handler) = clone.conn_manager.get(&port) {
@@ -111,7 +111,7 @@ impl PortHandler for Arc<TcpHandler> {
                             }
                         }
                     }
-                    Err(err) => error!("Error listening on port {}: {}", port, err),
+                    Err(err) => error!("Error listening on port {port}: {err}"),
                 }
             }
         }));
@@ -139,7 +139,7 @@ impl PortHandler for Arc<TcpHandler> {
             tokio::spawn(async move {
                 for port in ports.into_iter() {
                     if let Err(err) = clone.create_port_listener(port).await {
-                        error!("Failed to create listener for port {}: {}", port, err);
+                        error!("Failed to create listener for port {port}: {err}");
                     }
                 }
             });

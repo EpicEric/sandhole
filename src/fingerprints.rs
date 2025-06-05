@@ -84,7 +84,7 @@ async fn load_fingerprints_data(
                                 .flat_map(|line| match PublicKey::from_openssh(line) {
                                     Ok(key) => Some(key),
                                     Err(err) => {
-                                        warn!("Unable to parse key in {:?}: {}", entry, err);
+                                        warn!("Unable to parse key in {entry:?}: {err}");
                                         None
                                     }
                                 })
