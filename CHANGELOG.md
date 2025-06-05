@@ -5,6 +5,8 @@
 ### Changed
 
 - Update Docker base image.
+- Update dependencies.
+- Refactor `peek_sni_and_alpn()`.
 
 ### Fixed
 

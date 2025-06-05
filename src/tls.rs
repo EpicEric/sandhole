@@ -1,8 +1,4 @@
-use rustls::internal::msgs::{
-    codec::{Codec, Reader},
-    handshake::{ClientExtension, HandshakePayload},
-    message::{Message, MessagePayload, OutboundOpaqueMessage},
-};
+use tokio_rustls::LazyConfigAcceptor;
 
 pub(crate) struct TlsPeekData {
     pub(crate) sni: String,
@@ -10,38 +6,19 @@ pub(crate) struct TlsPeekData {
 }
 
 // Get the SNI and ALPN from a peeked ClientHello if it's valid.
-pub(crate) fn peek_sni_and_alpn(buf: &[u8]) -> Option<TlsPeekData> {
-    let opaque_message = OutboundOpaqueMessage::read(&mut Reader::init(buf)).ok()?;
-    let message = Message::try_from(opaque_message.into_plain_message()).ok()?;
-    if let MessagePayload::Handshake { parsed, .. } = &message.payload {
-        if let HandshakePayload::ClientHello(client_hello) = &parsed.payload {
-            let mut sni = None;
-            let mut alpn = vec![];
-            for extension in client_hello.extensions.iter() {
-                match extension {
-                    ClientExtension::ServerName(ext) => {
-                        sni = ext.first().and_then(|name| {
-                            // Do some freaky encoding stuff just to read the server name indicator
-                            let mut buffer = vec![];
-                            name.encode(&mut buffer);
-                            let end =
-                                (<u16>::read(&mut Reader::init(&buffer[1..3])).ok()? + 3) as usize;
-                            if buffer.len() != end {
-                                return None;
-                            }
-                            String::from_utf8(buffer[3..end].to_vec()).ok()
-                        })
-                    }
-                    ClientExtension::Protocols(ext) => {
-                        alpn = ext.iter().map(|name| name.as_ref().to_vec()).collect()
-                    }
-                    _ => {}
-                }
-            }
-            return sni.map(|sni| TlsPeekData { sni, alpn });
-        }
-    }
-    None
+pub(crate) async fn peek_sni_and_alpn(buf: &[u8]) -> Option<TlsPeekData> {
+    let handshake =
+        LazyConfigAcceptor::new(Default::default(), tokio::io::join(buf, tokio::io::empty()))
+            .await
+            .ok()?;
+    let client_hello = handshake.client_hello();
+    client_hello.server_name().map(|sni| TlsPeekData {
+        sni: sni.to_owned(),
+        alpn: client_hello
+            .alpn()
+            .map(|alpn_iter| alpn_iter.into_iter().map(|alpn| alpn.to_vec()).collect())
+            .unwrap_or_default(),
+    })
 }
 
 #[cfg(test)]
@@ -55,9 +32,45 @@ mod peek_sni_and_alpn_tests {
 
     use crate::peek_sni_and_alpn;
 
-    #[test]
-    fn fails_on_empty_buffer() {
-        assert!(peek_sni_and_alpn(b"").is_none());
+    #[tokio::test]
+    async fn fails_on_empty_buffer() {
+        assert!(peek_sni_and_alpn(b"").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn fails_on_plain_message() {
+        let mut root_store = rustls::RootCertStore::empty();
+        root_store.add_parsable_certificates(
+            rustls_pki_types::CertificateDer::pem_file_iter(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/data/ca/rootCA.pem"
+            ))
+            .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
+            .expect("Failed to parse client certificates"),
+        );
+        let mut client_config = rustls::ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::aws_lc_rs::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+        client_config.enable_sni = false;
+        let connector = TlsConnector::from(Arc::new(client_config));
+        let (mut server, client) = duplex(4096);
+        let jh = tokio::spawn(async move {
+            connector
+                .connect("plain.msg".try_into().unwrap(), client)
+                .await
+        });
+        let mut buf = [0u8; 4096];
+        let size = server
+            .read(&mut buf)
+            .await
+            .expect("Failed to read from duplex stream");
+        jh.abort();
+        let peek_data = peek_sni_and_alpn(&buf[..size]).await;
+        assert!(peek_data.is_none());
     }
 
     #[tokio::test]
@@ -93,7 +106,7 @@ mod peek_sni_and_alpn_tests {
             .await
             .expect("Failed to read from duplex stream");
         jh.abort();
-        let peek_data = peek_sni_and_alpn(&buf[..size]);
+        let peek_data = peek_sni_and_alpn(&buf[..size]).await;
         assert!(peek_data.is_none());
     }
 
@@ -128,7 +141,7 @@ mod peek_sni_and_alpn_tests {
             .await
             .expect("Failed to read from duplex stream");
         jh.abort();
-        let peek_data = peek_sni_and_alpn(&buf[..size]);
+        let peek_data = peek_sni_and_alpn(&buf[..size]).await;
         assert!(peek_data.is_some());
         let peek_data = peek_data.unwrap();
         assert_eq!(peek_data.sni, "sandhole.com.br");
@@ -167,7 +180,7 @@ mod peek_sni_and_alpn_tests {
             .await
             .expect("Failed to read from duplex stream");
         jh.abort();
-        let peek_data = peek_sni_and_alpn(&buf[..size]);
+        let peek_data = peek_sni_and_alpn(&buf[..size]).await;
         assert!(peek_data.is_some());
         let peek_data = peek_data.unwrap();
         assert_eq!(peek_data.sni, "foobar.tld");

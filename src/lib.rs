@@ -844,7 +844,7 @@ fn handle_https_connection(
             });
             return;
         }
-        let Some(TlsPeekData { sni, alpn }) = peek_sni_and_alpn(&buf[..n]) else {
+        let Some(TlsPeekData { sni, alpn }) = peek_sni_and_alpn(&buf[..n]).await else {
             return;
         };
         if alpn == [ACME_TLS_ALPN_NAME] {
