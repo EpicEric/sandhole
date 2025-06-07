@@ -40,12 +40,12 @@ You can now run Sandhole! Just make sure that it points to your domain:
 By default, this will expose ports 80 (for HTTP), 443 (for HTTPS), and 2222 (for SSH). If it all succeeds, you should see the following:
 
 ```log
-[2024-11-03T13:10:51Z INFO  sandhole] Starting Sandhole...
-[2024-11-03T13:10:51Z INFO  sandhole] Key file not found. Creating...
-[2024-11-03T13:10:51Z INFO  sandhole] Listening for HTTP connections on port 80.
-[2024-11-03T13:10:51Z INFO  sandhole] Listening for HTTPS connections on port 443.
-[2024-11-03T13:10:51Z INFO  sandhole] Listening for SSH connections on port 2222.
-[2024-11-03T13:10:51Z INFO  sandhole] Sandhole is now running.
+2025-06-07T02:34:01.346654097+00:00  INFO sandhole: Starting Sandhole...
+2025-06-07T02:34:01.347502369+00:00  INFO sandhole: Key file not found. Creating...
+2025-06-07T02:34:01.351344652+00:00  INFO sandhole: Listening for HTTP connections on port 80.
+2025-06-07T02:34:01.351376882+00:00  INFO sandhole: Listening for HTTPS connections on port 443.
+2025-06-07T02:34:01.351420152+00:00  INFO sandhole: Listening for SSH connections on port 2222.
+2025-06-07T02:34:01.351424230+00:00  INFO sandhole: Sandhole is now running.
 ```
 
 Now you're ready to dig sandholes like a crab! 🦀

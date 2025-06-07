@@ -282,7 +282,7 @@ mod connection_map_tests {
 
     use super::ConnectionMap;
 
-    #[test]
+    #[test_log::test]
     fn inserts_and_removes_one_handler() {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(2).returning(|_| {});
@@ -315,7 +315,7 @@ mod connection_map_tests {
         assert!(data.is_empty());
     }
 
-    #[test]
+    #[test_log::test]
     fn removes_all_handlers_from_address() {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(3).returning(|_| {});
@@ -359,7 +359,7 @@ mod connection_map_tests {
         assert!(data.is_empty());
     }
 
-    #[test]
+    #[test_log::test]
     fn removes_only_handlers_from_specific_address() {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(4).returning(|_| {});
@@ -414,7 +414,7 @@ mod connection_map_tests {
         "###);
     }
 
-    #[test]
+    #[test_log::test]
     fn returns_none_for_missing_host() {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(2).returning(|_| {});
@@ -445,7 +445,7 @@ mod connection_map_tests {
         assert_eq!(map.get("unknown"), None);
     }
 
-    #[test]
+    #[test_log::test]
     fn returns_one_of_several_load_balanced_handlers() {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor
@@ -530,7 +530,7 @@ mod connection_map_tests {
         "###);
     }
 
-    #[test]
+    #[test_log::test]
     fn returns_single_host_when_replacing() {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(1).returning(|_| {});
@@ -568,7 +568,7 @@ mod connection_map_tests {
         "###);
     }
 
-    #[test]
+    #[test_log::test]
     fn errors_when_rejecting_new_host() {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(1).returning(|_| {});
@@ -609,7 +609,7 @@ mod connection_map_tests {
         "###);
     }
 
-    #[test]
+    #[test_log::test]
     fn reaching_quota_limits_load_balancing() {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor
@@ -689,7 +689,7 @@ mod connection_map_tests {
         "###);
     }
 
-    #[test]
+    #[test_log::test]
     fn reaching_quota_prevents_replacing() {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(1).returning(|_| {});
@@ -744,7 +744,7 @@ mod connection_map_tests {
         "###);
     }
 
-    #[test]
+    #[test_log::test]
     fn reaching_quota_doesnt_deny_by_policy() {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(1).returning(|_| {});

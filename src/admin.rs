@@ -774,13 +774,13 @@ impl AdminInterface {
                 Some(AdminPrompt::RemoveUser(user, data)) => {
                     let mut text = "User removed successfully!".into();
                     if let Some(fingerprint) = data.map(|(fingerprint, _)| fingerprint) {
-                        if let Err(err) = interface
+                        if let Err(error) = interface
                             .state
                             .server
                             .fingerprints_validator
                             .remove_user_key(&fingerprint)
                         {
-                            text = format!("Error: {err}");
+                            text = format!("Error: {error}");
                         }
                         if let Some(sessions) = interface
                             .state

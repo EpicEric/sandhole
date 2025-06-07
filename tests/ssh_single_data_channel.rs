@@ -9,13 +9,9 @@ use tokio::{
     time::{sleep, timeout},
 };
 
-#[tokio::test(flavor = "multi_thread")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn ssh_single_data_channel() {
     // 1. Initialize Sandhole
-    let _ = env_logger::builder()
-        .filter_module("sandhole", log::LevelFilter::Debug)
-        .is_test(true)
-        .try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",

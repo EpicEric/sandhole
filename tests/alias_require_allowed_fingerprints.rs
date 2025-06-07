@@ -20,13 +20,9 @@ use tokio::{
 /// to request local port forwarding (as of this version).
 ///
 /// This test ensures that any other actions result in an error with a disconnect.
-#[tokio::test(flavor = "multi_thread")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn alias_require_allowed_fingerprints() {
     // 1. Initialize Sandhole
-    let _ = env_logger::builder()
-        .filter_module("sandhole", log::LevelFilter::Debug)
-        .is_test(true)
-        .try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",

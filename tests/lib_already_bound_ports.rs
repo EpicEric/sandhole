@@ -7,12 +7,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
-#[tokio::test(flavor = "multi_thread")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn lib_already_bound_ports() {
-    let _ = env_logger::builder()
-        .filter_module("sandhole", log::LevelFilter::Debug)
-        .is_test(true)
-        .try_init();
     for (i, port) in [18022, 18080, 18443].into_iter().enumerate() {
         if i > 0 {
             sleep(Duration::from_millis(200)).await;

@@ -94,7 +94,7 @@ mod counter_tests {
 
     use super::Counter;
 
-    #[test]
+    #[test_log::test]
     fn takes_measurements() {
         let mut counter = Counter::new(Duration::from_secs(4), Duration::from_secs(1));
         assert_eq!(counter.measure(), 0.0);
@@ -106,7 +106,7 @@ mod counter_tests {
         assert_eq!(measure_2, 4.0);
     }
 
-    #[test]
+    #[test_log::test]
     fn resets_on_moving_window() {
         let mut counter = Counter::new(Duration::from_millis(1_000), Duration::from_millis(200));
         counter.add(10);
@@ -286,7 +286,7 @@ mod telemetry_tests {
 
     use super::Telemetry;
 
-    #[test]
+    #[test_log::test]
     fn includes_data_for_connections_on_ssh_aliases() {
         let telemetry = Telemetry::new();
         assert!(
@@ -303,7 +303,7 @@ mod telemetry_tests {
         assert_eq!(*data.get("qux").unwrap(), 2.0 * data.get("foo").unwrap());
     }
 
-    #[test]
+    #[test_log::test]
     fn retains_ssh_aliases_that_are_still_active() {
         let telemetry = Arc::new(Telemetry::new());
         telemetry.ssh_reactor(vec!["host1".into(), "host2".into(), "host3".into()]);
@@ -328,7 +328,7 @@ mod telemetry_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn ssh_data_isnt_affected_by_other_connections() {
         let telemetry = Telemetry::new();
         assert!(
@@ -345,7 +345,7 @@ mod telemetry_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn includes_data_for_requests_on_http_domains() {
         let telemetry = Telemetry::new();
         assert!(
@@ -362,7 +362,7 @@ mod telemetry_tests {
         assert_eq!(*data.get("qux").unwrap(), 2.0 * data.get("foo").unwrap());
     }
 
-    #[test]
+    #[test_log::test]
     fn retains_http_hostnames_that_are_still_active() {
         let telemetry = Arc::new(Telemetry::new());
         telemetry.http_reactor(vec!["host1".into(), "host2".into(), "host3".into()]);
@@ -387,7 +387,7 @@ mod telemetry_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn http_data_isnt_affected_by_other_connections() {
         let telemetry = Telemetry::new();
         assert!(
@@ -404,7 +404,7 @@ mod telemetry_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn includes_data_for_connections_on_sni_domains() {
         let telemetry = Telemetry::new();
         assert!(
@@ -421,7 +421,7 @@ mod telemetry_tests {
         assert_eq!(*data.get("qux").unwrap(), 2.0 * data.get("foo").unwrap());
     }
 
-    #[test]
+    #[test_log::test]
     fn retains_sni_hostnames_that_are_still_active() {
         let telemetry = Arc::new(Telemetry::new());
         telemetry.sni_reactor(vec!["host1".into(), "host2".into(), "host3".into()]);
@@ -446,7 +446,7 @@ mod telemetry_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn sni_data_isnt_affected_by_other_connections() {
         let telemetry = Telemetry::new();
         assert!(
@@ -463,7 +463,7 @@ mod telemetry_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn includes_data_for_connections_on_tcp_ports() {
         let telemetry = Telemetry::new();
         assert!(
@@ -480,7 +480,7 @@ mod telemetry_tests {
         assert_eq!(*data.get(&3).unwrap(), 2.0 * data.get(&1).unwrap());
     }
 
-    #[test]
+    #[test_log::test]
     fn retains_tcp_ports_that_are_still_active() {
         let telemetry = Arc::new(Telemetry::new());
         telemetry.tcp_reactor(vec![1, 2, 3]);
@@ -499,7 +499,7 @@ mod telemetry_tests {
         assert!(*data.get(&4).unwrap() > 0.0, "should have data for port 4");
     }
 
-    #[test]
+    #[test_log::test]
     fn tcp_data_isnt_affected_by_other_connections() {
         let telemetry = Telemetry::new();
         assert!(
@@ -516,7 +516,7 @@ mod telemetry_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn includes_data_for_connections_on_aliases() {
         let telemetry = Telemetry::new();
         assert!(
@@ -545,7 +545,7 @@ mod telemetry_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn retains_aliases_that_are_still_active() {
         let telemetry = Arc::new(Telemetry::new());
         telemetry.alias_reactor(vec![
@@ -584,7 +584,7 @@ mod telemetry_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn alias_data_isnt_affected_by_other_connections() {
         let telemetry = Telemetry::new();
         assert!(

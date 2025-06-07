@@ -74,7 +74,7 @@ mod ip_filter_tests {
 
     use super::{IpFilter, IpFilterConfig};
 
-    #[test]
+    #[test_log::test]
     fn should_allow_anyone_if_no_lists() {
         let filter = IpFilter::from(IpFilterConfig {
             allowlist: None,
@@ -87,7 +87,7 @@ mod ip_filter_tests {
         assert!(filter.is_allowed(IpAddr::from_str("1234:0db8:502e::3c").unwrap()));
     }
 
-    #[test]
+    #[test_log::test]
     fn should_allow_anyone_if_empty_lists() {
         let filter = IpFilter::from(IpFilterConfig {
             allowlist: Some(vec![]),
@@ -100,7 +100,7 @@ mod ip_filter_tests {
         assert!(filter.is_allowed(IpAddr::from_str("1234:0db8:502e::3c").unwrap()));
     }
 
-    #[test]
+    #[test_log::test]
     fn should_allow_addresses_not_in_blocklist() {
         let filter = IpFilter::from(IpFilterConfig {
             allowlist: None,
@@ -116,7 +116,7 @@ mod ip_filter_tests {
         assert!(filter.is_allowed(IpAddr::from_str("1234:0db8:502e::3c").unwrap()));
     }
 
-    #[test]
+    #[test_log::test]
     fn should_reject_addresses_not_in_allowlist() {
         let filter = IpFilter::from(IpFilterConfig {
             allowlist: Some(vec![
@@ -132,7 +132,7 @@ mod ip_filter_tests {
         assert!(!filter.is_allowed(IpAddr::from_str("1234:0db8:502e::3c").unwrap()));
     }
 
-    #[test]
+    #[test_log::test]
     fn should_only_accept_allowlist() {
         let filter = IpFilter::from(IpFilterConfig {
             allowlist: Some(vec![
@@ -151,7 +151,7 @@ mod ip_filter_tests {
         assert!(!filter.is_allowed(IpAddr::from_str("1234:0db8:502e::3c").unwrap()));
     }
 
-    #[test]
+    #[test_log::test]
     fn should_fail_if_duplicated_network() {
         assert!(
             IpFilter::from(IpFilterConfig {

@@ -131,7 +131,7 @@ mod api_login_tests {
 
     use super::{ApiLogin, AuthenticationRequest, MockConfigurer};
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn authenticates_on_successful_http_response() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -169,7 +169,7 @@ mod api_login_tests {
         jh.abort();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn doesnt_authenticate_on_unsuccessful_http_response() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -207,7 +207,7 @@ mod api_login_tests {
         jh.abort();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn authenticates_on_successful_https_response() {
         let mut mock = MockConfigurer::new();
         let mut root_store = RootCertStore::empty();
@@ -304,7 +304,7 @@ mod api_login_tests {
         jh.abort();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn authenticates_on_successful_http_redirect() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -347,7 +347,7 @@ mod api_login_tests {
         jh.abort();
     }
 
-    #[test]
+    #[test_log::test]
     fn fails_on_empty_url() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -357,7 +357,7 @@ mod api_login_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn fails_on_invalid_url() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -367,7 +367,7 @@ mod api_login_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn fails_on_missing_host() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -377,7 +377,7 @@ mod api_login_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn fails_on_invalid_host() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -387,7 +387,7 @@ mod api_login_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn fails_on_missing_scheme() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -397,7 +397,7 @@ mod api_login_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn fails_on_unknown_scheme() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -407,7 +407,7 @@ mod api_login_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn errors_when_unable_to_connect_to_socket() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -430,7 +430,7 @@ mod api_login_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn errors_when_unable_to_complete_http_handshake() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -461,7 +461,7 @@ mod api_login_tests {
         jh.abort();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn errors_when_http_request_fails() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -500,7 +500,7 @@ mod api_login_tests {
         jh.abort();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn errors_when_unable_to_complete_https_handshake() {
         let mut mock = MockConfigurer::new();
         let mut root_store = RootCertStore::empty();
@@ -552,7 +552,7 @@ mod api_login_tests {
         jh.abort();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn errors_when_https_request_fails() {
         let mut mock = MockConfigurer::new();
         let mut root_store = RootCertStore::empty();

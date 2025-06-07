@@ -16,13 +16,9 @@ use tokio::{
     time::{sleep, timeout},
 };
 
-#[tokio::test(flavor = "multi_thread")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn lib_configure_from_scratch() {
     // 1. Create random temporary directory and initialize Sandhole
-    let _ = env_logger::builder()
-        .filter_module("sandhole", log::LevelFilter::Debug)
-        .is_test(true)
-        .try_init();
     let random_name = String::from_utf8(
         (0..6)
             .flat_map(|_| {
