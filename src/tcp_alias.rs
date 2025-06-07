@@ -24,7 +24,7 @@ pub(crate) trait TcpAliasKey {
 }
 
 impl TcpAliasKey for TcpAlias {
-    fn key(&self) -> BorrowedTcpAlias {
+    fn key(&self) -> BorrowedTcpAlias<'_> {
         BorrowedTcpAlias(self.0.as_str(), &self.1)
     }
 }

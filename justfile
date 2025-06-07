@@ -13,7 +13,7 @@ book:
 cli:
   to-html --no-prompt "cargo run --quiet -- --help" > cli.html
 
-flamegraph test:
+flamegraph-test test:
   cargo flamegraph --dev --test {{test}}
 
 clippy:
@@ -21,4 +21,3 @@ clippy:
 
 clippy-nightly:
   cargo +nightly clippy --all-targets --fix --allow-dirty --allow-staged && cargo fmt --all
-

@@ -8,6 +8,7 @@
 - Update dependencies.
 - Replace `env_logger` with `tracing`.
 - Refactor `peek_sni_and_alpn()`.
+- Remove `CHACHA20_POLY1305` from preferred ciphers.
 
 ### Fixed
 

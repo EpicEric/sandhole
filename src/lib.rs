@@ -24,7 +24,7 @@ use hyper_util::{
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::{
-    ChannelStream,
+    ChannelStream, Preferred,
     keys::{
         decode_secret_key,
         ssh_key::{Fingerprint, LineEnding, private::Ed25519Keypair},
@@ -533,16 +533,26 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
 
     // SSH server
     let ssh_config = Arc::new(Config {
-        inactivity_timeout: Some(Duration::from_secs(3_600)),
         auth_rejection_time: Duration::from_secs(2),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
-        keepalive_interval: Some(Duration::from_secs(30)),
+        inactivity_timeout: Some(Duration::from_secs(3_600)),
+        keepalive_interval: Some(Duration::from_secs(15)),
+        keepalive_max: 4,
+        keys: vec![key],
         maximum_packet_size: config
             .buffer_size
             .try_into()
             .with_context(|| "buffer_size must fit in 32 bits")?,
-        keepalive_max: 4,
-        keys: vec![key],
+        preferred: Preferred {
+            cipher: std::borrow::Cow::Borrowed(&[
+                russh::cipher::AES_256_GCM,
+                russh::cipher::AES_256_CTR,
+                russh::cipher::AES_192_CTR,
+                russh::cipher::AES_128_CTR,
+                // russh::cipher::CHACHA20_POLY1305,
+            ]),
+            ..Default::default()
+        },
         ..Default::default()
     });
     // Create the local forwarding-specific HTTP proxy data.
