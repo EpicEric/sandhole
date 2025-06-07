@@ -25,13 +25,9 @@ use tokio::{
 use tokio_rustls::TlsConnector;
 use tower::Service;
 
-#[tokio::test(flavor = "multi_thread")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn https_connect_ssh_on_https_port() {
     // 1. Initialize Sandhole
-    let _ = env_logger::builder()
-        .filter_module("sandhole", log::LevelFilter::Debug)
-        .is_test(true)
-        .try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
@@ -125,8 +121,8 @@ async fn https_connect_ssh_on_https_port() {
         .await
         .expect("HTTP handshake failed");
     tokio::spawn(async move {
-        if let Err(err) = conn.await {
-            eprintln!("Connection failed: {err:?}");
+        if let Err(error) = conn.await {
+            eprintln!("Connection failed: {error:?}");
         }
     });
     let request = Request::builder()

@@ -7,13 +7,13 @@ use std::{
 };
 
 use crate::{directory::watch_directory, droppable_handle::DroppableHandle, error::ServerError};
-use log::{error, warn};
 use notify::RecommendedWatcher;
 use russh::keys::{Algorithm, HashAlg, PublicKey, ssh_key::Fingerprint};
 use tokio::{
     fs::{read_dir, read_to_string},
     sync::oneshot,
 };
+use tracing::{error, warn};
 
 // Authentication identified for a given fingerprint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -83,8 +83,8 @@ async fn load_fingerprints_data(
                                 .filter(|line| !line.trim().is_empty())
                                 .flat_map(|line| match PublicKey::from_openssh(line) {
                                     Ok(key) => Some(key),
-                                    Err(err) => {
-                                        warn!("Unable to parse key in {entry:?}: {err}");
+                                    Err(error) => {
+                                        warn!(path=?entry, %error, "Unable to parse key.");
                                         None
                                     }
                                 })
@@ -102,15 +102,15 @@ async fn load_fingerprints_data(
                                 }),
                         );
                     }
-                    Err(err) => {
-                        warn!("Unable to load key in {:?}: {}", entry.file_name(), err);
+                    Err(error) => {
+                        warn!(path = ?entry.file_name(),%error, "Unable to load key.");
                     }
                 }
             }
             *fingerprints_data.write().unwrap() = fingerprints_map;
         }
-        Err(err) => {
-            error!("Unable to read keys directory {:?}: {}", &directory, err);
+        Err(error) => {
+            error!(?directory, %error, "Unable to read keys directory.");
         }
     }
 }
@@ -251,7 +251,7 @@ mod fingerprints_validator_tests {
     static ADMIN_KEYS_DIRECTORY: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys");
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn authenticates_user_keys() {
         let validator = FingerprintsValidator::watch(
             USER_KEYS_DIRECTORY.parse().unwrap(),
@@ -295,7 +295,7 @@ mod fingerprints_validator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn gets_data_for_fingerprints() {
         let validator = FingerprintsValidator::watch(
             USER_KEYS_DIRECTORY.parse().unwrap(),

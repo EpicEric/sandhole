@@ -25,13 +25,9 @@ use tokio::{
 use tokio_tungstenite::client_async;
 use tower::Service;
 
-#[tokio::test(flavor = "multi_thread")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn websocket_timeout() {
     // 1. Initialize Sandhole
-    let _ = env_logger::builder()
-        .filter_module("sandhole", log::LevelFilter::Debug)
-        .is_test(true)
-        .try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",

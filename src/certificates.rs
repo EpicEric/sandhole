@@ -6,7 +6,6 @@ use std::{
 };
 
 use crate::{directory::watch_directory, droppable_handle::DroppableHandle, error::ServerError};
-use log::{error, warn};
 #[cfg(test)]
 use mockall::automock;
 use notify::RecommendedWatcher;
@@ -20,6 +19,7 @@ use rustls::{
 };
 use rustls_pki_types::CertificateDer;
 use tokio::{fs::read_dir, sync::oneshot};
+use tracing::{error, warn};
 use trie_rs::map::{Trie, TrieBuilder};
 use webpki::EndEntityCert;
 
@@ -88,41 +88,43 @@ impl CertificateResolver {
                                 .is_ok_and(|filetype| filetype.is_dir())
                             {
                                 // Get the certificate(s) from the fullchain.pem file
-                                let cert = match CertificateDer::pem_file_iter(
-                                    entry.path().join("fullchain.pem"),
-                                )
-                                .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
+                                let certificate_path = entry.path().join("fullchain.pem");
+                                let cert = match CertificateDer::pem_file_iter(&certificate_path)
+                                    .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
                                 {
                                     Ok(cert) => cert,
-                                    Err(err) => {
+                                    Err(error) => {
                                         warn!(
-                                            "Unable to load certificate chain in {:?}: {}",
-                                            entry.path().join("fullchain.pem"),
-                                            err
+                                            path = ?certificate_path,
+                                            %error,
+                                            "Unable to load certificate chain.",
                                         );
                                         continue;
                                     }
                                 };
                                 // Get the associated private key privkey.pem file
-                                let key = match PrivateKeyDer::from_pem_file(
-                                    entry.path().join("privkey.pem"),
-                                ) {
+                                let key_path = entry.path().join("privkey.pem");
+                                let key = match PrivateKeyDer::from_pem_file(&key_path) {
                                     Ok(key) => key,
-                                    Err(err) => {
+                                    Err(error) => {
                                         warn!(
-                                            "Unable to load certificate key in {:?}: {}",
-                                            entry.path().join("privkey.pem"),
-                                            err
+                                            path = ?key_path,
+                                            %error,
+                                            "Unable to load certificate key.",
                                         );
                                         continue;
                                     }
                                 };
-                                let Ok(key) = any_supported_type(&key) else {
-                                    warn!(
-                                        "Invalid key in {:?}: no supported type",
-                                        entry.path().join("privkey.pem")
-                                    );
-                                    continue;
+                                let key = match any_supported_type(&key) {
+                                    Ok(key) => key,
+                                    Err(error) => {
+                                        warn!(
+                                            path = ?key_path,
+                                            %error,
+                                            "Invalid key.",
+                                        );
+                                        continue;
+                                    }
                                 };
                                 // Create the certificate + key pair
                                 let ck = Arc::new(CertifiedKey::new(cert, key));
@@ -147,10 +149,10 @@ impl CertificateResolver {
                         let trie = builder.build();
                         *certs_clone.write().unwrap() = trie;
                     }
-                    Err(err) => {
+                    Err(error) => {
                         error!(
-                            "Unable to read certificates directory {:?}: {}",
-                            &directory, err
+                            ?directory, %error,
+                            "Unable to read certificates directory.",
                         );
                     }
                 }
@@ -247,7 +249,7 @@ mod certificate_resolver_tests {
     static DOMAINS_LOCALHOST: &[&str] = &["localhost"];
     static UNKNOWN_DOMAINS: &[&str] = &[".invalid.", "tld", "example.com", "too.nested.foobar.tld"];
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn errors_on_missing_directory() {
         assert!(
             CertificateResolver::watch(
@@ -260,7 +262,7 @@ mod certificate_resolver_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn allows_valid_domains() {
         let resolver = CertificateResolver::watch(
             CERTIFICATES_DIRECTORY.parse().unwrap(),
@@ -282,7 +284,7 @@ mod certificate_resolver_tests {
         }
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn forbids_invalid_domains() {
         let resolver = CertificateResolver::watch(
             CERTIFICATES_DIRECTORY.parse().unwrap(),
@@ -298,7 +300,7 @@ mod certificate_resolver_tests {
         }
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn errors_on_missing_certificate() {
         let random_name = String::from_utf8(
             (0..6)
@@ -335,7 +337,7 @@ mod certificate_resolver_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn errors_on_missing_key() {
         let random_name = String::from_utf8(
             (0..6)
@@ -372,7 +374,7 @@ mod certificate_resolver_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn errors_on_invalid_certificate() {
         let random_name = String::from_utf8(
             (0..6)
@@ -412,7 +414,7 @@ mod certificate_resolver_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn errors_on_invalid_key() {
         let random_name = String::from_utf8(
             (0..6)
@@ -452,7 +454,7 @@ mod certificate_resolver_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn updates_alpn_resolver_on_reaction() {
         let mut mock = MockAlpnChallengeResolver::new();
         mock.expect_update_domains()

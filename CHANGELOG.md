@@ -6,6 +6,7 @@
 
 - Update Docker base image.
 - Update dependencies.
+- Replace `env_logger` with `tracing`.
 - Refactor `peek_sni_and_alpn()`.
 
 ### Fixed

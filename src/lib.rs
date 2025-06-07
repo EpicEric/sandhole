@@ -21,7 +21,6 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
 };
-use log::{debug, error, info, warn};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::{
@@ -45,6 +44,7 @@ use tokio::{
 };
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info, warn};
 
 use crate::{
     acme::AcmeResolver,
@@ -212,7 +212,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
     // Find the private SSH key for Sandhole or create a new one.
     let key = match fs::read_to_string(config.private_key_file.as_path()).await {
         Ok(key) => decode_secret_key(&key, None).with_context(|| "Error decoding secret key")?,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             info!("Key file not found. Creating...");
             let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
                 &ChaCha20Rng::from_os_rng().random(),
@@ -237,7 +237,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 .with_context(|| "Error saving secret key to filesystem")?;
             key
         }
-        Err(err) => return Err(err).with_context(|| "Error reading secret key"),
+        Err(error) => return Err(error).with_context(|| "Error reading secret key"),
     };
 
     // Initialize modules
@@ -360,8 +360,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             let mut trie = rustrict::Trie::default();
             if config.domain.is_inappropriate() {
                 warn!(
-                    "Domain \"{}\" is considered a profanity; adding to safe word list",
-                    config.domain
+                    domain = %config.domain,
+                    "Domain is considered a profanity; adding to safe word list.",
                 );
                 trie.set(&config.domain, rustrict::Type::SAFE);
             }
@@ -646,18 +646,17 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
                 let proxy_data = Arc::clone(&http_proxy_data);
                 let (stream, address) = match http_listener.accept().await {
                     Ok((stream, address)) => (stream, address),
-                    Err(err) => {
-                        error!("Unable to accept HTTP connection: {err}");
+                    Err(error) => {
+                        error!(%error, "Unable to accept HTTP connection.");
                         break;
                     }
                 };
-                let ip = address.ip();
-                if !ip_filter_clone.is_allowed(ip) {
-                    info!("Rejecting HTTP connection for {ip}: not allowed");
+                if !ip_filter_clone.is_allowed(address.ip()) {
+                    info!(%address, "Rejecting HTTP connection: IP not allowed.");
                     continue;
                 }
-                if let Err(err) = stream.set_nodelay(true) {
-                    warn!("Error setting nodelay for {address}: {err}");
+                if let Err(error) = stream.set_nodelay(true) {
+                    warn!(%error, %address, "Error setting nodelay.");
                 }
                 // Create a Hyper service and serve over the accepted TCP connection.
                 let service = service_fn(move |req: Request<Incoming>| {
@@ -727,18 +726,17 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             loop {
                 let (stream, address) = match https_listener.accept().await {
                     Ok((stream, address)) => (stream, address),
-                    Err(err) => {
-                        error!("Unable to accept HTTPS connection: {err}");
+                    Err(error) => {
+                        error!(%error, "Unable to accept HTTPS connection.");
                         break;
                     }
                 };
-                let ip = address.ip();
-                if !ip_filter_clone.is_allowed(ip) {
-                    info!("Rejecting HTTPS connection for {ip}: not allowed");
+                if !ip_filter_clone.is_allowed(address.ip()) {
+                    info!(%address, "Rejecting HTTPS connection: IP not allowed.");
                     continue;
                 }
-                if let Err(err) = stream.set_nodelay(true) {
-                    warn!("Error setting nodelay for {address}: {err}");
+                if let Err(error) = stream.set_nodelay(true) {
+                    warn!(%error, %address, "Error setting nodelay.");
                 }
                 handle_https_connection(HandleHttpsConnectionConfig {
                     stream,
@@ -769,18 +767,17 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             conn = ssh_listener.accept() => {
                 let (stream, address) = match conn {
                     Ok((stream, address)) => (stream, address),
-                    Err(err) => {
-                        error!("Unable to accept SSH connection: {err}");
+                    Err(error) => {
+                        error!(%error, "Unable to accept SSH connection.");
                         break;
                     },
                 };
-                let ip = address.ip();
-                if !ip_filter.is_allowed(ip) {
-                    info!("Rejecting SSH connection for {ip}: not allowed");
+                if !ip_filter.is_allowed(address.ip()) {
+                    info!(%address, "Rejecting SSH connection: IP not allowed.");
                     continue;
                 }
-                if let Err(err) = stream.set_nodelay(true) {
-                    warn!("Error setting nodelay for {address}: {err}");
+                if let Err(error) = stream.set_nodelay(true) {
+                    warn!(%error, %address, "Error setting nodelay.");
                 }
                 handle_ssh_connection(HandleSshConnectionConfig {
                     stream,
@@ -855,7 +852,7 @@ fn handle_https_connection(
                     .unwrap();
                 tls.shutdown().await.unwrap();
             } else {
-                warn!("Unable to get ACME challenge TLS config");
+                warn!("Unable to get ACME challenge TLS config.");
             }
             return;
         }
@@ -930,8 +927,8 @@ fn handle_https_connection(
                     }
                 }
             }
-            Err(err) => {
-                warn!("Error establishing TLS connection with {address}: {err}");
+            Err(error) => {
+                warn!(%error, %address, "Error establishing TLS connection.");
             }
         }
     });
@@ -958,19 +955,19 @@ fn handle_ssh_connection(
     tokio::spawn(async move {
         let mut session = match russh::server::run_stream(config, stream, handler).await {
             Ok(session) => session,
-            Err(err) => {
-                warn!("Connection setup failed: {err}");
+            Err(error) => {
+                warn!(%error, "Connection setup failed.");
                 return;
             }
         };
         tokio::select! {
             result = &mut session => {
-                if let Err(err) = result {
-                    warn!("Connection with {address} closed with error: {err}");
+                if let Err(error) = result {
+                    warn!(%error, %address, "Connection closed.");
                 }
             }
             _ = cancellation_token.cancelled() => {
-                info!("Disconnecting client {address}...");
+                info!(%address, "Disconnecting client...");
                 let _ = session.handle().disconnect(russh::Disconnect::ByApplication, "".into(), "English".into()).await;
             },
         }

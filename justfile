@@ -1,7 +1,7 @@
 default:
   just --list
 
-test:
+test $RUST_LOG="sandhole=debug":
   cargo test
 
 install-dev-deps:

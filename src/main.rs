@@ -1,14 +1,26 @@
 use clap::Parser;
-use log::error;
 use sandhole::{ApplicationConfig, entrypoint};
+use tracing::error;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::builder()
+                .with_default_directive(tracing::level_filters::LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .with(
+            tracing_subscriber::fmt::Layer::default()
+                .compact()
+                .with_timer(tracing_subscriber::fmt::time::ChronoUtc::rfc_3339()),
+        )
+        .init();
     let config = ApplicationConfig::parse();
-    if let Err(err) = entrypoint(config).await {
-        error!("Unable to start Sandhole: {err}");
-        Err(err)
+    if let Err(error) = entrypoint(config).await {
+        error!(%error, "Unable to start Sandhole.");
+        Err(error)
     } else {
         Ok(())
     }

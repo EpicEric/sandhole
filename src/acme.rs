@@ -4,7 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use log::{info, warn};
 #[cfg(test)]
 use mockall::automock;
 use rustls::{
@@ -14,6 +13,7 @@ use rustls::{
 };
 use rustls_acme::{AcmeConfig, AcmeState, UseChallenge, caches::DirCache};
 use tokio_stream::StreamExt;
+use tracing::{info, warn};
 
 use crate::{certificates::AlpnChallengeResolver, droppable_handle::DroppableHandle};
 
@@ -85,8 +85,8 @@ impl ResolverState for AlpnAcmeResolverState {
     fn join_handle(mut self) -> DroppableHandle<()> {
         DroppableHandle(tokio::spawn(async move {
             while let Some(msg) = self.0.next().await {
-                if let Err(err) = msg {
-                    warn!("ACME listener error: {err:?}");
+                if let Err(error) = msg {
+                    warn!(%error, "ACME listener error.");
                 }
             }
         }))
@@ -141,10 +141,7 @@ where
             self.join_handle = None;
             return;
         }
-        info!(
-            "Generating ACME certificates for the following domains: {:?}",
-            &domains
-        );
+        info!(?domains, "Generating ACME certificates.",);
         // Create a new ACME config state.
         let new_state =
             self.resolver
@@ -241,7 +238,7 @@ o6ioYnJQHPsfaym/DY0seYghtg==
 -----END PRIVATE KEY-----
 ";
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn update_acme_resolver_with_no_domains() {
         let mut mock = MockResolver::new();
         mock.expect_state().never();
@@ -265,7 +262,7 @@ o6ioYnJQHPsfaym/DY0seYghtg==
         // assert!(resolver.resolve().is_none(), "resolving should return None");
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn update_acme_resolver_with_single_domain() {
         let mut mock_state = MockResolverState::default();
         mock_state.expect_config().once().return_once(|| {

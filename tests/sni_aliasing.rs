@@ -87,13 +87,9 @@ o6ioYnJQHPsfaym/DY0seYghtg==
 -----END PRIVATE KEY-----
 ";
 
-#[tokio::test(flavor = "multi_thread")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn sni_aliasing() {
     // 1. Initialize Sandhole
-    let _ = env_logger::builder()
-        .filter_module("sandhole", log::LevelFilter::Debug)
-        .is_test(true)
-        .try_init();
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
@@ -233,8 +229,8 @@ async fn sni_aliasing() {
         .await
         .expect("HTTP handshake failed");
     tokio::spawn(async move {
-        if let Err(err) = conn.await {
-            eprintln!("Connection failed: {err:?}");
+        if let Err(error) = conn.await {
+            eprintln!("Connection failed: {error:?}");
         }
     });
     let request = Request::builder()

@@ -32,12 +32,12 @@ mod peek_sni_and_alpn_tests {
 
     use crate::peek_sni_and_alpn;
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn fails_on_empty_buffer() {
         assert!(peek_sni_and_alpn(b"").await.is_none());
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn fails_on_plain_message() {
         let mut root_store = rustls::RootCertStore::empty();
         root_store.add_parsable_certificates(
@@ -73,7 +73,7 @@ mod peek_sni_and_alpn_tests {
         assert!(peek_data.is_none());
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn fails_on_missing_sni() {
         let mut root_store = rustls::RootCertStore::empty();
         root_store.add_parsable_certificates(
@@ -110,7 +110,7 @@ mod peek_sni_and_alpn_tests {
         assert!(peek_data.is_none());
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_sni_data() {
         let mut root_store = rustls::RootCertStore::empty();
         root_store.add_parsable_certificates(
@@ -148,7 +148,7 @@ mod peek_sni_and_alpn_tests {
         assert_eq!(peek_data.alpn, Vec::<Vec<u8>>::new());
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_sni_and_alpn_data() {
         let mut root_store = rustls::RootCertStore::empty();
         root_store.add_parsable_certificates(

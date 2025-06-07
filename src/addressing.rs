@@ -4,7 +4,6 @@ use block_id::{Alphabet, BlockId};
 use bon::Builder;
 use hickory_resolver::{TokioResolver, proto::rr::RecordType};
 use itertools::Itertools;
-use log::{debug, warn};
 #[cfg(test)]
 use mockall::automock;
 use rand::{self, Rng, SeedableRng, seq::IndexedRandom};
@@ -13,6 +12,7 @@ use rand_seeder::SipHasher;
 use russh::keys::ssh_key::Fingerprint;
 use rustls_pki_types::DnsName;
 use rustrict::{Censor, CensorStr, Type};
+use tracing::{debug, warn};
 
 use crate::config::{BindHostnames, RandomSubdomainSeed};
 
@@ -93,7 +93,7 @@ impl Resolver for DnsResolver {
                             .iter()
                             .map(|data| String::from_utf8_lossy(data))
                             .join(".");
-                        debug!("cname {}", &cname);
+                        debug!(%cname, "Checking CNAME.");
                         // Check if the domain name matches
                         cname == domain
                     })
@@ -176,7 +176,7 @@ impl<R: Resolver> AddressDelegator<R> {
                     .analyze()
                     .is(Type::INAPPROPRIATE)
             }) {
-                warn!("Profane address requested ({requested_address}), defaulting to random");
+                warn!(%requested_address, "Profane address requested, defaulting to random.");
             } else {
                 // If we bind all hostnames, return the provided address
                 if matches!(self.bind_hostnames, BindHostnames::All) {
@@ -220,13 +220,13 @@ impl<R: Resolver> AddressDelegator<R> {
                         return format!("{}.{}", address, self.root_domain);
                     } else {
                         warn!(
-                            "Invalid address requested ({requested_address}), defaulting to random"
+                            %requested_address, "Invalid address requested, defaulting to random."
                         );
                     }
                 }
             }
         } else {
-            warn!("Invalid address requested ({requested_address}), defaulting to random");
+            warn!(%requested_address, "Invalid address requested, defaulting to random.");
         }
         // Assign random subdomain under the root domain
         format!(
@@ -353,7 +353,7 @@ mod address_delegator_tests {
 
     use super::{AddressDelegator, MockResolver};
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_provided_address_when_binding_any_host() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
@@ -381,7 +381,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_root_domain_when_binding_any_host() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
@@ -409,7 +409,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_provided_address_when_cname_is_match() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
@@ -440,7 +440,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_provided_address_if_cname_matches_fingerprint() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
             &ChaCha20Rng::from_os_rng().random(),
@@ -477,7 +477,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_provided_address_if_txt_record_matches_fingerprint() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
             &ChaCha20Rng::from_os_rng().random(),
@@ -511,7 +511,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_provided_subdomain_if_no_fingerprint() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint()
@@ -541,7 +541,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_subdomain_if_no_txt_record_matches_fingerprint() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
             &ChaCha20Rng::from_os_rng().random(),
@@ -575,7 +575,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_subdomain_if_requested_subdomain_of_host_domain() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
@@ -603,7 +603,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_host_domain_if_address_equals_host_domain_and_has_fingerprint() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
             &ChaCha20Rng::from_os_rng().random(),
@@ -637,7 +637,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_random_subdomain_if_address_equals_host_domain_and_doesnt_have_fingerprint() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
             &ChaCha20Rng::from_os_rng().random(),
@@ -676,7 +676,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_random_subdomain_if_requested_address_is_not_direct_subdomain() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
             &ChaCha20Rng::from_os_rng().random(),
@@ -715,7 +715,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_random_subdomain_if_invalid_address() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
             &ChaCha20Rng::from_os_rng().random(),
@@ -752,7 +752,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_unique_random_subdomains_if_forced() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
             &ChaCha20Rng::from_os_rng().random(),
@@ -798,7 +798,7 @@ mod address_delegator_tests {
         assert_eq!((final_block_rng - initial_block_rng) as usize, SIZE);
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_unique_random_subdomains_with_different_size_and_no_profanities() {
         let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
             &ChaCha20Rng::from_os_rng().random(),
@@ -847,7 +847,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_random_subdomain_if_requested_subdomain_contains_profanity() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
@@ -885,7 +885,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_unique_random_subdomains_per_user_and_address_if_forced() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
@@ -953,7 +953,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_unique_random_subdomains_per_fingerprint_user_and_address_if_forced() {
         let f1: russh::keys::ssh_key::Fingerprint = russh::keys::PrivateKey::from(
             Ed25519Keypair::from_seed(&ChaCha20Rng::from_os_rng().random()),
@@ -1141,7 +1141,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_unique_random_subdomains_per_ip_and_user_if_forced() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();
@@ -1209,7 +1209,7 @@ mod address_delegator_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_unique_random_subdomains_per_socket_and_address_if_forced() {
         let mut mock = MockResolver::new();
         mock.expect_has_txt_record_for_fingerprint().never();

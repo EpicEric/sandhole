@@ -1,8 +1,11 @@
-use std::error::Error;
-use std::marker::PhantomData;
-use std::str::FromStr;
-use std::time::{Duration, Instant};
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    error::Error,
+    fmt::Debug,
+    marker::PhantomData,
+    str::FromStr,
+    time::{Duration, Instant},
+    {net::SocketAddr, sync::Arc},
+};
 
 use crate::connection_handler::ConnectionHandler;
 use crate::connections::ConnectionGetByHttpHost;
@@ -23,12 +26,12 @@ use hyper::{
     header::{HOST, UPGRADE},
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use log::{debug, warn};
 use russh::keys::ssh_key::Fingerprint;
 use tokio::{
     io::{AsyncRead, AsyncWrite, copy_bidirectional_with_sizes},
     time::timeout,
 };
+use tracing::{debug, warn};
 
 const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 const X_FORWARDED_HOST: &str = "X-Forwarded-Host";
@@ -75,8 +78,8 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
         _ => "44",
     };
     let line = format!(
-        " \x1b[2m{}\x1b[22m \x1b[{}m[{}] \x1b[0;1;30;{}m {} \x1b[0m {} => {} \x1b[2m({}) {}\x1b[0m\r\n",
-        chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%:z"),
+        "\x1b[2m{}\x1b[22m \x1b[{}m[{}] \x1b[0;1;30;{}m {} \x1b[0m {} => {} \x1b[2m({}) {}\x1b[0m\r\n",
+        chrono::Utc::now().to_rfc3339(),
         status_escape_color,
         status,
         method_escape_color,
@@ -132,7 +135,7 @@ pub(crate) enum HttpError {
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> axum::response::Response {
-        debug!("HTTP proxy error: {:?}", &self);
+        debug!(error = %self, "HTTP proxy error.");
         match self {
             HttpError::HeaderToStrError(_)
             | HttpError::MissingUriHost
@@ -200,7 +203,7 @@ where
     M: ConnectionGetByHttpHost<Arc<H>>,
     H: ConnectionHandler<T>,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
-    B: Body + Send + Unpin + 'static,
+    B: Body + Debug + Send + Unpin + 'static,
     <B as Body>::Data: Send + Sync + 'static,
     <B as Body>::Error: Error + Send + Sync + 'static,
 {
@@ -210,6 +213,7 @@ where
     }
 }
 
+#[tracing::instrument(skip(proxy_data), level = "debug")]
 async fn proxy_handler_inner<B, M, H, T>(
     mut request: Request<B>,
     tcp_address: SocketAddr,
@@ -220,7 +224,7 @@ where
     M: ConnectionGetByHttpHost<Arc<H>>,
     H: ConnectionHandler<T>,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
-    B: Body + Send + Unpin + 'static,
+    B: Body + Debug + Send + Unpin + 'static,
     <B as Body>::Data: Send + Sync + 'static,
     <B as Body>::Error: Error + Send + Sync + 'static,
 {
@@ -320,18 +324,11 @@ where
         (Protocol::Https { port }, _, _) => ("https", *port),
     };
     // Add proxied info to the proper headers
-    request
-        .headers_mut()
-        .insert(X_FORWARDED_FOR, ip.parse().unwrap());
-    request
-        .headers_mut()
-        .insert(X_FORWARDED_HOST, host.parse().unwrap());
-    request
-        .headers_mut()
-        .insert(X_FORWARDED_PROTO, proto.parse().unwrap());
-    request
-        .headers_mut()
-        .insert(X_FORWARDED_PORT, port.to_string().parse().unwrap());
+    let headers = request.headers_mut();
+    headers.insert(X_FORWARDED_FOR, ip.parse().unwrap());
+    headers.insert(X_FORWARDED_HOST, host.parse().unwrap());
+    headers.insert(X_FORWARDED_PROTO, proto.parse().unwrap());
+    headers.insert(X_FORWARDED_PORT, port.into());
     // Add this request to the telemetry for the host
     if http_data.as_ref().is_some_and(|data| data.is_aliasing) {
         telemetry.add_alias_connection(TcpAlias(host.clone(), port));
@@ -364,15 +361,15 @@ where
                 hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(io))
                     .await?;
             tokio::spawn(Box::pin(async move {
-                if let Err(err) = conn.await {
-                    warn!("HTTP/2 connection failed: {err:?}");
+                if let Err(error) = conn.await {
+                    warn!(%error, "HTTP/2 connection failed.");
                 }
             }));
             let response = match proxy_data.http_request_timeout {
                 // Await for a response under the given duration.
                 Some(duration) => {
                     if let Ok(response) = timeout(duration, sender.send_request(request)).await {
-                        response?.into_response()
+                        response?
                     } else {
                         let elapsed_time = timer.elapsed();
                         http_log(
@@ -386,7 +383,7 @@ where
                         return Err(HttpError::RequestTimeout);
                     }
                 }
-                None => sender.send_request(request).await?.into_response(),
+                None => sender.send_request(request).await?,
             };
             let elapsed_time = timer.elapsed();
             http_log(
@@ -397,7 +394,7 @@ where
                 Some(tx),
                 disable_http_logs,
             );
-            Ok(response)
+            Ok(response.into_response())
         }
         Version::HTTP_11 | Version::HTTP_2 => {
             // Ensure best-effort compatibility of proxy request with HTTP/1.1 format
@@ -437,8 +434,8 @@ where
             if let Some(request_upgrade) = request.headers().get(UPGRADE) {
                 // If there is an Upgrade header, make sure that it's a valid Websocket upgrade.
                 tokio::spawn(async move {
-                    if let Err(err) = conn.with_upgrades().await {
-                        warn!("HTTP/1.1 connection with upgrades failed: {err:?}");
+                    if let Err(error) = conn.with_upgrades().await {
+                        warn!(%error, "HTTP/1.1 connection with upgrades failed.");
                     }
                 });
                 let request_type = request_upgrade.to_str()?.to_string();
@@ -449,7 +446,7 @@ where
                     Some(duration) => {
                         if let Ok(response) = timeout(duration, sender.send_request(request)).await
                         {
-                            response?.into_response()
+                            response?
                         } else {
                             let elapsed_time = timer.elapsed();
                             http_log(
@@ -463,7 +460,7 @@ where
                             return Err(HttpError::RequestTimeout);
                         }
                     }
-                    None => sender.send_request(request).await?.into_response(),
+                    None => sender.send_request(request).await?,
                 };
                 let elapsed_time = timer.elapsed();
                 http_log(
@@ -521,15 +518,15 @@ where
                             });
                         }
                         // Return the response to the client
-                        Ok(response)
+                        Ok(response.into_response())
                     }
-                    _ => Ok(response),
+                    _ => Ok(response.into_response()),
                 }
             } else {
                 // If Upgrade header is not present, simply handle the request
                 tokio::spawn(async move {
-                    if let Err(err) = conn.await {
-                        warn!("HTTP/1.1 connection failed: {err:?}");
+                    if let Err(error) = conn.await {
+                        warn!(%error, "HTTP/1.1 connection failed.");
                     }
                 });
                 let response = match proxy_data.http_request_timeout {
@@ -537,7 +534,7 @@ where
                     Some(duration) => {
                         if let Ok(response) = timeout(duration, sender.send_request(request)).await
                         {
-                            response?.into_response()
+                            response?
                         } else {
                             let elapsed_time = timer.elapsed();
                             http_log(
@@ -551,7 +548,7 @@ where
                             return Err(HttpError::RequestTimeout);
                         }
                     }
-                    None => sender.send_request(request).await?.into_response(),
+                    None => sender.send_request(request).await?,
                 };
                 let elapsed_time = timer.elapsed();
                 http_log(
@@ -563,7 +560,7 @@ where
                     disable_http_logs,
                 );
                 // Return the received response to the client
-                Ok(response)
+                Ok(response.into_response())
             }
         }
         version => Err(HttpError::InvalidHttpVersion(version)),
@@ -601,7 +598,7 @@ mod proxy_handler_tests {
 
     use super::{DomainRedirect, Protocol, ProxyData, ProxyType, proxy_handler};
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_bad_request_on_missing_host_header() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -644,7 +641,7 @@ mod proxy_handler_tests {
         assert_eq!(response.status(), hyper::StatusCode::BAD_REQUEST);
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_not_found_on_missing_handler() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -688,7 +685,7 @@ mod proxy_handler_tests {
         assert_eq!(response.status(), hyper::StatusCode::NOT_FOUND);
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_redirect_for_root_domain_and_missing_handler() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -736,7 +733,7 @@ mod proxy_handler_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_redirect_to_https_from_global_config() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -802,7 +799,7 @@ mod proxy_handler_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_redirect_to_non_standard_https_port_from_global_config() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -869,7 +866,7 @@ mod proxy_handler_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_redirect_to_https_from_connection_data() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -935,7 +932,7 @@ mod proxy_handler_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_redirect_to_non_standard_https_port_from_connection_data() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -1002,7 +999,7 @@ mod proxy_handler_tests {
         );
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_error_for_outgoing_http11_request_timeout() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -1095,7 +1092,7 @@ mod proxy_handler_tests {
         jh.abort();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_error_for_outgoing_websocket_request_timeout() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -1180,11 +1177,11 @@ mod proxy_handler_tests {
                 .await
                 .expect("Invalid request");
         });
-        let err = match client_async("ws://with.websocket/ws", stream).await {
-            Err(err) => err,
+        let error = match client_async("ws://with.websocket/ws", stream).await {
+            Err(error) => error,
             Ok(res) => panic!("should've errored when establishing Websocket connection: {res:?}"),
         };
-        match err {
+        match error {
             tokio_tungstenite::tungstenite::Error::Http(response) => {
                 assert!(
                     response.status() == StatusCode::REQUEST_TIMEOUT,
@@ -1201,7 +1198,7 @@ mod proxy_handler_tests {
         jh2.abort();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_error_for_outgoing_http2_request_timeout() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -1293,7 +1290,7 @@ mod proxy_handler_tests {
         jh.abort();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_response_for_existing_handler() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -1384,13 +1381,12 @@ mod proxy_handler_tests {
         assert!(!logging_rx.is_empty(), "should log after proxying request");
         let response = response.expect("should return response after proxy");
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body();
-        let body = axum::body::to_bytes(body, 32).await.unwrap();
-        assert_eq!(body, bytes::Bytes::from("Success."));
+        let body = response.into_body().frame().await.unwrap().unwrap();
+        assert_eq!(body.data_ref(), Some(&Bytes::copy_from_slice(b"Success.")));
         jh.abort();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_response_for_aliasing_handler() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -1487,7 +1483,7 @@ mod proxy_handler_tests {
         jh.abort();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_response_for_handler_of_root_domain() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -1584,7 +1580,7 @@ mod proxy_handler_tests {
         jh.abort();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_websocket_upgrade_for_existing_handler() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -1683,7 +1679,7 @@ mod proxy_handler_tests {
         jh2.abort();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn returns_http2_response_for_existing_handler() {
         let conn_manager: Arc<
             ConnectionMap<

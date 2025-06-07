@@ -139,7 +139,7 @@ mod quota_map_tests {
 
     use super::{QuotaHandler, QuotaMap, TokenHolder, UserIdentification};
 
-    #[test]
+    #[test_log::test]
     fn returns_tokens_while_under_quota() {
         let user = UserIdentification::Username("a".into());
         let map = Arc::new(QuotaMap::new(3.try_into().unwrap()));
@@ -158,7 +158,7 @@ mod quota_map_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn returns_unlimited_tokens_for_admin_holder() {
         let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
             &ChaCha20Rng::from_os_rng().random(),
@@ -175,7 +175,7 @@ mod quota_map_tests {
         }
     }
 
-    #[test]
+    #[test_log::test]
     fn returns_tokens_for_different_holders() {
         let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
             &ChaCha20Rng::from_os_rng().random(),

@@ -379,7 +379,7 @@ mod application_config_tests {
 
     use super::{ApplicationConfig, BindHostnames, LoadBalancing, RandomSubdomainSeed};
 
-    #[test]
+    #[test_log::test]
     fn parses_minimal_args() {
         let config = ApplicationConfig::parse_from(["sandhole", "--domain=foobar.tld"]);
         assert_eq!(
@@ -431,7 +431,7 @@ mod application_config_tests {
         )
     }
 
-    #[test]
+    #[test_log::test]
     fn parses_full_args() {
         let config = ApplicationConfig::parse_from([
             "sandhole",
@@ -530,12 +530,12 @@ mod application_config_tests {
         )
     }
 
-    #[test]
+    #[test_log::test]
     fn fails_to_parse_if_invalid_domain() {
         assert!(ApplicationConfig::try_parse_from(["sandhole", "--domain=.foobar.tld"]).is_err());
     }
 
-    #[test]
+    #[test_log::test]
     fn fails_to_parse_if_invalid_txt_record_prefix() {
         assert!(
             ApplicationConfig::try_parse_from([
@@ -547,7 +547,7 @@ mod application_config_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn fails_to_parse_if_invalid_duration() {
         assert!(
             ApplicationConfig::try_parse_from([
@@ -559,7 +559,7 @@ mod application_config_tests {
         );
     }
 
-    #[test]
+    #[test_log::test]
     fn fails_to_parse_if_invalid_byte_size() {
         assert!(
             ApplicationConfig::try_parse_from([

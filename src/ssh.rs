@@ -27,6 +27,7 @@ use crate::{
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
 };
 
+use anyhow::anyhow;
 use enumflags2::{BitFlags, bitflags};
 use http::Request;
 use hyper::{body::Incoming, service::service_fn};
@@ -35,7 +36,6 @@ use hyper_util::{
     server::conn::auto,
 };
 use ipnet::IpNet;
-use log::{debug, error, info, warn};
 use russh::{
     Channel, ChannelId, ChannelStream, MethodKind, MethodSet,
     keys::{HashAlg, PublicKey, ssh_key::Fingerprint},
@@ -50,6 +50,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info, warn};
 
 type FingerprintFn = dyn Fn(Option<&Fingerprint>) -> bool + Send + Sync;
 
@@ -254,9 +255,9 @@ enum AuthenticatedData {
 impl Display for AuthenticatedData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AuthenticatedData::None { .. } => f.write_str("no authentication"),
-            AuthenticatedData::User { .. } => f.write_str("user authentication"),
-            AuthenticatedData::Admin { .. } => f.write_str("admin authentication"),
+            AuthenticatedData::None { .. } => f.write_str("NONE"),
+            AuthenticatedData::User { .. } => f.write_str("USER"),
+            AuthenticatedData::Admin { .. } => f.write_str("ADMIN"),
         }
     }
 }
@@ -282,7 +283,7 @@ impl ServerHandlerSender {
     pub(crate) fn send(&self, message: Vec<u8>) -> Result<(), std::io::Error> {
         self.0
             .send(message)
-            .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::BrokenPipe, error))
     }
 }
 
@@ -331,7 +332,7 @@ impl Server for Arc<SandholeServer> {
         cancellation_token: CancellationToken,
     ) -> ServerHandler {
         let id = self.session_id.fetch_add(1, Ordering::AcqRel);
-        info!("{peer_address} connected");
+        info!(peer = %peer_address, "SSH client connected.");
         let (tx, rx) = mpsc::unbounded_channel();
         ServerHandler {
             id,
@@ -414,6 +415,7 @@ impl Handler for ServerHandler {
     }
 
     // Authenticate users with a password if the API login service is available.
+    #[tracing::instrument(skip(self), fields(peer = %self.peer), level = "debug")]
     async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
         // Check if the API login service has been initialized.
         if let Some(ref api_login) = self.server.api_login {
@@ -448,19 +450,18 @@ impl Handler for ServerHandler {
                             ))),
                         };
                         info!(
-                            "{} ({}) connected with {} (password)",
-                            user, self.peer, self.auth_data
+                            peer = %self.peer, %user, role = %self.auth_data, "SSH client authenticated with password.",
                         );
                         return Ok(Auth::Accept);
                     } else {
-                        warn!("{} ({}) failed password authentication", user, self.peer);
+                        warn!(peer = %self.peer, %user, "Failed password authentication.");
                     }
                 }
-                Ok(Err(err)) => {
-                    error!("Error authenticating {} ({}): {}", user, self.peer, err);
+                Ok(Err(error)) => {
+                    error!(peer = %self.peer, %user, %error, "SSH authentication error.");
                 }
                 _ => {
-                    warn!("Authentication request timed out");
+                    warn!(peer = %self.peer, "Authentication request timed out.");
                 }
             }
         }
@@ -472,6 +473,7 @@ impl Handler for ServerHandler {
 
     // Receive an authentication request and handle it by validating the fingerprint,
     // marking the session as unauthenticated if unknown to potentially clean up if unproxied.
+    #[tracing::instrument(skip(self), fields(peer = %self.peer), level = "debug")]
     async fn auth_publickey(
         &mut self,
         user: &str,
@@ -532,8 +534,7 @@ impl Handler for ServerHandler {
             }
         }
         info!(
-            "{} ({}) connected with {} (public key {})",
-            user, self.peer, self.auth_data, fingerprint
+            peer = %self.peer, %user, fingerprint = %fingerprint, role = %self.auth_data, "SSH client authenticated with public key."
         );
         Ok(Auth::Accept)
     }
@@ -549,7 +550,7 @@ impl Handler for ServerHandler {
             .channel_id
             .is_some_and(|channel_id| channel_id == channel)
         {
-            debug!("received data {data:?}");
+            debug!(peer = %self.peer, ?data, "Received channel data.");
             match &mut self.auth_data {
                 // Ignore other commands for non-admin users
                 AuthenticatedData::None { .. } | AuthenticatedData::User { .. } => (),
@@ -587,13 +588,14 @@ impl Handler for ServerHandler {
     }
 
     // Receive and handle any additional commands from the client where appropriate.
+    #[tracing::instrument(skip(self), fields(peer = %self.peer), level = "debug")]
     async fn exec_request(
         &mut self,
         channel: ChannelId,
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
-        debug!("exec_request data {data:?}");
+        debug!(peer = %self.peer, ?data, "Received exec_request data.");
         let mut success = true;
         let cmd = String::from_utf8_lossy(data);
         // Split commands by whitespace and handle each.
@@ -669,9 +671,9 @@ impl Handler for ServerHandler {
                         .collect();
                     let set = match set {
                         Ok(set) => set,
-                        Err(err) => {
+                        Err(error) => {
                             let _ = self.tx.send(
-                                format!("Error parsing fingerprints: {err}\r\n").into_bytes(),
+                                format!("Error parsing fingerprints: {error}\r\n").into_bytes(),
                             );
                             success = false;
                             break;
@@ -711,20 +713,20 @@ impl Handler for ServerHandler {
                             break 'parse;
                         }
                         // Insert our handler into the TCP alias connections map.
-                        if let Err(err) = self.server.alias.insert(
+                        if let Err(error) = self.server.alias.insert(
                             TcpAlias(address.clone(), 80),
                             self.peer,
                             user_data.quota_key.clone(),
                             handler,
                         ) {
                             info!(
-                                "Failed to bind HTTP alias '{}' ({}) - {}",
-                                &address, self.peer, err,
+                                peer = %self.peer, alias = %address, %error,
+                                "Failed to bind HTTP alias.",
                             );
                             let _ = self.tx.send(
                                 format!(
                                     "Cannot listen to HTTP alias of '{}' ({})\r\n",
-                                    &address, err,
+                                    &address, error,
                                 )
                                 .into_bytes(),
                             );
@@ -791,20 +793,20 @@ impl Handler for ServerHandler {
                             break 'parse;
                         }
                         // Insert our handler into the TCP alias connections map.
-                        if let Err(err) = self.server.alias.insert(
+                        if let Err(error) = self.server.alias.insert(
                             TcpAlias(address.clone(), 80),
                             self.peer,
                             user_data.quota_key.clone(),
                             handler,
                         ) {
                             info!(
-                                "Failed to bind HTTP alias '{}' ({}) - {}",
-                                &address, self.peer, err,
+                                peer = %self.peer, alias = %address, %error,
+                                "Failed to bind HTTP alias.",
                             );
                             let _ = self.tx.send(
                                 format!(
                                     "Cannot listen to HTTP alias of '{}' ({})\r\n",
-                                    &address, err,
+                                    &address, error,
                                 )
                                 .into_bytes(),
                             );
@@ -897,20 +899,20 @@ impl Handler for ServerHandler {
                             break 'parse;
                         }
                         // Insert our handler into the SNI proxy connections map.
-                        if let Err(err) = self.server.sni.insert(
+                        if let Err(error) = self.server.sni.insert(
                             address.clone(),
                             self.peer,
                             user_data.quota_key.clone(),
                             handler,
                         ) {
                             info!(
-                                "Failed to bind SNI proxy '{}' ({}) - {}",
-                                &address, self.peer, err,
+                                peer = %self.peer, host = %address, %error,
+                                "Failed to bind SNI proxy.",
                             );
                             let _ = self.tx.send(
                                 format!(
                                     "Cannot listen to SNI proxy of '{}' ({})\r\n",
-                                    &address, err,
+                                    &address, error,
                                 )
                                 .into_bytes(),
                             );
@@ -945,9 +947,10 @@ impl Handler for ServerHandler {
                         .collect();
                     let list = match list {
                         Ok(list) => list,
-                        Err(err) => {
+                        Err(error) => {
                             let _ = self.tx.send(
-                                format!("Error parsing allowlist networks: {err}\r\n").into_bytes(),
+                                format!("Error parsing allowlist networks: {error}\r\n")
+                                    .into_bytes(),
                             );
                             success = false;
                             break;
@@ -985,9 +988,10 @@ impl Handler for ServerHandler {
                         .collect();
                     let list = match list {
                         Ok(list) => list,
-                        Err(err) => {
+                        Err(error) => {
                             let _ = self.tx.send(
-                                format!("Error parsing blocklist networks: {err}\r\n").into_bytes(),
+                                format!("Error parsing blocklist networks: {error}\r\n")
+                                    .into_bytes(),
                             );
                             success = false;
                             break;
@@ -1004,8 +1008,7 @@ impl Handler for ServerHandler {
                 // - Unknown command
                 (command, _) => {
                     debug!(
-                        "Invalid command {} received for {} ({})",
-                        command, self.auth_data, self.peer
+                        peer = %self.peer, %command, role = %self.auth_data, "Invalid SSH command received."
                     );
                     let _ = self
                         .tx
@@ -1039,9 +1042,9 @@ impl Handler for ServerHandler {
                         Ok(ip_filter) => {
                             *user_data.ip_filter.write().await = Some(ip_filter);
                         }
-                        Err(err) => {
+                        Err(error) => {
                             let _ = self.tx.send(
-                                format!("Failed to create IP filter for connection ({err})\r\n")
+                                format!("Failed to create IP filter for connection ({error})\r\n")
                                     .into_bytes(),
                             );
                             success = false;
@@ -1070,7 +1073,7 @@ impl Handler for ServerHandler {
         _modes: &[(russh::Pty, u32)],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
-        debug!("pty_request");
+        debug!(peer = %self.peer, "Received pty_request.");
         match &mut self.auth_data {
             AuthenticatedData::Admin { admin_data, .. } => {
                 // Change the size of the pseudo-terminal.
@@ -1103,13 +1106,10 @@ impl Handler for ServerHandler {
             admin_data.row_height = Some(row_height);
             // Dynamically update the TUI if present.
             if let Some(ref mut admin_interface) = admin_data.admin_interface {
-                if admin_interface
-                    .resize(col_width as u16, row_height as u16)
-                    .is_ok()
-                {
-                    return session.channel_success(channel);
+                if let Err(error) = admin_interface.resize(col_width as u16, row_height as u16) {
+                    warn!(peer = %self.peer, %error, "Failed to resize terminal.");
                 } else {
-                    warn!("Failed to resize terminal for {}", self.peer);
+                    return session.channel_success(channel);
                 }
             }
         }
@@ -1118,6 +1118,7 @@ impl Handler for ServerHandler {
     }
 
     // Handle a remote forwarding request for the client.
+    #[tracing::instrument(skip(self), fields(peer = %self.peer), level = "debug")]
     async fn tcpip_forward(
         &mut self,
         address: &str,
@@ -1159,9 +1160,10 @@ impl Handler for ServerHandler {
                 }
                 // SSH host must be alias (to be accessed via ProxyJump or ProxyCommand)
                 if !self.server.is_alias(address) {
+                    let error = anyhow!("must be alias, not localhost");
                     info!(
-                        "Failed to bind SSH for {}: must be alias, not localhost",
-                        self.peer
+                        peer = %self.peer, alias = %address, %error,
+                        "Failed to bind SSH alias.",
                     );
                     let _ = self
                         .tx
@@ -1184,13 +1186,13 @@ impl Handler for ServerHandler {
                         port: *port,
                     }),
                 ) {
-                    Err(err) => {
+                    Err(error) => {
                         // Adding to connection map failed.
-                        info!("Rejecting SSH for {} ({}) - {}", address, self.peer, err);
+                        info!(peer = %self.peer, alias = %address, %error, "Rejecting SSH.");
                         let _ = self.tx.send(
                             format!(
                                 "Cannot listen to SSH on {}:{} ({})\r\n",
-                                address, self.server.ssh_port, err,
+                                address, self.server.ssh_port, error,
                             )
                             .into_bytes(),
                         );
@@ -1198,7 +1200,7 @@ impl Handler for ServerHandler {
                     }
                     _ => {
                         // Adding to connection map succeeded.
-                        info!("Serving SSH for {} ({})", address, self.peer);
+                        info!(peer = %self.peer, alias = %address, "Serving SSH connection...");
                         let _ = self.tx.send(
                             format!(
                                 "Serving SSH on {}:{}\r\n\
@@ -1234,11 +1236,14 @@ impl Handler for ServerHandler {
                 if user_data.tcp_alias_only {
                     // HTTP host must be alias (to be accessed via local forwarding)
                     if !self.server.is_alias(address) {
+                        let error = anyhow!("must be alias, not localhost");
+                        info!(
+                            peer = %self.peer, alias = %address, %error,
+                            "Failed to bind HTTP alias.",
+                        );
                         let _ = self.tx.send(
-                            format!(
-                                "Failed to bind HTTP alias '{address}' (must be alias, not localhost)\r\n"
-                            )
-                            .into_bytes(),
+                            format!("Failed to bind HTTP alias '{address}' ({error})\r\n")
+                                .into_bytes(),
                         );
                         return Ok(false);
                     }
@@ -1258,21 +1263,21 @@ impl Handler for ServerHandler {
                             port: *port,
                         }),
                     ) {
-                        Err(err) => {
+                        Err(error) => {
                             // Adding to connection map failed.
                             info!(
-                                "Rejecting HTTP alias for '{}' ({}) - {}",
-                                address, self.peer, err
+                                peer = %self.peer, %error, alias = %address,
+                                "Rejecting HTTP alias.",
                             );
                             let _ = self.tx.send(
-                                format!("Failed to bind HTTP alias {address} ({err})\r\n")
+                                format!("Failed to bind HTTP alias {address} ({error})\r\n")
                                     .into_bytes(),
                             );
                             Ok(false)
                         }
                         _ => {
                             // Adding to connection map succeeded.
-                            info!("Tunneling HTTP for '{}' ({})", address, self.peer);
+                            info!(peer = %self.peer, alias = %address, "Tunneling HTTP...");
                             let _ = self.tx.send(
                                 format!(
                                     "Tunneling HTTP for alias {}{}\r\n",
@@ -1314,21 +1319,21 @@ impl Handler for ServerHandler {
                             port: *port,
                         }),
                     ) {
-                        Err(err) => {
+                        Err(error) => {
                             // Adding to connection map failed.
                             info!(
-                                "Rejecting SNI proxy for '{}' ({}) - {}",
-                                address, self.peer, err
+                                peer = %self.peer, %error, host = %address,
+                                "Rejecting SNI proxy.",
                             );
                             let _ = self.tx.send(
-                                format!("Failed to bind SNI proxy '{address}' ({err})\r\n")
+                                format!("Failed to bind SNI proxy '{address}' ({error})\r\n")
                                     .into_bytes(),
                             );
                             Ok(false)
                         }
                         _ => {
                             // Adding to connection map succeeded.
-                            info!("Serving SNI proxy for {} ({})", address, self.peer);
+                            info!(peer = %self.peer, host = %address, "Serving SNI proxy...",);
                             let _ = self.tx.send(
                                 format!(
                                     "Serving SNI proxy for https://{}{}\r\n",
@@ -1348,13 +1353,13 @@ impl Handler for ServerHandler {
                     }
                 // Reject when HTTP is disabled
                 } else if self.server.disable_http {
+                    let error = anyhow!("HTTP is disabled");
                     info!(
-                        "Failed to bind HTTP host {} ({}): HTTP is disabled",
-                        address, self.peer
+                        peer = %self.peer, host = %address, %error,
+                        "Failed to bind HTTP host.",
                     );
                     let _ = self.tx.send(
-                        format!("Cannot listen to HTTP host {address} (HTTP is disabled)\r\n",)
-                            .into_bytes(),
+                        format!("Cannot listen to HTTP host {address} ({error})\r\n",).into_bytes(),
                     );
                     Ok(false)
                 // Handle regular tunneling for HTTP services
@@ -1381,11 +1386,11 @@ impl Handler for ServerHandler {
                             port: *port,
                         }),
                     ) {
-                        Err(err) => {
+                        Err(error) => {
                             // Adding to connection map failed.
                             info!(
-                                "Rejecting HTTP for {} ({}) - {}",
-                                &assigned_host, self.peer, err
+                                peer = %self.peer, host = %assigned_host, %error,
+                                "Rejecting HTTP.",
                             );
                             let _ = self.tx.send(
                                 format!(
@@ -1396,7 +1401,7 @@ impl Handler for ServerHandler {
                                         port => format!(":{port}"),
                                     },
                                     address,
-                                    err,
+                                    error,
                                 )
                                 .into_bytes(),
                             );
@@ -1404,7 +1409,7 @@ impl Handler for ServerHandler {
                         }
                         _ => {
                             // Adding to connection map succeeded.
-                            info!("Serving HTTP for {} ({})", &assigned_host, self.peer);
+                            info!(peer = %self.peer, host = %assigned_host, "Serving HTTP...");
                             let _ = self.tx.send(
                                 format!(
                                     "Serving HTTP on http://{}{} for {}\r\n",
@@ -1441,43 +1446,45 @@ impl Handler for ServerHandler {
             _ if !self.server.is_alias(address) => {
                 // Forbid binding TCP if disabled
                 if self.server.disable_tcp {
+                    let error = anyhow!("TCP is disabled");
                     info!(
-                        "Failed to bind TCP port {} ({}): TCP is disabled",
-                        port, self.peer
+                        peer = %self.peer, %port, %error,
+                        "Failed to bind TCP port.",
                     );
                     let _ = self.tx.send(
                         format!(
-                            "Cannot listen to TCP on port {}:{} (TCP is disabled)\r\n",
-                            &self.server.domain, port,
+                            "Cannot listen to TCP on port {}:{port} ({error})\r\n",
+                            &self.server.domain,
                         )
                         .into_bytes(),
                     );
                     Ok(false)
                 // Forbid binding TCP on alias-only mode
                 } else if user_data.tcp_alias_only {
+                    let error = anyhow!("session is in alias-only mode");
                     info!(
-                        "Failed to bind TCP port {} ({}): session is in alias-only mode",
-                        port, self.peer
+                        peer = %self.peer, %port, %error,
+                        "Failed to bind TCP port.",
                     );
-                    let _ = self.tx
-                        .send(
+                    let _ = self.tx.send(
                         format!(
-                            "Cannot listen to TCP on port {}:{} (session is in alias-only mode)\r\n",
+                            "Cannot listen to TCP on port {}:{port} ({error})\r\n",
                             &self.server.domain,
-                            port,
-                        ).into_bytes()
+                        )
+                        .into_bytes(),
                     );
                     Ok(false)
                 // Forbid binding low TCP ports
                 } else if (1..1024).contains(port) {
+                    let error = anyhow!("port too low");
                     info!(
-                        "Failed to bind TCP port {} ({}): port too low",
-                        port, self.peer
+                        peer = %self.peer, %port, %error,
+                        "Failed to bind TCP port.",
                     );
                     let _ = self.tx.send(
                         format!(
-                            "Cannot listen to TCP on port {}:{} (port too low)\r\n",
-                            &self.server.domain, port,
+                            "Cannot listen to TCP on port {}:{port} ({error})\r\n",
+                            &self.server.domain,
                         )
                         .into_bytes(),
                     );
@@ -1487,14 +1494,14 @@ impl Handler for ServerHandler {
                     let assigned_port = if *port == 0 {
                         let assigned_port = match self.server.tcp_handler.get_free_port().await {
                             Ok(port) => port,
-                            Err(err) => {
+                            Err(error) => {
                                 info!(
-                                    "Failed to bind random TCP port for alias {} ({}) - {}",
-                                    address, self.peer, err,
+                                    peer = %self.peer, alias = %address, %error,
+                                    "Failed to bind random TCP port for alias.",
                                 );
                                 let _ = self.tx.send(
                                     format!(
-                                        "Cannot listen to TCP on random port of {address} ({err})\r\n",
+                                        "Cannot listen to TCP on random port of {address} ({error})\r\n",
                                     )
                                     .into_bytes(),
                                 );
@@ -1508,14 +1515,14 @@ impl Handler for ServerHandler {
                     } else if self.server.force_random_ports {
                         match self.server.tcp_handler.get_free_port().await {
                             Ok(port) => port,
-                            Err(err) => {
+                            Err(error) => {
                                 info!(
-                                    "Failed to bind random TCP port for alias {} ({}) - {}",
-                                    address, self.peer, err,
+                                    peer = %self.peer, alias = %address, %error,
+                                    "Failed to bind random TCP port for alias.",
                                 );
                                 let _ = self.tx.send(
                                     format!(
-                                        "Cannot listen to TCP on random port of {port} ({err})\r\n"
+                                        "Cannot listen to TCP on random port of {port} ({error})\r\n"
                                     )
                                     .into_bytes(),
                                 );
@@ -1542,16 +1549,16 @@ impl Handler for ServerHandler {
                             port: *port,
                         }),
                     ) {
-                        Err(err) => {
+                        Err(error) => {
                             // Adding to connection map failed.
                             info!(
-                                "Rejecting TCP for localhost:{} ({}) - {}",
-                                &assigned_port, self.peer, err,
+                                peer = %self.peer, port = %assigned_port, %error,
+                                "Rejecting TCP.",
                             );
                             let _ = self.tx.send(
                                 format!(
                                     "Cannot listen to TCP on {}:{} ({})\r\n",
-                                    self.server.domain, &assigned_port, err,
+                                    self.server.domain, &assigned_port, error,
                                 )
                                 .into_bytes(),
                             );
@@ -1563,8 +1570,8 @@ impl Handler for ServerHandler {
                                 .port_addressing
                                 .insert(TcpAlias(address.to_string(), *port as u16), assigned_port);
                             info!(
-                                "Serving TCP for localhost:{} ({})",
-                                &assigned_port, self.peer
+                                peer = %self.peer, port = %assigned_port,
+                                "Serving TCP...",
                             );
                             let _ = self.tx.send(
                                 format!(
@@ -1586,13 +1593,14 @@ impl Handler for ServerHandler {
                 }
                 // If alias, the user must provide the port number themselves
                 let assigned_port = if *port == 0 {
+                    let error = anyhow!("cannot assign random port to alias");
                     info!(
-                        "Failed to bind random TCP port for alias {} ({}) - cannot assign random port to alias",
-                        address, self.peer,
+                        peer = %self.peer, alias = %address, %error,
+                        "Failed to bind random TCP port for alias.",
                     );
                     let _ = self.tx.send(
                         format!(
-                            "Cannot listen to TCP on random port of {address} (cannot assign random port to alias)\r\n\
+                            "Cannot listen to TCP on random port of {address} ({error})\r\n\
                             Please specify the desired port.\r\n",
                         )
                         .into_bytes(),
@@ -1618,16 +1626,16 @@ impl Handler for ServerHandler {
                         port: *port,
                     }),
                 ) {
-                    Err(err) => {
+                    Err(error) => {
                         // Adding to connection map failed.
                         info!(
-                            "Rejecting TCP port {} for alias {} ({}) - {}",
-                            &assigned_port, address, self.peer, err,
+                            peer = %self.peer, alias = %address, port = %assigned_port, %error,
+                            "Rejecting TCP port for alias.",
                         );
                         let _ = self.tx.send(
                             format!(
                                 "Cannot listen to TCP on port {} for alias {} ({})\r\n",
-                                &assigned_port, address, err,
+                                &assigned_port, address, error,
                             )
                             .into_bytes(),
                         );
@@ -1640,8 +1648,8 @@ impl Handler for ServerHandler {
                             TcpAlias(address.to_string(), assigned_port),
                         );
                         info!(
-                            "Tunneling TCP port {} for alias {} ({})",
-                            &assigned_port, address, self.peer
+                            peer = %self.peer, alias = %address, port = %assigned_port,
+                            "Tunneling TCP port for alias...",
                         );
                         let _ = self.tx.send(
                             format!(
@@ -1658,6 +1666,7 @@ impl Handler for ServerHandler {
     }
 
     // Handle closure of a remote forwarding request.
+    #[tracing::instrument(skip(self), fields(peer = %self.peer), level = "debug")]
     async fn cancel_tcpip_forward(
         &mut self,
         address: &str,
@@ -1682,8 +1691,8 @@ impl Handler for ServerHandler {
                         .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                 {
                     info!(
-                        "Stopped SSH forwarding for {} ({})",
-                        &assigned_host, self.peer
+                        peer = %self.peer, alias = &assigned_host,
+                        "Stopped SSH forwarding.",
                     );
                     self.server.ssh.remove(&assigned_host, &self.peer);
                     Ok(true)
@@ -1700,8 +1709,8 @@ impl Handler for ServerHandler {
                         .remove(&BorrowedTcpAlias(address, &80) as &dyn TcpAliasKey)
                     {
                         info!(
-                            "Stopped TCP aliasing for {}:{} ({})",
-                            &assigned_alias.0, assigned_alias.1, self.peer
+                            peer = %self.peer, alias = %assigned_alias.0, port = %assigned_alias.1,
+                            "Stopped TCP aliasing.",
                         );
                         let key: &dyn TcpAliasKey = assigned_alias.borrow();
                         self.server.alias.remove(key, &self.peer);
@@ -1716,8 +1725,8 @@ impl Handler for ServerHandler {
                         .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                     {
                         info!(
-                            "Stopped SNI proxying for https://{} ({})",
-                            &assigned_alias, self.peer
+                            peer = %self.peer, host = %assigned_alias,
+                            "Stopped SNI proxying.",
                         );
                         self.server.sni.remove(&assigned_alias, &self.peer);
                         Ok(true)
@@ -1731,8 +1740,8 @@ impl Handler for ServerHandler {
                         .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                     {
                         info!(
-                            "Stopped HTTP forwarding for {} ({})",
-                            &assigned_host, self.peer
+                            peer = %self.peer, host = %assigned_host,
+                            "Stopped HTTP forwarding.",
                         );
                         self.server.http.remove(&assigned_host, &self.peer);
                         Ok(true)
@@ -1749,8 +1758,8 @@ impl Handler for ServerHandler {
                         .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                 {
                     info!(
-                        "Stopped TCP forwarding for port {} ({})",
-                        &assigned_port, self.peer
+                        peer = %self.peer, port = %port,
+                        "Stopped TCP forwarding.",
                     );
                     self.server.tcp.remove(&assigned_port, &self.peer);
                     Ok(true)
@@ -1766,8 +1775,8 @@ impl Handler for ServerHandler {
                         .remove(&BorrowedTcpAlias(address, &(port as u16)) as &dyn TcpAliasKey)
                 {
                     info!(
-                        "Stopped TCP aliasing for {}:{} ({})",
-                        &assigned_alias.0, assigned_alias.1, self.peer
+                        peer = %self.peer, alias = %assigned_alias.0, port = %assigned_alias.1,
+                        "Stopped TCP aliasing.",
                     );
                     let key: &dyn TcpAliasKey = assigned_alias.borrow();
                     self.server.alias.remove(key, &self.peer);
@@ -1780,6 +1789,7 @@ impl Handler for ServerHandler {
     }
 
     // Handle a local forwarding request (i.e. proxy tunnel for aliases).
+    #[tracing::instrument(skip(self), fields(peer = %self.peer), level = "debug")]
     async fn channel_open_direct_tcpip(
         &mut self,
         channel: Channel<Msg>,
@@ -1909,8 +1919,8 @@ impl Handler for ServerHandler {
                         }
                     }
                     info!(
-                        "Accepted connection from {} => {} ({})",
-                        self.peer, host_to_connect, handler.peer,
+                        peer = %self.peer, remote = %handler.peer, alias = %host_to_connect,
+                        "Accepted SSH connection.",
                     );
                     let _ = self
                         .tx
@@ -2139,8 +2149,8 @@ impl Handler for ServerHandler {
                         }
                     }
                     info!(
-                        "Accepted connection from {} => {} ({})",
-                        self.peer, host_to_connect, handler.peer,
+                        peer = %self.peer, remote = %handler.peer, port = %port_to_connect,
+                        "Accepted TCP connection.",
                     );
                     let _ = self
                         .tx
@@ -2254,8 +2264,8 @@ impl Handler for ServerHandler {
                         }
                     }
                     info!(
-                        "Accepted connection from {} => {} ({})",
-                        self.peer, host_to_connect, handler.peer,
+                        peer = %self.peer, remote = %handler.peer, alias = %host_to_connect, port = %port_to_connect,
+                        "Accepted alias connection.",
                     );
                     let _ = self
                         .tx
@@ -2280,7 +2290,7 @@ impl Handler for ServerHandler {
 impl Drop for ServerHandler {
     fn drop(&mut self) {
         let user = self.user.as_ref().map(String::as_ref).unwrap_or("unknown");
-        info!("{} ({}) disconnected", user, self.peer);
+        info!(peer = %self.peer, %user, "SSH client disconnected.");
         match self.auth_data {
             AuthenticatedData::User { .. } | AuthenticatedData::Admin { .. } => {
                 let server = Arc::clone(&self.server);

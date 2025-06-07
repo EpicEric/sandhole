@@ -8,8 +8,8 @@ use crate::{
 use anyhow::Context;
 use bon::Builder;
 use dashmap::DashMap;
-use log::{error, info, warn};
 use tokio::{io::copy_bidirectional_with_sizes, net::TcpListener, time::timeout};
+use tracing::{error, info, warn};
 
 // Service that handles creating TCP sockets for reverse forwarding connections.
 #[derive(Builder)]
@@ -43,10 +43,7 @@ impl PortHandler for Arc<TcpHandler> {
     // Create a TCP listener on the given port.
     async fn create_port_listener(&self, port: u16) -> anyhow::Result<u16> {
         // Check if we're able to bind to the given address and port.
-        let listener = match TcpListener::bind((self.listen_address, port)).await {
-            Ok(listener) => listener,
-            Err(err) => return Err(err.into()),
-        };
+        let listener = TcpListener::bind((self.listen_address, port)).await?;
         let port = listener
             .local_addr()
             .with_context(|| "Missing local address when binding port")?
@@ -59,11 +56,11 @@ impl PortHandler for Arc<TcpHandler> {
                     Ok((mut stream, address)) => {
                         let ip = address.ip();
                         if !clone.ip_filter.is_allowed(ip) {
-                            info!("Rejecting TCP connection for {ip}: not allowed");
+                            info!(%address, "Rejecting TCP connection: IP not allowed.");
                             continue;
                         }
-                        if let Err(err) = stream.set_nodelay(true) {
-                            warn!("Error setting nodelay for {address}: {err}");
+                        if let Err(error) = stream.set_nodelay(true) {
+                            warn!(%address, %error, "Error setting nodelay.");
                         }
                         // Get the handler for this port
                         if let Some(handler) = clone.conn_manager.get(&port) {
@@ -111,7 +108,7 @@ impl PortHandler for Arc<TcpHandler> {
                             }
                         }
                     }
-                    Err(err) => error!("Error listening on port {port}: {err}"),
+                    Err(error) => error!(%port, %error, "Error listening on TCP port."),
                 }
             }
         }));
@@ -138,8 +135,8 @@ impl PortHandler for Arc<TcpHandler> {
             // Create port listeners for the new ports
             tokio::spawn(async move {
                 for port in ports.into_iter() {
-                    if let Err(err) = clone.create_port_listener(port).await {
-                        error!("Failed to create listener for port {port}: {err}");
+                    if let Err(error) = clone.create_port_listener(port).await {
+                        error!(%port, %error, "Failed to create listener for TCP port.");
                     }
                 }
             });
