@@ -1,3 +1,5 @@
 /deploy
 /target
 /cli.html
+/perf.data*
+/flamegraph.svg

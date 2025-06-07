@@ -58,7 +58,7 @@ reqwest = { version = "0.12.19", default-features = false, features = [
 ] }
 russh = "0.52.1"
 rustls = "0.23.27"
-rustls-acme = { version = "0.13.0", features = ["tokio"] }
+rustls-acme = { version = "0.14.0", features = ["tokio"] }
 rustls-pki-types = "1.12.0"
 rustls-webpki = "0.103.3"
 rustrict = { version = "0.7.35", features = ["customize"] }
@@ -96,6 +96,9 @@ vt100-ctt = { version = "0.16.0", default-features = false }
 [profile.release]
 strip = true
 lto = true
+
+[profile.bench]
+debug = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
