@@ -790,7 +790,7 @@ impl AdminInterface {
                             .unwrap()
                             .remove(&fingerprint)
                         {
-                            sessions.values().for_each(|cancellation_token| {
+                            sessions.1.values().for_each(|cancellation_token| {
                                 cancellation_token.cancel();
                             });
                         }
@@ -802,7 +802,7 @@ impl AdminInterface {
                         .unwrap()
                         .remove(&user)
                     {
-                        sessions.values().for_each(|cancellation_token| {
+                        sessions.1.values().for_each(|cancellation_token| {
                             cancellation_token.cancel();
                         });
                     }

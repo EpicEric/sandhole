@@ -185,6 +185,16 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           By default, no limit is set.
 
+      <b>--rate-limit-per-user</b> &lt;RATE&gt;
+          How many bytes per second a single user&#39;s services can transmit at
+          once. Doesn&#39;t apply to admin users.
+
+          Each user is distinguished by their key fingerprint or, in the case of
+          API logins, by their username.
+
+          By default, no rate limit is set. For better results, this should be a
+          multiple of `--buffer-size`.
+
       <b>--random-subdomain-seed</b> &lt;SEED&gt;
           Which value to seed with when generating random subdomains, for
           determinism. This allows binding to the same random address until

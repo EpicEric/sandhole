@@ -251,6 +251,14 @@ pub struct ApplicationConfig {
     #[arg(long, value_name = "MAX")]
     pub quota_per_user: Option<NonZero<u16>>,
 
+    /// How many bytes per second a single user's services can transmit at once. Doesn't apply to admin users.
+    ///
+    /// Each user is distinguished by their key fingerprint or, in the case of API logins, by their username.
+    ///
+    /// By default, no rate limit is set. For better results, this should be a multiple of `--buffer-size`.
+    #[arg(long, value_name = "RATE", value_parser = validate_byte_size)]
+    pub rate_limit_per_user: Option<usize>,
+
     /// Which value to seed with when generating random subdomains, for determinism. This allows binding to the same
     /// random address until Sandhole is restarted.
     ///
@@ -415,6 +423,7 @@ mod application_config_tests {
                 disable_tcp: false,
                 disable_aliasing: false,
                 quota_per_user: None,
+                rate_limit_per_user: None,
                 random_subdomain_seed: None,
                 random_subdomain_length: 6.try_into().unwrap(),
                 random_subdomain_filter_profanities: false,
@@ -465,6 +474,7 @@ mod application_config_tests {
             "--disable-tcp",
             "--disable-aliasing",
             "--quota-per-user=10",
+            "--rate-limit-per-user=1MB",
             "--random-subdomain-seed=ip-and-user",
             "--random-subdomain-length=8",
             "--random-subdomain-filter-profanities",
@@ -511,6 +521,7 @@ mod application_config_tests {
                 disable_tcp: true,
                 disable_aliasing: true,
                 quota_per_user: Some(10.try_into().unwrap()),
+                rate_limit_per_user: Some(1_000_000),
                 random_subdomain_seed: Some(RandomSubdomainSeed::IpAndUser),
                 random_subdomain_length: 8.try_into().unwrap(),
                 random_subdomain_filter_profanities: true,

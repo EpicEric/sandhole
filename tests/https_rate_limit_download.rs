@@ -1,9 +1,12 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use axum::{
     Router,
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Path, Request},
+    extract::Request,
     routing::post,
 };
 use clap::Parser;
@@ -13,13 +16,10 @@ use hyper_util::{
     server::conn::auto::Builder,
 };
 use rand::RngCore;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
-    Channel, Preferred,
+    Channel,
     client::{Msg, Session},
-};
-use russh::{
-    client::Config,
-    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
 };
 use rustls::{
     RootCertStore,
@@ -34,7 +34,7 @@ use tokio_rustls::TlsConnector;
 use tower::Service;
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn https_multi_stream_upload() {
+async fn https_rate_limit_download() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -58,7 +58,9 @@ async fn https_multi_stream_upload() {
         "--bind-hostnames=all",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
-        "--http-request-timeout=60s",
+        "--http-request-timeout=5s",
+        "--buffer-size=20KB",
+        "--rate-limit-per-user=20KB",
     ]);
     tokio::spawn(async move { entrypoint(config).await });
     if timeout(Duration::from_secs(5), async {
@@ -79,22 +81,9 @@ async fn https_multi_stream_upload() {
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session = russh::client::connect(
-        Arc::new(Config {
-            preferred: Preferred {
-                cipher: std::borrow::Cow::Borrowed(&[
-                    russh::cipher::CHACHA20_POLY1305,
-                    // russh::cipher::AES_256_GCM,
-                ]),
-                ..Default::default()
-            },
-            ..Default::default()
-        }),
-        "127.0.0.1:18022",
-        ssh_client,
-    )
-    .await
-    .expect("Failed to connect to SSH server");
+    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
     assert!(
         session
             .authenticate_publickey(
@@ -129,51 +118,53 @@ async fn https_multi_stream_upload() {
             .with_root_certificates(root_store)
             .with_no_client_auth(),
     );
-    let mut data = vec![0u8; 20_000_000];
+    let mut data = vec![0u8; 50_000];
     rand::rng().fill_bytes(&mut data);
-    let data: &'static [u8] = data.leak();
-    let mut jh_vec = vec![];
-    for file_size in [7_500_000, 10_000_000, 15_000_000, 20_000_000] {
-        let connector = TlsConnector::from(Arc::clone(&tls_config));
-        let tcp_stream = TcpStream::connect("127.0.0.1:18443")
+    let connector = TlsConnector::from(Arc::clone(&tls_config));
+    let tcp_stream = TcpStream::connect("127.0.0.1:18443")
+        .await
+        .expect("TCP connection failed");
+    let tls_stream = connector
+        .connect("foobar.tld".try_into().unwrap(), tcp_stream)
+        .await
+        .expect("TLS stream failed");
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls_stream))
+        .await
+        .expect("HTTP handshake failed");
+    tokio::spawn(async move {
+        if let Err(error) = conn.await {
+            eprintln!("Connection failed: {error:?}");
+        }
+    });
+    let request = Request::builder()
+        .method("POST")
+        .uri("/")
+        .header("host", "foobar.tld")
+        .body(Body::from(data))
+        .unwrap();
+    let start = Instant::now();
+    let Ok(response) = timeout(Duration::from_secs(5), async move {
+        sender
+            .send_request(request)
             .await
-            .expect("TCP connection failed");
-        let tls_stream = connector
-            .connect("foobar.tld".try_into().unwrap(), tcp_stream)
-            .await
-            .expect("TLS stream failed");
-        let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls_stream))
-            .await
-            .expect("HTTP handshake failed");
-        tokio::spawn(async move {
-            if let Err(error) = conn.await {
-                eprintln!("Connection failed: {error:?}");
-            }
-        });
-        let jh = tokio::spawn(async move {
-            let request = Request::builder()
-                .method("POST")
-                .uri(format!("/{file_size}"))
-                .header("host", "foobar.tld")
-                .body(Body::from(&data[..file_size]))
-                .unwrap();
-            let Ok(response) = timeout(Duration::from_secs(60), async move {
-                sender
-                    .send_request(request)
-                    .await
-                    .expect("Error sending HTTP request")
-            })
-            .await
-            else {
-                panic!("Timeout waiting for request to finish.");
-            };
-            assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        });
-        jh_vec.push(jh);
-    }
-    for jh in jh_vec.into_iter() {
-        jh.await.expect("Join handle panicked");
-    }
+            .expect("Error sending HTTP request")
+    })
+    .await
+    else {
+        panic!("Timeout waiting for request to finish.");
+    };
+    let elapsed = start.elapsed();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert!(
+        elapsed > Duration::from_secs(2),
+        "must've taken more than 2 seconds, but was {:?}",
+        elapsed
+    );
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "must've taken less than 3 seconds, but was {:?}",
+        elapsed
+    );
 }
 
 struct SshClient;
@@ -197,17 +188,7 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let router = Router::new().route(
-            "/{file_size}",
-            post(async |Path(file_size): Path<usize>, body: Bytes| {
-                if file_size == body.len() {
-                    StatusCode::NO_CONTENT
-                } else {
-                    StatusCode::BAD_REQUEST
-                }
-            })
-            .layer(DefaultBodyLimit::max(100_000_000)),
-        );
+        let router = Router::new().route("/", post(async |_body: Bytes| StatusCode::NO_CONTENT));
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {
             Builder::new(TokioExecutor::new())

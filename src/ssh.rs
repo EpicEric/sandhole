@@ -28,6 +28,7 @@ use crate::{
 };
 
 use anyhow::anyhow;
+use async_speed_limit::{Limiter, Resource, clock::StandardClock};
 use enumflags2::{BitFlags, bitflags};
 use http::Request;
 use hyper::{body::Incoming, service::service_fn};
@@ -75,6 +76,8 @@ pub(crate) struct SshTunnelHandler {
     address: String,
     // Port used for the remote forwarding, required for the client to open the correct session channels.
     port: u32,
+    // Limiter for rate limiting.
+    limiter: Limiter,
 }
 
 impl Drop for SshTunnelHandler {
@@ -91,12 +94,16 @@ impl Drop for SshTunnelHandler {
     }
 }
 
-impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
+impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunnelHandler {
     fn log_channel(&self) -> ServerHandlerSender {
         self.tx.clone()
     }
 
-    async fn tunneling_channel(&self, ip: IpAddr, port: u16) -> anyhow::Result<ChannelStream<Msg>> {
+    async fn tunneling_channel(
+        &self,
+        ip: IpAddr,
+        port: u16,
+    ) -> anyhow::Result<Resource<ChannelStream<Msg>, StandardClock>> {
         // Check if this IP is not blocked
         if self
             .ip_filter
@@ -115,7 +122,7 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
                 )
                 .await?
                 .into_stream();
-            Ok(channel)
+            Ok(self.limiter.clone().limit(channel))
         } else {
             Err(ServerError::TunnelingNotAllowed.into())
         }
@@ -142,7 +149,7 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
         ip: IpAddr,
         port: u16,
         fingerprint: Option<&'_ Fingerprint>,
-    ) -> anyhow::Result<ChannelStream<Msg>> {
+    ) -> anyhow::Result<Resource<ChannelStream<Msg>, StandardClock>> {
         if self.can_alias(ip, port, fingerprint).await {
             let channel = self
                 .handle
@@ -154,7 +161,7 @@ impl ConnectionHandler<ChannelStream<Msg>> for SshTunnelHandler {
                 )
                 .await?
                 .into_stream();
-            Ok(channel)
+            Ok(self.limiter.clone().limit(channel))
         } else {
             Err(ServerError::AliasingNotAllowed.into())
         }
@@ -185,12 +192,16 @@ struct UserData {
     port_addressing: HashMap<TcpAlias, u16>,
     // Map to keep track of opened alias-based connections (aliases), to clean up when the forwarding is canceled.
     alias_addressing: HashMap<TcpAlias, TcpAlias>,
+    // IPs allowed to connect to this user's services.
     allowlist: Option<Vec<IpNet>>,
+    // IPs disallowed from connecting to this user's services.
     blocklist: Option<Vec<IpNet>>,
+    // Rate limiter for this user's services.
+    limiter: Limiter,
 }
 
 impl UserData {
-    fn new(quota_key: TokenHolder) -> Self {
+    fn new(quota_key: TokenHolder, limiter: Limiter) -> Self {
         Self {
             allow_fingerprint: Arc::new(RwLock::new(Box::new(|_| true))),
             http_data: Arc::new(RwLock::new(ConnectionHttpData {
@@ -207,6 +218,7 @@ impl UserData {
             alias_addressing: Default::default(),
             allowlist: Default::default(),
             blocklist: Default::default(),
+            limiter,
         }
     }
 }
@@ -435,19 +447,22 @@ impl Handler for ServerHandler {
                     // Check if authentication succeeded.
                     if is_authenticated {
                         // Add this session to the password sessions, allowing it to be canceled via the admin TUI.
-                        self.server
-                            .sessions_password
-                            .lock()
-                            .unwrap()
-                            .entry(user.into())
-                            .or_default()
-                            .insert(self.id, self.cancellation_token.clone());
+                        let limiter = {
+                            let mut user_sessions = self.server.sessions_password.lock().unwrap();
+                            let entry = user_sessions.entry(user.into()).or_insert((
+                                Limiter::new(self.server.rate_limit),
+                                HashMap::default(),
+                            ));
+                            entry.1.insert(self.id, self.cancellation_token.clone());
+                            entry.0.clone()
+                        };
                         self.user = Some(user.into());
                         // Add user data, identifying its tokens by the username.
                         self.auth_data = AuthenticatedData::User {
-                            user_data: Box::new(UserData::new(TokenHolder::User(
-                                UserIdentification::Username(user.into()),
-                            ))),
+                            user_data: Box::new(UserData::new(
+                                TokenHolder::User(UserIdentification::Username(user.into())),
+                                limiter,
+                            )),
                         };
                         info!(
                             peer = %self.peer, %user, role = %self.auth_data, "SSH client authenticated with password.",
@@ -509,26 +524,30 @@ impl Handler for ServerHandler {
             }
             AuthenticationType::User => {
                 // Add this session to the public key sessions, allowing it to be canceled via the admin TUI.
-                self.server
-                    .sessions_publickey
-                    .lock()
-                    .unwrap()
-                    .entry(fingerprint)
-                    .or_default()
-                    .insert(self.id, self.cancellation_token.clone());
+                let limiter = {
+                    let mut user_sessions = self.server.sessions_publickey.lock().unwrap();
+                    let entry = user_sessions
+                        .entry(fingerprint)
+                        .or_insert((Limiter::new(self.server.rate_limit), HashMap::default()));
+                    entry.1.insert(self.id, self.cancellation_token.clone());
+                    entry.0.clone()
+                };
                 // Add user data, identifying its tokens by the public key.
                 self.auth_data = AuthenticatedData::User {
-                    user_data: Box::new(UserData::new(TokenHolder::User(
-                        UserIdentification::PublicKey(fingerprint),
-                    ))),
+                    user_data: Box::new(UserData::new(
+                        TokenHolder::User(UserIdentification::PublicKey(fingerprint)),
+                        limiter,
+                    )),
                 };
             }
             AuthenticationType::Admin => {
                 // Add admin data, identifying its tokens by the public key.
+                let limiter = Limiter::new(f64::INFINITY);
                 self.auth_data = AuthenticatedData::Admin {
-                    user_data: Box::new(UserData::new(TokenHolder::Admin(
-                        UserIdentification::PublicKey(fingerprint),
-                    ))),
+                    user_data: Box::new(UserData::new(
+                        TokenHolder::Admin(UserIdentification::PublicKey(fingerprint)),
+                        limiter,
+                    )),
                     admin_data: Box::new(AdminData::new()),
                 };
             }
@@ -1184,6 +1203,7 @@ impl Handler for ServerHandler {
                         peer: self.peer,
                         address: address.to_string(),
                         port: *port,
+                        limiter: user_data.limiter.clone(),
                     }),
                 ) {
                     Err(error) => {
@@ -1261,6 +1281,7 @@ impl Handler for ServerHandler {
                             peer: self.peer,
                             address: address.into(),
                             port: *port,
+                            limiter: user_data.limiter.clone(),
                         }),
                     ) {
                         Err(error) => {
@@ -1317,6 +1338,7 @@ impl Handler for ServerHandler {
                             peer: self.peer,
                             address: address.into(),
                             port: *port,
+                            limiter: user_data.limiter.clone(),
                         }),
                     ) {
                         Err(error) => {
@@ -1384,6 +1406,7 @@ impl Handler for ServerHandler {
                             peer: self.peer,
                             address: address.to_string(),
                             port: *port,
+                            limiter: user_data.limiter.clone(),
                         }),
                     ) {
                         Err(error) => {
@@ -1547,6 +1570,7 @@ impl Handler for ServerHandler {
                             peer: self.peer,
                             address: address.to_string(),
                             port: *port,
+                            limiter: user_data.limiter.clone(),
                         }),
                     ) {
                         Err(error) => {
@@ -1624,6 +1648,7 @@ impl Handler for ServerHandler {
                         peer: self.peer,
                         address: address.to_string(),
                         port: *port,
+                        limiter: user_data.limiter.clone(),
                     }),
                 ) {
                     Err(error) => {
@@ -2308,7 +2333,7 @@ impl Drop for ServerHandler {
                         .sessions_password
                         .lock()
                         .unwrap()
-                        .retain(|_, session| {
+                        .retain(|_, (_, session)| {
                             session.remove(&id);
                             !session.is_empty()
                         });
@@ -2316,7 +2341,7 @@ impl Drop for ServerHandler {
                         .sessions_publickey
                         .lock()
                         .unwrap()
-                        .retain(|_, session| {
+                        .retain(|_, (_, session)| {
                             session.remove(&id);
                             !session.is_empty()
                         });

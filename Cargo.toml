@@ -15,6 +15,7 @@ exclude = [".github", "book", "docker-compose-example", "tests/data"]
 
 [dependencies]
 anyhow = "1.0.98"
+async-speed-limit = { version = "0.4.2", features = ["tokio"] }
 aws-lc-rs = "1.13.1"
 axum = { version = "0.8.4", default-features = false }
 block-id = "0.2.1"

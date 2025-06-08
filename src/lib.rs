@@ -15,6 +15,7 @@ use std::{
 };
 
 use anyhow::Context;
+use async_speed_limit::{Limiter, Resource, clock::StandardClock};
 use axum::response::IntoResponse;
 use hyper::{Request, StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
@@ -24,7 +25,7 @@ use hyper_util::{
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::{
-    ChannelStream, Preferred,
+    ChannelStream,
     keys::{
         decode_secret_key,
         ssh_key::{Fingerprint, LineEnding, private::Ed25519Keypair},
@@ -106,11 +107,12 @@ struct SystemData {
 }
 
 // A list of sessions and their cancelation channels.
-type SessionMap = HashMap<usize, CancellationToken>;
+type SessionMap = (Limiter, HashMap<usize, CancellationToken>);
 // A generic table with data for the admin interface.
 type DataTable<K, V> = Arc<RwLock<BTreeMap<K, V>>>;
 // Helper type for HTTP proxy data types.
-type HttpProxyData<C> = Arc<ProxyData<Arc<C>, SshTunnelHandler, ChannelStream<Msg>>>;
+type HttpProxyData<C> =
+    Arc<ProxyData<Arc<C>, SshTunnelHandler, Resource<ChannelStream<Msg>, StandardClock>>>;
 // HTTP proxy data used by the tunneling connections.
 type TunnelingProxyData = HttpProxyData<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>;
 // HTTP proxy data used by the local forwarding aliasing connections.
@@ -177,6 +179,8 @@ pub(crate) struct SandholeServer {
     pub(crate) disable_aliasing: bool,
     // Buffer size for bidirectional copying.
     pub(crate) buffer_size: usize,
+    // Rate limit per second for services of a single user.
+    pub(crate) rate_limit: f64,
     // How long until a login API request is timed out.
     pub(crate) authentication_request_timeout: Duration,
     // How long until an unauthed connection is closed.
@@ -543,16 +547,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
             .buffer_size
             .try_into()
             .with_context(|| "buffer_size must fit in 32 bits")?,
-        preferred: Preferred {
-            cipher: std::borrow::Cow::Borrowed(&[
-                russh::cipher::AES_256_GCM,
-                russh::cipher::AES_256_CTR,
-                russh::cipher::AES_192_CTR,
-                russh::cipher::AES_128_CTR,
-                // russh::cipher::CHACHA20_POLY1305,
-            ]),
-            ..Default::default()
-        },
         ..Default::default()
     });
     // Create the local forwarding-specific HTTP proxy data.
@@ -607,6 +601,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
         disable_tcp: config.disable_tcp,
         disable_aliasing: config.disable_aliasing,
         buffer_size: config.buffer_size,
+        rate_limit: config
+            .rate_limit_per_user
+            .map(|rate| rate as f64)
+            .unwrap_or(f64::INFINITY),
         authentication_request_timeout: config.authentication_request_timeout,
         idle_connection_timeout: config.idle_connection_timeout,
         unproxied_connection_timeout: config

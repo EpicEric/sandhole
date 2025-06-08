@@ -26,6 +26,12 @@ Websockets are always enabled for HTTP services.
 
 It's simple: just let Sandhole take care of that for you! Nothing stops you from connecting to Sandhole on localhost, and just like any reverse proxy, it will redirect the traffic appropriately for you.
 
+## How do I squeeze out more performance?
+
+The biggest bottleneck in Sandhole is SSH message encryption and decryption. If both client and server support hardware instructions for AES (i.e. most x64 processors), you should prefer the AES-GCM cypher by passing the `-c aes256-gcm@openssh.com` flag to your OpenSSH client, at the cost of [revealing packet lengths to potential attackers](https://infosec.mozilla.org/guidelines/openssh#ciphers-and-algorithms-choice).
+
+For ARM processors running a modern version of OpenSSH, `chacha20-poly1305@openssh.com` should be the faster cypher out of the two options.
+
 ## How do I disable HTTP/TCP/aliasing?
 
 With the `--disable--http`, `--disable-tcp`, and `--disable-aliasing` [CLI flags](./cli.md) respectively. Note that you cannot disable all three at once, as that would remove all of Sandhole's functionality.
