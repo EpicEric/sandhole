@@ -836,8 +836,16 @@ fn handle_https_connection(
 ) {
     tokio::spawn(async move {
         let mut buf = [0u8; 4096];
-        let Ok(n) = stream.peek(&mut buf).await else {
-            return;
+        let n = if let Some(tcp_connection_timeout) = sandhole.tcp_connection_timeout {
+            let Ok(Ok(n)) = timeout(tcp_connection_timeout, stream.peek(&mut buf)).await else {
+                return;
+            };
+            n
+        } else {
+            let Ok(n) = stream.peek(&mut buf).await else {
+                return;
+            };
+            n
         };
         if connect_ssh_on_https_port && buf[..n].starts_with(b"SSH-2.0-") {
             // Handle as an SSH connection instead of HTTPS.

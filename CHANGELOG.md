@@ -17,6 +17,7 @@
 
 - Improvements to admin interface shutdown.
 - Fix SNI proxies not being removed on disconnect.
+- Timeout waiting for TLS connection.
 
 ## 0.5.3 (2025-05-24)
 

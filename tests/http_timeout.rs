@@ -115,6 +115,23 @@ async fn http_timeout() {
     drop(sender);
 
     // 4. Idle after connecting to the HTTPS port of our proxy
+    let tcp_stream = TcpStream::connect("127.0.0.1:18443")
+        .await
+        .expect("TCP connection failed");
+    let mut buf = [0u8; 8];
+    if timeout(Duration::from_secs(2), async {
+        assert!(
+            tcp_stream.try_read(&mut buf).is_err(),
+            "connection should've closed with an error"
+        );
+    })
+    .await
+    .is_err()
+    {
+        panic!("Timeout waiting for connection to be closed.")
+    };
+
+    // 5. Idle after handshake to the HTTPS port of our proxy
     let mut root_store = RootCertStore::empty();
     root_store.add_parsable_certificates(
         CertificateDer::pem_file_iter(concat!(
