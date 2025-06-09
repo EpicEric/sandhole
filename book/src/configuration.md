@@ -22,6 +22,8 @@ Now you'll be able to run Sandhole on port 22:
 sandhole --domain server.com --ssh-port 22
 ```
 
+Note that using HTTPS on a port other than 443 will disable [ACME challenges](./tls_support.md#acme-support).
+
 ## Allow binding on any subdomains/ports
 
 Without extra configuration, Sandhole will not let users bind to requested subdomains and ports, and will always allocate a random one instead.
@@ -58,8 +60,18 @@ Any 2xx status will signify a successful authentication.
 
 ## Restricting resources for users
 
+### Service quotas
+
 By default, users are able to bind as many services as they want. In order to limit this amount, Sandhole provides the `--quota-per-user` option, which must be a number greater than 0. The user's quota includes all services across HTTP, SSH, and TCP.
 
 To enforce this quota across multiple connections, Sandhole considers a unique user to be any number of forwardings sharing _the same public key_. In the case of [password-authenticated users](#alternative-authentication-with-password), _their username_ will be considered instead.
 
 The quota is not enforced for admin users.
+
+### Rate limiting
+
+You may also specify a rate limit on a user's combined services with the `--rate-limit-per-user` option, by passing the maximum amount of bytes per second such as `1MB`.
+
+Read the section above on how Sandhole determines what is a unique user across multiple connections.
+
+Rate limiting is not enforced for admin users.
