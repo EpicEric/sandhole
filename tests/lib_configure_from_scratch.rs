@@ -16,6 +16,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that Sandhole is able to configure itself from scratch,
+/// including adding a user key.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn lib_configure_from_scratch() {
     // 1. Create random temporary directory and initialize Sandhole

@@ -14,6 +14,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that an admin user cannot access the admin interface and
+/// perform remote forwarding at the same time.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn admin_no_interface_if_forwarding() {
     // 1. Initialize Sandhole

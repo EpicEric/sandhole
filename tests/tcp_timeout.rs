@@ -13,6 +13,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that a TCP connection times out after a certain time
+/// configured by the server.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn tcp_timeout() {
     // 1. Initialize Sandhole

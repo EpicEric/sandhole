@@ -87,6 +87,7 @@ o6ioYnJQHPsfaym/DY0seYghtg==
 -----END PRIVATE KEY-----
 ";
 
+/// This test ensures that local forwarding works for SNI proxies.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn sni_aliasing() {
     // 1. Initialize Sandhole

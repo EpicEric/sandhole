@@ -10,6 +10,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that invalid exec options or combinations result in
+/// total or partial errors.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn ssh_invalid_exec_commands() {
     // 1. Initialize Sandhole

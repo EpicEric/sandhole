@@ -14,6 +14,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that an aliased connection times out after a certain time
+/// configured by the server.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn alias_timeout() {
     // 1. Initialize Sandhole

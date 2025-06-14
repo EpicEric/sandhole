@@ -24,6 +24,8 @@ use tokio::{
 use tokio_rustls::TlsConnector;
 use tower::Service;
 
+/// This test ensures that an HTTP/2 client connecting to an HTTP/1.1 service
+/// can still be handled properly.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn https_http11_fallback() {
     // 1. Initialize Sandhole

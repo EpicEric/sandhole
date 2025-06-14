@@ -20,6 +20,8 @@ use tokio::{
 };
 use tower::Service;
 
+/// This test ensures that HTTP services can be fully disabled by the
+/// `--disable-http` option.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn config_disable_http() {
     // 1. Initialize Sandhole

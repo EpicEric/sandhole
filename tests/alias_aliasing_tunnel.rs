@@ -15,6 +15,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that aliasing works, and that it stops working once the
+/// service shuts down the remote forwarding.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn alias_aliasing_tunnel() {
     // 1. Initialize Sandhole

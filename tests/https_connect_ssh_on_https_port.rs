@@ -25,6 +25,8 @@ use tokio::{
 use tokio_rustls::TlsConnector;
 use tower::Service;
 
+/// This test ensures that the `--connect-ssh-on-https-port` option allows SSH
+/// connections to be established through the HTTPS port.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn https_connect_ssh_on_https_port() {
     // 1. Initialize Sandhole

@@ -25,6 +25,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that download rate limiting works as expected for SSH
+/// services.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn ssh_rate_limit_download() {
     // 1. Initialize Sandhole

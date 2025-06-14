@@ -15,6 +15,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that upload rate limiting works as expected for TCP
+/// services.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn tcp_rate_limit_upload() {
     // 1. Initialize Sandhole

@@ -7,6 +7,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that Sandhole fails to initialize if it attempts to
+/// connect to a port that's already bound.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn lib_already_bound_ports() {
     for (i, port) in [18022, 18080, 18443].into_iter().enumerate() {

@@ -23,6 +23,8 @@ use tokio::{
 };
 use tower::Service;
 
+/// This test ensures that it's possible to authenticate an SSH user + password
+/// via the login API by a (TCP) service hosted on Sandhole itself.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn auth_self_hosted_login_api() {
     // 1. Initialize Sandhole

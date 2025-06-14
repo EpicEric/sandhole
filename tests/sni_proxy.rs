@@ -84,6 +84,7 @@ o6ioYnJQHPsfaym/DY0seYghtg==
 -----END PRIVATE KEY-----
 ";
 
+/// This test ensures that SNI proxies can be connected to.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn sni_proxy() {
     // 1. Initialize Sandhole

@@ -9,6 +9,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that only a single session channel can be opened.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn ssh_single_data_channel() {
     // 1. Initialize Sandhole

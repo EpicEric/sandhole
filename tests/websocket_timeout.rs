@@ -25,6 +25,8 @@ use tokio::{
 use tokio_tungstenite::client_async;
 use tower::Service;
 
+/// This test ensures that a WebSocket connection times out after a certain time
+/// configured by the server.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn websocket_timeout() {
     // 1. Initialize Sandhole

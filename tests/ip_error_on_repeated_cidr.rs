@@ -10,6 +10,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that IP allowlist/blocklists fail when specifying the
+/// same CIDR block.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn ip_error_on_repeated_cidr() {
     // 1. Initialize Sandhole

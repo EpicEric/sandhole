@@ -13,6 +13,9 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that Sandhole properly shuts down when receiving a SIGINT
+/// or SIGTERM on Unix.
+#[cfg(unix)]
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn lib_configure_from_scratch() {
     for signal in [SIGINT, SIGTERM] {

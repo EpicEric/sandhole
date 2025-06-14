@@ -12,6 +12,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that `--load-balancing=deny` prevents more than one
+/// service from remote forwarding to the same hosts/ports/aliases.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn connection_deny_load_balancing() {
     // 1. Initialize Sandhole

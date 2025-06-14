@@ -21,11 +21,7 @@ use tokio::{
 };
 use tower::Service;
 
-/// In order for tunneling to work, Sandhole must allow any public key to connect.
-/// However, unauthorized users should have much more restricted access, only being allowed
-/// to request local port forwarding (as of this version).
-///
-/// This test ensures that any other actions result in an error with a disconnect.
+/// This test ensures that local forwarding works for alias-only HTTP services.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn alias_http_aliases() {
     // 1. Initialize Sandhole

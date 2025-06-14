@@ -15,11 +15,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
-/// In order for tunneling to work, Sandhole must allow any public key to connect.
-/// However, unauthorized users should have much more restricted access, only being allowed
-/// to request local port forwarding (as of this version).
-///
-/// This test ensures that any other actions result in an error with a disconnect.
+/// This test ensures that aliases with the allowed-fingerprints option can only
+/// be locally forwarded to by the provided fingerprints.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn alias_require_allowed_fingerprints() {
     // 1. Initialize Sandhole

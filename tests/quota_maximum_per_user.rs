@@ -19,6 +19,8 @@ use tokio::{
 };
 use tower::Service;
 
+/// This test ensures that a user cannot expose more services than the number
+/// specified in the `--quota-per-user` option.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn quota_maximum_per_user() {
     // 1. Initialize Sandhole

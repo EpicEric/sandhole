@@ -24,6 +24,8 @@ use tokio::{
 use tokio_rustls::TlsConnector;
 use tower::Service;
 
+/// This test ensures that an HTTP connection times out after a certain time
+/// configured by the server.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn http_timeout() {
     // 1. Initialize Sandhole

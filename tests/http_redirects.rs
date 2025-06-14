@@ -19,13 +19,14 @@ use tokio::{
 };
 use tower::Service;
 
+/// This test ensures that HTTPS and default domain redirects work.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn http_redirects() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
-        "--domain-redirect=https://sandhole.eric.dev.br",
+        "--domain-redirect=https://sandhole.com.br",
         "--user-keys-directory",
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
         "--admin-keys-directory",
@@ -120,7 +121,7 @@ async fn http_redirects() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(
         response.headers().get("location"),
-        Some(&"https://sandhole.eric.dev.br".try_into().unwrap())
+        Some(&"https://sandhole.com.br".try_into().unwrap())
     );
 
     // 4. Connect to the HTTP port of our proxy and check redirect to HTTPS

@@ -13,6 +13,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that multiple services are load balanced by default.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn connection_load_balancing() {
     // 1. Initialize Sandhole

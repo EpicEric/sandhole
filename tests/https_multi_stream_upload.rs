@@ -33,6 +33,8 @@ use tokio::{
 use tokio_rustls::TlsConnector;
 use tower::Service;
 
+/// This test ensures that a service can handle multiple big uploads at the same
+/// time (mostly for profiling purposes).
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn https_multi_stream_upload() {
     // 1. Initialize Sandhole

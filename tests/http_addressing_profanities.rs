@@ -20,6 +20,9 @@ use tokio::{
 };
 use tower::Service;
 
+/// This test ensures that profanities are not allowed when using the
+/// `--requested-domain-filter-profanities` option, except if the profanity
+/// happens to be part of the root domain.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn http_addressing_profanities() {
     // 1. Initialize Sandhole

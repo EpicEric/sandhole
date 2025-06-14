@@ -15,6 +15,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that the admin interface changes size once the user's
+/// screen reports a screen size change.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn admin_window_change() {
     // 1. Initialize Sandhole

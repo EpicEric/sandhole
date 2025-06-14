@@ -24,6 +24,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that SSH proxy jumping is possible.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn ssh_proxy_jump() {
     // 1. Initialize Sandhole

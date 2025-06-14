@@ -7,6 +7,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that HTTPS services can be fully disabled by the
+/// `--disable-https` option.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn config_disable_https() {
     // 1. Initialize Sandhole

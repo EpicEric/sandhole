@@ -13,6 +13,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that random ports work for TCP connections.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn tcp_bind_random_ports() {
     // 1. Initialize Sandhole

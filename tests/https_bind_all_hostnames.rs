@@ -25,6 +25,7 @@ use tokio::{
 use tokio_rustls::TlsConnector;
 use tower::Service;
 
+/// This test ensures that HTTPS works when binding for all hostnames is allowed.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn https_bind_all_hostnames() {
     // 1. Initialize Sandhole

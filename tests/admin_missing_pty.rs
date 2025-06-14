@@ -15,6 +15,9 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that a proper message is displayed when the admin user
+/// opens the admin interface without allocating a pseudo-terminal (i.e. if
+/// they run `ssh sandhole.com.br admin` without the `-T` flag).
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn admin_missing_pty() {
     // 1. Initialize Sandhole

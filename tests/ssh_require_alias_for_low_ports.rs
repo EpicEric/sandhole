@@ -9,6 +9,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that low ports are allowed for aliases.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn ssh_require_alias_for_low_ports() {
     // 1. Initialize Sandhole

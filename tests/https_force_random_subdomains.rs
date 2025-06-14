@@ -26,6 +26,7 @@ use tokio::{
 use tokio_rustls::TlsConnector;
 use tower::Service;
 
+/// This test ensures that random subdomains work for HTTPS connections.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn https_force_random_subdomains() {
     // 1. Initialize Sandhole

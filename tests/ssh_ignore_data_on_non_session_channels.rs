@@ -14,6 +14,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that data sent on non-session channels does not affect the
+/// functioning of the session (i.e. that `0x03` isn't interpreted as Ctrl-C)
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn ssh_ignore_data_on_non_session_channels() {
     // 1. Initialize Sandhole

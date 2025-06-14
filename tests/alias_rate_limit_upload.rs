@@ -17,6 +17,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that upload rate limiting works as expected for aliases.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn alias_rate_limit_upload() {
     // 1. Initialize Sandhole

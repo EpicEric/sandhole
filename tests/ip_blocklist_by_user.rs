@@ -21,6 +21,8 @@ use tokio::{
 };
 use tower::Service;
 
+/// This test ensures that the user-provided `ip-allowlist` and `ip-blocklist`
+/// options work as advertised.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn ip_blocklist_by_user() {
     // 1. Initialize Sandhole

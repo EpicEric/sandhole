@@ -12,6 +12,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that remote forwarding is not allowed for low TCP ports.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn tcp_reject_low_ports() {
     // 1. Initialize Sandhole

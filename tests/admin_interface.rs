@@ -16,6 +16,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test interacts with the admin interface and ensures that the displayed
+/// information matches what's expected after each specific key press.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn admin_interface() {
     // 1. Initialize Sandhole

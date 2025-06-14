@@ -27,6 +27,8 @@ use tokio::{
 use tokio_rustls::TlsConnector;
 use tower::Service;
 
+/// This test ensures that HTTP/2 connections work when passing the service
+/// command `http2`.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn https_http2() {
     // 1. Initialize Sandhole

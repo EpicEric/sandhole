@@ -24,6 +24,8 @@ use tokio::{
 };
 use tower::Service;
 
+/// This test follows an admin user that removes a connected user through the
+/// admin interface.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn admin_remove_user() {
     // 1. Initialize Sandhole

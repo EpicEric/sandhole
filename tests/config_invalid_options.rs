@@ -10,6 +10,8 @@ use tokio::{
 };
 use tokio_rustls::TlsConnector;
 
+/// This test ensures that invalid options result in errors when running
+/// Sandhole.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn config_invalid_options() {
     // 1. Fail to initialize Sandhole if HTTP, TCP, and aliasing are all disabled

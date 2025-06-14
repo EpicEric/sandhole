@@ -16,6 +16,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that TCP works when binding for all ports is allowed.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn tcp_allow_requested_ports() {
     // 1. Initialize Sandhole

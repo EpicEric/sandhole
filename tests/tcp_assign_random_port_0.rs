@@ -13,6 +13,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that explicitly binding to port 0 assigns a random port
+/// for TCP connections.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn tcp_assign_random_port_0() {
     // 1. Initialize Sandhole

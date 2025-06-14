@@ -21,6 +21,8 @@ use tokio::{
 };
 use tower::Service;
 
+/// This test ensures that the connection option `force-https` redirects HTTP
+/// requests to the HTTPS port.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn http_force_https_by_user() {
     // 1. Initialize Sandhole

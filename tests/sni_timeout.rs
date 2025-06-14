@@ -83,6 +83,8 @@ o6ioYnJQHPsfaym/DY0seYghtg==
 -----END PRIVATE KEY-----
 ";
 
+/// This test ensures that an SNI connection times out after a certain time
+/// configured by the server.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn sni_timeout() {
     // 1. Initialize Sandhole

@@ -28,6 +28,8 @@ use tokio::{
 use tokio_rustls::TlsConnector;
 use tower::Service;
 
+/// This test ensures that upload rate limiting works as expected for HTTP
+/// services.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn https_rate_limit_upload() {
     // 1. Initialize Sandhole

@@ -23,6 +23,8 @@ use tokio::{
 };
 use tower::Service;
 
+/// This test ensures that aliasing can be fully disabled by the
+/// `--disable-aliasing` option.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn config_disable_aliasing() {
     // 1. Initialize Sandhole

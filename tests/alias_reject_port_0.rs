@@ -8,6 +8,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that remote forwarded aliases cannot have the port 0
+/// assigned to them.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn alias_reject_port_0() {
     // 1. Initialize Sandhole

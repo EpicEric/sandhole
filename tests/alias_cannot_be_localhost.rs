@@ -12,6 +12,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that remote forwarding fails for an invalid alias, such as
+/// localhost.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn alias_cannot_be_localhost() {
     // 1. Initialize Sandhole

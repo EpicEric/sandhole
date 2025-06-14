@@ -8,6 +8,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// This test ensures that IPs in the blocklist are not allowed to connect to
+/// Sandhole.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn config_ip_blocklist() {
     // 1. Initialize Sandhole
