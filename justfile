@@ -4,8 +4,11 @@ default:
 test $RUST_LOG="sandhole=debug":
   cargo test
 
-install-dev-deps:
-  cargo install mdbook mdbook-mermaid to-html flamegraph
+clippy:
+  cargo clippy --all-targets --fix --allow-dirty --allow-staged && cargo fmt --all
+
+clippy-nightly:
+  cargo +nightly clippy --all-targets --fix --allow-dirty --allow-staged && cargo fmt --all
 
 book:
   mdbook serve book --open
@@ -16,8 +19,10 @@ cli:
 flamegraph-test test:
   cargo flamegraph --dev --test {{test}}
 
-clippy:
-  cargo clippy --all-targets --fix --allow-dirty --allow-staged && cargo fmt --all
+install-dev-deps: install-book-deps install-profiling-deps
 
-clippy-nightly:
-  cargo +nightly clippy --all-targets --fix --allow-dirty --allow-staged && cargo fmt --all
+install-book-deps:
+  cargo install mdbook mdbook-mermaid to-html
+
+install-profiling-deps:
+  cargo install flamegraph

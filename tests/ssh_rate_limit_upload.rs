@@ -155,13 +155,11 @@ async fn ssh_rate_limit_upload() {
     let elapsed = start.elapsed();
     assert!(
         elapsed > Duration::from_secs(2),
-        "must've taken more than 2 seconds, but was {:?}",
-        elapsed
+        "must've taken more than 2 seconds, but was {elapsed:?}"
     );
     assert!(
         elapsed < Duration::from_secs(3),
-        "must've taken less than 3 seconds, but was {:?}",
-        elapsed
+        "must've taken less than 3 seconds, but was {elapsed:?}"
     );
 }
 
