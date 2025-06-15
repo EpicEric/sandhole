@@ -5,7 +5,7 @@ test $RUST_LOG="sandhole=debug":
   cargo test
 
 install-dev-deps:
-  cargo install mdbook to-html flamegraph
+  cargo install mdbook mdbook-mermaid to-html flamegraph
 
 book:
   mdbook serve book --open

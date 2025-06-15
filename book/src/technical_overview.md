@@ -19,15 +19,15 @@ Sandhole is capable of handling both, albeit in a different way than a regular O
 
 A reverse proxy is an intermediary server that receives and forwards requests to a backend service. They are commonly used to secure traffic, or expose servers behind a firewall/private network.
 
-Sandhole is essentially a reverse proxy. It leverages SSH for authentication and tunneling of services, while transparently handling client requests.
+Sandhole is itself a reverse proxy. It leverages SSH for authentication and tunneling of services, while transparently handling client requests.
 
 ![A diagram displaying Sandhole's usage as a reverse proxy. It's deployed to a public server, where a local service connects to its SSH port. A remote service in a private server also connects to the SSH port over the Internet. Meanwhile, a client's web browser connects to the HTTPS port of Sandhole over the Internet.](./how_it_works.svg)
 
-As such, it's possible to expose services publicly without needing a VPN, even behind NAT or firewalls.
+As such, it's possible to expose services publicly without needing a VPN, even when the private server is behind NAT or firewalls.
 
 ## Example flow
 
-Let's say client A wishes to expose a local service, running on port 8080, to the Internet.
+Let's say that client A wishes to expose a local service, running on port 8080, to the Internet.
 
 ![A diagram showing a connection to Sandhole's HTTP proxy in six steps.](./example_flow.svg)
 
@@ -48,3 +48,28 @@ ssh -p 2222 -R mytunnel:80:localhost:8080 sandhole.com.br
 6. Sandhole forwards the reply to client B.
 
 To client A, requests arrive normally at the socket, despite only having an outbound SSH connection; to client B, Sandhole transparently acts as if it were the service itself.
+
+Here's the same flux in a sequence diagram:
+
+```mermaid
+sequenceDiagram
+  participant SC as SSH client
+  participant SS as SSH server
+  participant M as Connection map
+  participant HS as HTTP server
+  participant HC as Web client
+
+  Note over SC, M: Tunnel setup
+  SC ->> SS: SSH connection + tcpip_forward
+  SS ->> SS: Validate login
+  SS ->> M: Register tunnel handler
+  Note over SC, HC: Traffic routing
+  HC ->>+ HS: HTTP request to assigned domain
+  HS ->>+ M: Look up tunnel for domain
+  M -->>- HS: Return tunnel handler
+  HS ->>+ SS: Forward request via tunnel
+  SS ->>+ SC: Relay to local service
+  SC -->>- SS: Response from local service
+  SS -->>- HS: Forward response
+  HS -->>- HC: Return HTTP response
+```
