@@ -10,7 +10,9 @@ jobs:
       contents: read
       packages: write
     uses: ./.github/workflows/build.yml
-    secrets: inherit
+    secrets:
+      dockerhub-push-token: ${{ secrets.DOCKERHUB_PUSH_TOKEN  }}
+      ghcr-push-token: ${{ secrets.GITHUB_TOKEN }}
   create-release-draft:
     name: Create release draft
     needs: build
@@ -18,11 +20,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: true
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: sandhole-binaries
           path: out/

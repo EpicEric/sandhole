@@ -20,7 +20,7 @@ jobs:
       MDBOOK_VERSION: 0.4.45
       MDBOOK_MERMAID_VERSION: 0.15.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
       - name: Install mdBook
@@ -38,7 +38,7 @@ jobs:
         run: mdbook build book
       - name: Deploy to Sandhole
         if: github.ref == 'refs/heads/main'
-        uses: up9cloud/action-rsync@master
+        uses: up9cloud/action-rsync@2978cee625bfb1cd273ae6e146a5e1554e6111b1 # master
         env:
           SOURCE: book/book/
           HOST: ${{ secrets.BOOK_SSH_HOST }}
