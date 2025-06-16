@@ -27,8 +27,8 @@ use crate::{
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
 };
 
-use anyhow::anyhow;
 use async_speed_limit::{Limiter, Resource, clock::StandardClock};
+use color_eyre::eyre::eyre;
 use enumflags2::{BitFlags, bitflags};
 use http::Request;
 use hyper::{body::Incoming, service::service_fn};
@@ -103,7 +103,7 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
         &self,
         ip: IpAddr,
         port: u16,
-    ) -> anyhow::Result<Resource<ChannelStream<Msg>, StandardClock>> {
+    ) -> color_eyre::Result<Resource<ChannelStream<Msg>, StandardClock>> {
         // Check if this IP is not blocked
         if self
             .ip_filter
@@ -149,7 +149,7 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
         ip: IpAddr,
         port: u16,
         fingerprint: Option<&'_ Fingerprint>,
-    ) -> anyhow::Result<Resource<ChannelStream<Msg>, StandardClock>> {
+    ) -> color_eyre::Result<Resource<ChannelStream<Msg>, StandardClock>> {
         if self.can_alias(ip, port, fingerprint).await {
             let channel = self
                 .handle
@@ -1179,7 +1179,7 @@ impl Handler for ServerHandler {
                 }
                 // SSH host must be alias (to be accessed via ProxyJump or ProxyCommand)
                 if !self.server.is_alias(address) {
-                    let error = anyhow!("must be alias, not localhost");
+                    let error = eyre!("must be alias, not localhost");
                     info!(
                         peer = %self.peer, alias = %address, %error,
                         "Failed to bind SSH alias.",
@@ -1256,7 +1256,7 @@ impl Handler for ServerHandler {
                 if user_data.tcp_alias_only {
                     // HTTP host must be alias (to be accessed via local forwarding)
                     if !self.server.is_alias(address) {
-                        let error = anyhow!("must be alias, not localhost");
+                        let error = eyre!("must be alias, not localhost");
                         info!(
                             peer = %self.peer, alias = %address, %error,
                             "Failed to bind HTTP alias.",
@@ -1375,7 +1375,7 @@ impl Handler for ServerHandler {
                     }
                 // Reject when HTTP is disabled
                 } else if self.server.disable_http {
-                    let error = anyhow!("HTTP is disabled");
+                    let error = eyre!("HTTP is disabled");
                     info!(
                         peer = %self.peer, host = %address, %error,
                         "Failed to bind HTTP host.",
@@ -1469,7 +1469,7 @@ impl Handler for ServerHandler {
             _ if !self.server.is_alias(address) => {
                 // Forbid binding TCP if disabled
                 if self.server.disable_tcp {
-                    let error = anyhow!("TCP is disabled");
+                    let error = eyre!("TCP is disabled");
                     info!(
                         peer = %self.peer, %port, %error,
                         "Failed to bind TCP port.",
@@ -1484,7 +1484,7 @@ impl Handler for ServerHandler {
                     Ok(false)
                 // Forbid binding TCP on alias-only mode
                 } else if user_data.tcp_alias_only {
-                    let error = anyhow!("session is in alias-only mode");
+                    let error = eyre!("session is in alias-only mode");
                     info!(
                         peer = %self.peer, %port, %error,
                         "Failed to bind TCP port.",
@@ -1499,7 +1499,7 @@ impl Handler for ServerHandler {
                     Ok(false)
                 // Forbid binding low TCP ports
                 } else if (1..1024).contains(port) {
-                    let error = anyhow!("port too low");
+                    let error = eyre!("port too low");
                     info!(
                         peer = %self.peer, %port, %error,
                         "Failed to bind TCP port.",
@@ -1617,7 +1617,7 @@ impl Handler for ServerHandler {
                 }
                 // If alias, the user must provide the port number themselves
                 let assigned_port = if *port == 0 {
-                    let error = anyhow!("cannot assign random port to alias");
+                    let error = eyre!("cannot assign random port to alias");
                     info!(
                         peer = %self.peer, alias = %address, %error,
                         "Failed to bind random TCP port for alias.",

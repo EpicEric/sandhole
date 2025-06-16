@@ -4,7 +4,9 @@ use notify::{Event, EventKind, RecursiveMode, Watcher};
 use tokio::sync::watch::{self, Receiver};
 
 // Listen to events in a directory, and send relevant updates in a watch channel.
-pub(crate) fn watch_directory<W: Watcher>(directory: &Path) -> anyhow::Result<(W, Receiver<()>)> {
+pub(crate) fn watch_directory<W: Watcher>(
+    directory: &Path,
+) -> color_eyre::Result<(W, Receiver<()>)> {
     let (tx, rx) = watch::channel(());
     let mut watcher = W::new(
         move |res: notify::Result<Event>| {

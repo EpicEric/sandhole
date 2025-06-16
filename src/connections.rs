@@ -72,7 +72,7 @@ where
         address: SocketAddr,
         holder: TokenHolder,
         handler: H,
-    ) -> anyhow::Result<()> {
+    ) -> color_eyre::Result<()> {
         let len = self.map.len();
         let user = holder.get_user();
         match self.load_balancing {

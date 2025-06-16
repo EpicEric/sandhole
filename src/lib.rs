@@ -14,9 +14,9 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Context;
 use async_speed_limit::{Limiter, Resource, clock::StandardClock};
 use axum::response::IntoResponse;
+use color_eyre::eyre::Context;
 use hyper::{Request, StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
@@ -200,7 +200,7 @@ impl SandholeServer {
 
 #[doc(hidden)]
 // Main entrypoint of the application.
-pub async fn entrypoint(config: ApplicationConfig) -> anyhow::Result<()> {
+pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     info!("Starting Sandhole...");
     // Check configuration flags for issues or other operations
     if config.disable_http && config.disable_tcp && config.disable_aliasing {

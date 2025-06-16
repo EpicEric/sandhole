@@ -127,7 +127,7 @@ async fn connection_load_balancing() {
 struct SshClientA;
 
 impl russh::client::Handler for SshClientA {
-    type Error = anyhow::Error;
+    type Error = color_eyre::eyre::Error;
 
     async fn check_server_key(
         &mut self,
@@ -156,7 +156,7 @@ impl russh::client::Handler for SshClientA {
 struct SshClientB;
 
 impl russh::client::Handler for SshClientB {
-    type Error = anyhow::Error;
+    type Error = color_eyre::eyre::Error;
 
     async fn check_server_key(
         &mut self,

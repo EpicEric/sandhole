@@ -647,7 +647,7 @@ impl AdminInterface {
     }
 
     // Adjust to a window resize event
-    pub(crate) fn resize(&mut self, width: u16, height: u16) -> anyhow::Result<()> {
+    pub(crate) fn resize(&mut self, width: u16, height: u16) -> color_eyre::Result<()> {
         let rect = ratatui::prelude::Rect {
             x: 0,
             y: 0,

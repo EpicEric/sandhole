@@ -5,8 +5,8 @@ use crate::{
     droppable_handle::DroppableHandle, ip::IpFilter, reactor::TcpReactor, ssh::SshTunnelHandler,
     telemetry::Telemetry,
 };
-use anyhow::Context;
 use bon::Builder;
+use color_eyre::eyre::Context;
 use dashmap::DashMap;
 use tokio::{io::copy_bidirectional_with_sizes, net::TcpListener, time::timeout};
 use tracing::{error, info, warn};
@@ -34,14 +34,14 @@ pub(crate) struct TcpHandler {
 }
 
 pub(crate) trait PortHandler {
-    async fn create_port_listener(&self, port: u16) -> anyhow::Result<u16>;
-    async fn get_free_port(&self) -> anyhow::Result<u16>;
+    async fn create_port_listener(&self, port: u16) -> color_eyre::Result<u16>;
+    async fn get_free_port(&self) -> color_eyre::Result<u16>;
     fn update_ports(&self, ports: Vec<u16>);
 }
 
 impl PortHandler for Arc<TcpHandler> {
     // Create a TCP listener on the given port.
-    async fn create_port_listener(&self, port: u16) -> anyhow::Result<u16> {
+    async fn create_port_listener(&self, port: u16) -> color_eyre::Result<u16> {
         // Check if we're able to bind to the given address and port.
         let listener = TcpListener::bind((self.listen_address, port)).await?;
         let port = listener
@@ -117,7 +117,7 @@ impl PortHandler for Arc<TcpHandler> {
     }
 
     // Create a TCP listener on a random open port, returning the port number.
-    async fn get_free_port(&self) -> anyhow::Result<u16> {
+    async fn get_free_port(&self) -> color_eyre::Result<u16> {
         // By passing 0 to create_port_listener, the OS will choose a port for us.
         self.create_port_listener(0).await
     }

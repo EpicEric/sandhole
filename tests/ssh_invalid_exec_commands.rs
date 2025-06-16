@@ -416,7 +416,7 @@ async fn ssh_invalid_exec_commands() {
 struct SshClient(mpsc::UnboundedSender<ChannelId>);
 
 impl client::Handler for SshClient {
-    type Error = anyhow::Error;
+    type Error = color_eyre::eyre::Error;
 
     async fn check_server_key(
         &mut self,

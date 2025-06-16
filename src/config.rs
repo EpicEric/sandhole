@@ -7,6 +7,7 @@ use std::{
 };
 
 use clap::{Parser, ValueEnum, command};
+use color_eyre::eyre::{Context, eyre};
 use ipnet::IpNet;
 use rustls_pki_types::DnsName;
 
@@ -349,32 +350,32 @@ pub struct ApplicationConfig {
     pub tcp_connection_timeout: Option<Duration>,
 }
 
-fn validate_domain(value: &str) -> Result<String, String> {
-    DnsName::try_from(value).map_err(|_| "invalid domain")?;
+fn validate_domain(value: &str) -> color_eyre::Result<String> {
+    DnsName::try_from(value).with_context(|| "invalid domain")?;
     Ok(value.to_string())
 }
 
-fn validate_txt_record_prefix(value: &str) -> Result<String, String> {
-    DnsName::try_from(value).map_err(|_| "invalid prefix")?;
+fn validate_txt_record_prefix(value: &str) -> color_eyre::Result<String> {
+    DnsName::try_from(value).with_context(|| "invalid prefix")?;
     if value.find('.').is_some() {
-        Err("prefix cannot contain period".into())
+        Err(eyre!("prefix cannot contain period"))
     } else {
         Ok(value.to_string())
     }
 }
 
-fn validate_duration(value: &str) -> Result<Duration, String> {
+fn validate_duration(value: &str) -> color_eyre::Result<Duration> {
     Ok(humantime::Duration::from_str(value)
-        .map_err(|_| "invalid duration")?
+        .with_context(|| "invalid duration")?
         .into())
 }
 
-fn validate_byte_size(value: &str) -> Result<usize, String> {
-    Ok(bytesize::ByteSize::from_str(value)
-        .map_err(|_| "invalid byte size")?
+fn validate_byte_size(value: &str) -> color_eyre::Result<usize> {
+    bytesize::ByteSize::from_str(value)
+        .map_err(|s| eyre!("invalid byte size {s}"))?
         .as_u64()
         .try_into()
-        .map_err(|_| "cannot convert to usize")?)
+        .with_context(|| "cannot convert to usize")
 }
 
 #[cfg(test)]
@@ -542,43 +543,37 @@ mod application_config_tests {
     }
 
     #[test_log::test]
+    #[should_panic(expected = "invalid dns name")]
     fn fails_to_parse_if_invalid_domain() {
-        assert!(ApplicationConfig::try_parse_from(["sandhole", "--domain=.foobar.tld"]).is_err());
+        ApplicationConfig::try_parse_from(["sandhole", "--domain=.foobar.tld"]).unwrap();
     }
 
     #[test_log::test]
+    #[should_panic(expected = "prefix cannot contain period")]
     fn fails_to_parse_if_invalid_txt_record_prefix() {
-        assert!(
-            ApplicationConfig::try_parse_from([
-                "sandhole",
-                "--domain=foobar.tld",
-                "--txt-record-prefix=hello.world"
-            ])
-            .is_err()
-        );
+        ApplicationConfig::try_parse_from([
+            "sandhole",
+            "--domain=foobar.tld",
+            "--txt-record-prefix=hello.world",
+        ])
+        .unwrap();
     }
 
     #[test_log::test]
+    #[should_panic(expected = "time unit needed, for example 42sec or 42ms")]
     fn fails_to_parse_if_invalid_duration() {
-        assert!(
-            ApplicationConfig::try_parse_from([
-                "sandhole",
-                "--domain=foobar.tld",
-                "--idle-connection-timeout=42"
-            ])
-            .is_err()
-        );
+        ApplicationConfig::try_parse_from([
+            "sandhole",
+            "--domain=foobar.tld",
+            "--idle-connection-timeout=42",
+        ])
+        .unwrap();
     }
 
     #[test_log::test]
+    #[should_panic(expected = "couldn't parse \"abc\" into a ByteSize")]
     fn fails_to_parse_if_invalid_byte_size() {
-        assert!(
-            ApplicationConfig::try_parse_from([
-                "sandhole",
-                "--domain=foobar.tld",
-                "--buffer_size=42"
-            ])
-            .is_err()
-        );
+        ApplicationConfig::try_parse_from(["sandhole", "--domain=foobar.tld", "--buffer-size=abc"])
+            .unwrap();
     }
 }

@@ -26,7 +26,7 @@ pub(crate) struct IpFilterConfig {
 }
 
 impl IpFilter {
-    pub(crate) fn from(config: IpFilterConfig) -> anyhow::Result<Self> {
+    pub(crate) fn from(config: IpFilterConfig) -> color_eyre::Result<Self> {
         let IpFilterConfig {
             allowlist,
             blocklist,

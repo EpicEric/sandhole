@@ -107,7 +107,7 @@ async fn ssh_ignore_data_on_non_session_channels() {
 struct SshClient;
 
 impl russh::client::Handler for SshClient {
-    type Error = anyhow::Error;
+    type Error = color_eyre::eyre::Error;
 
     async fn check_server_key(
         &mut self,

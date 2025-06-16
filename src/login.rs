@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, net::SocketAddr, sync::Arc, time::Duration};
 
-use anyhow::{Context, Result};
+use color_eyre::eyre::{ContextCompat, WrapErr};
 use http::uri::Scheme;
 use hyper::Uri;
 #[cfg(test)]
@@ -33,14 +33,14 @@ pub(crate) struct AuthenticationRequest<'a> {
 #[cfg_attr(test, automock)]
 pub(crate) trait Configurer {
     // Returns the TLS client configuration.
-    fn get_client_config(&self, provider: CryptoProvider) -> Result<ClientConfig>;
+    fn get_client_config(&self, provider: CryptoProvider) -> color_eyre::Result<ClientConfig>;
 }
 
 pub(crate) struct WebpkiVerifierConfigurer;
 
 impl Configurer for WebpkiVerifierConfigurer {
     // Returns the CA certificate chain from the operating system.
-    fn get_client_config(&self, provider: CryptoProvider) -> Result<ClientConfig> {
+    fn get_client_config(&self, provider: CryptoProvider) -> color_eyre::Result<ClientConfig> {
         let mut store = RootCertStore::empty();
         store.extend(TLS_SERVER_ROOTS.iter().map(|ta| ta.to_owned()));
         Ok(ClientConfig::builder_with_provider(Arc::new(provider))
@@ -56,7 +56,7 @@ impl<C: Configurer> ApiLogin<C> {
         configurer: C,
         endpoint: String,
         timeout: Option<Duration>,
-    ) -> anyhow::Result<Self> {
+    ) -> color_eyre::Result<Self> {
         // Parse data from the URL
         let mut client_builder = Client::builder().hickory_dns(true).user_agent(concat!(
             env!("CARGO_PKG_NAME"),
@@ -98,7 +98,10 @@ impl<C: Configurer> ApiLogin<C> {
     }
 
     // Sends a POST request with the authentication body to the configured service, returning true if authenticated.
-    pub(crate) async fn authenticate(&self, data: &AuthenticationRequest<'_>) -> Result<bool> {
+    pub(crate) async fn authenticate(
+        &self,
+        data: &AuthenticationRequest<'_>,
+    ) -> color_eyre::Result<bool> {
         // Send an HTTP/HTTPS request
         let response = self.client.post(&self.endpoint).json(data).send().await?;
         // Authenticate if status code is within 200-299
@@ -128,6 +131,8 @@ mod api_login_tests {
     use tokio::{io::AsyncReadExt, net::TcpListener};
     use tokio_rustls::TlsAcceptor;
     use tower::Service;
+
+    use crate::droppable_handle::DroppableHandle;
 
     use super::{ApiLogin, AuthenticationRequest, MockConfigurer};
 
@@ -348,126 +353,104 @@ mod api_login_tests {
     }
 
     #[test_log::test]
+    #[should_panic(expected = "Invalid endpoint for API login")]
     fn fails_on_empty_url() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        assert!(
-            ApiLogin::from(mock, "".into(), None).is_err(),
-            "should error on empty URL"
-        );
+        ApiLogin::from(mock, "".into(), None).unwrap();
     }
 
     #[test_log::test]
+    #[should_panic(expected = "Invalid endpoint for API login")]
     fn fails_on_invalid_url() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        assert!(
-            ApiLogin::from(mock, "https://should.fail/\x00".into(), None).is_err(),
-            "should error on missing URL"
-        );
+        ApiLogin::from(mock, "https://should.fail/\x00".into(), None).unwrap();
     }
 
     #[test_log::test]
+    #[should_panic(expected = "Invalid endpoint for API login")]
     fn fails_on_missing_host() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        assert!(
-            ApiLogin::from(mock, "https:///invalid".into(), None).is_err(),
-            "should error on missing host"
-        );
+        ApiLogin::from(mock, "https:///invalid".into(), None).unwrap();
     }
 
     #[test_log::test]
+    #[should_panic(expected = "Invalid endpoint for API login")]
     fn fails_on_invalid_host() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        assert!(
-            ApiLogin::from(mock, "https://should\x00fail".into(), None).is_err(),
-            "should error on invalid host"
-        );
+        ApiLogin::from(mock, "https://should\x00fail".into(), None).unwrap();
     }
 
     #[test_log::test]
+    #[should_panic(expected = "API login URL has no scheme")]
     fn fails_on_missing_scheme() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        assert!(
-            ApiLogin::from(mock, "should.fail".into(), None).is_err(),
-            "should error on missing scheme"
-        );
+        ApiLogin::from(mock, "should.fail".into(), None).unwrap();
     }
 
     #[test_log::test]
+    #[should_panic(expected = "Invalid API login URL")]
     fn fails_on_unknown_scheme() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        assert!(
-            ApiLogin::from(mock, "unknown://should.fail".into(), None).is_err(),
-            "should error on unknown scheme"
-        );
+        ApiLogin::from(mock, "unknown://should.fail".into(), None).unwrap();
     }
 
     #[test_log::test(tokio::test)]
+    #[should_panic(expected = "Connection refused")]
     async fn errors_when_unable_to_connect_to_socket() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
 
         let api_login =
             ApiLogin::from(mock, "http://localhost:28015/authentication".into(), None).unwrap();
-        assert!(
-            api_login
-                .authenticate(&AuthenticationRequest {
-                    user: "eric",
-                    password: "sandhole",
-                    remote_address: &SocketAddr::new(
-                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                        12345
-                    )
-                })
-                .await
-                .is_err(),
-            "should fail to connect to socket"
-        );
+        api_login
+            .authenticate(&AuthenticationRequest {
+                user: "eric",
+                password: "sandhole",
+                remote_address: &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345),
+            })
+            .await
+            .unwrap();
     }
 
     #[test_log::test(tokio::test)]
+    #[should_panic(expected = "connection closed before message completed")]
     async fn errors_when_unable_to_complete_http_handshake() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
 
         let listener = TcpListener::bind("127.0.0.1:28016").await.unwrap();
-        let jh = tokio::spawn(async move {
+        let _jh = DroppableHandle(tokio::spawn(async move {
             loop {
                 drop(listener.accept().await.unwrap());
             }
-        });
+        }));
 
         let api_login =
             ApiLogin::from(mock, "http://localhost:28016/authentication".into(), None).unwrap();
-        assert!(
-            api_login
-                .authenticate(&AuthenticationRequest {
-                    user: "eric",
-                    password: "sandhole",
-                    remote_address: &SocketAddr::new(
-                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                        12345
-                    )
-                })
-                .await
-                .is_err(),
-            "should fail to complete HTTP handshake"
-        );
-        jh.abort();
+        api_login
+            .authenticate(&AuthenticationRequest {
+                user: "eric",
+                password: "sandhole",
+                remote_address: &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345),
+            })
+            .await
+            .unwrap();
     }
 
     #[test_log::test(tokio::test)]
+    #[should_panic(expected = "connection closed before message completed")]
     async fn errors_when_http_request_fails() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
 
         let listener = TcpListener::bind("127.0.0.1:28017").await.unwrap();
-        let jh = tokio::spawn(async move {
+        let _jh = DroppableHandle(tokio::spawn(async move {
             loop {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 let mut buf = [0u8; 1024];
@@ -479,28 +462,22 @@ mod api_login_tests {
                     }
                 }
             }
-        });
+        }));
 
         let api_login =
             ApiLogin::from(mock, "http://localhost:28017/authentication".into(), None).unwrap();
-        assert!(
-            api_login
-                .authenticate(&AuthenticationRequest {
-                    user: "eric",
-                    password: "sandhole",
-                    remote_address: &SocketAddr::new(
-                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                        12345
-                    )
-                })
-                .await
-                .is_err(),
-            "should fail to complete HTTP request"
-        );
-        jh.abort();
+        api_login
+            .authenticate(&AuthenticationRequest {
+                user: "eric",
+                password: "sandhole",
+                remote_address: &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345),
+            })
+            .await
+            .unwrap();
     }
 
     #[test_log::test(tokio::test)]
+    #[should_panic(expected = "Connection reset by peer")]
     async fn errors_when_unable_to_complete_https_handshake() {
         let mut mock = MockConfigurer::new();
         let mut root_store = RootCertStore::empty();
@@ -523,11 +500,11 @@ mod api_login_tests {
             });
 
         let listener = TcpListener::bind("127.0.0.1:28018").await.unwrap();
-        let jh = tokio::spawn(async move {
+        let _jh = DroppableHandle(tokio::spawn(async move {
             loop {
                 drop(listener.accept().await.unwrap());
             }
-        });
+        }));
 
         let api_login = ApiLogin::from(
             mock,
@@ -535,24 +512,18 @@ mod api_login_tests {
             None,
         )
         .unwrap();
-        assert!(
-            api_login
-                .authenticate(&AuthenticationRequest {
-                    user: "eric",
-                    password: "sandhole",
-                    remote_address: &SocketAddr::new(
-                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                        12345
-                    )
-                })
-                .await
-                .is_err(),
-            "should fail to complete HTTPS handshake"
-        );
-        jh.abort();
+        api_login
+            .authenticate(&AuthenticationRequest {
+                user: "eric",
+                password: "sandhole",
+                remote_address: &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345),
+            })
+            .await
+            .unwrap();
     }
 
     #[test_log::test(tokio::test)]
+    #[should_panic(expected = "peer closed connection without sending TLS close_notify")]
     async fn errors_when_https_request_fails() {
         let mut mock = MockConfigurer::new();
         let mut root_store = RootCertStore::empty();
@@ -598,7 +569,7 @@ mod api_login_tests {
             .expect("Failed to build server config"),
         );
         let tls_acceptor = TlsAcceptor::from(tls_server_config);
-        let jh = tokio::spawn(async move {
+        let _jh = DroppableHandle(tokio::spawn(async move {
             loop {
                 let acceptor = tls_acceptor.clone();
                 let (conn, _) = listener.accept().await.unwrap();
@@ -614,7 +585,7 @@ mod api_login_tests {
                     }
                 });
             }
-        });
+        }));
 
         let api_login = ApiLogin::from(
             mock,
@@ -622,20 +593,13 @@ mod api_login_tests {
             None,
         )
         .unwrap();
-        assert!(
-            api_login
-                .authenticate(&AuthenticationRequest {
-                    user: "eric",
-                    password: "sandhole",
-                    remote_address: &SocketAddr::new(
-                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                        12345
-                    )
-                })
-                .await
-                .is_err(),
-            "should fail to complete HTTPS request"
-        );
-        jh.abort();
+        api_login
+            .authenticate(&AuthenticationRequest {
+                user: "eric",
+                password: "sandhole",
+                remote_address: &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345),
+            })
+            .await
+            .unwrap();
     }
 }

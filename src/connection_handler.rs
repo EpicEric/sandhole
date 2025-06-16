@@ -22,7 +22,7 @@ pub(crate) trait ConnectionHandler<T: Sync> {
     fn log_channel(&self) -> ServerHandlerSender;
 
     // Return a tunneling channel for this handler.
-    async fn tunneling_channel(&self, ip: IpAddr, port: u16) -> anyhow::Result<T>;
+    async fn tunneling_channel(&self, ip: IpAddr, port: u16) -> color_eyre::Result<T>;
 
     // Whether the given credentials can create an aliasing channel to this handler.
     #[expect(clippy::needless_lifetimes)]
@@ -40,7 +40,7 @@ pub(crate) trait ConnectionHandler<T: Sync> {
         ip: IpAddr,
         port: u16,
         fingerprint: Option<&'a Fingerprint>,
-    ) -> anyhow::Result<T>;
+    ) -> color_eyre::Result<T>;
 
     // Returns HTTP-specific data for this handler.
     async fn http_data(&self) -> Option<ConnectionHttpData>;

@@ -215,7 +215,7 @@ async fn config_disable_aliasing() {
 struct SshClientOne(mpsc::UnboundedSender<ChannelId>);
 
 impl russh::client::Handler for SshClientOne {
-    type Error = anyhow::Error;
+    type Error = color_eyre::eyre::Error;
 
     async fn check_server_key(
         &mut self,
@@ -257,7 +257,7 @@ impl russh::client::Handler for SshClientOne {
 struct SshClientTwo;
 
 impl russh::client::Handler for SshClientTwo {
-    type Error = anyhow::Error;
+    type Error = color_eyre::eyre::Error;
 
     async fn check_server_key(
         &mut self,

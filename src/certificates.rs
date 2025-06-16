@@ -63,7 +63,7 @@ impl CertificateResolver {
     pub(crate) async fn watch(
         directory: PathBuf,
         alpn_resolver: RwLock<Box<dyn AlpnChallengeResolver>>,
-    ) -> anyhow::Result<Self> {
+    ) -> color_eyre::Result<Self> {
         if !directory.as_path().is_dir() {
             return Err(ServerError::MissingDirectory(directory).into());
         }
@@ -250,16 +250,14 @@ mod certificate_resolver_tests {
     static UNKNOWN_DOMAINS: &[&str] = &[".invalid.", "tld", "example.com", "too.nested.foobar.tld"];
 
     #[test_log::test(tokio::test)]
+    #[should_panic(expected = "Missing directory")]
     async fn errors_on_missing_directory() {
-        assert!(
-            CertificateResolver::watch(
-                std::env::temp_dir().join("invalid_directory_123"),
-                RwLock::new(Box::new(DummyAlpnChallengeResolver)),
-            )
-            .await
-            .is_err(),
-            "should error on missing directory"
-        );
+        CertificateResolver::watch(
+            std::env::temp_dir().join("invalid_directory_123"),
+            RwLock::new(Box::new(DummyAlpnChallengeResolver)),
+        )
+        .await
+        .unwrap();
     }
 
     #[test_log::test(tokio::test)]

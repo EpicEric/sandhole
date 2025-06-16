@@ -427,7 +427,7 @@ async fn alias_cannot_be_localhost() {
 struct SshClientWithChannelSuccess(mpsc::UnboundedSender<ChannelId>);
 
 impl russh::client::Handler for SshClientWithChannelSuccess {
-    type Error = anyhow::Error;
+    type Error = color_eyre::eyre::Error;
 
     async fn check_server_key(
         &mut self,
@@ -449,7 +449,7 @@ impl russh::client::Handler for SshClientWithChannelSuccess {
 struct SshClientWithChannelFailure(mpsc::UnboundedSender<ChannelId>);
 
 impl russh::client::Handler for SshClientWithChannelFailure {
-    type Error = anyhow::Error;
+    type Error = color_eyre::eyre::Error;
 
     async fn check_server_key(
         &mut self,

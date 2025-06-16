@@ -117,6 +117,8 @@ pub(crate) enum HttpError {
     HyperError(#[from] hyper::Error),
     #[error("Handler not found")]
     HandlerNotFound,
+    #[error("Channel request denied")]
+    ChannelRequestDenied,
     #[error("Header to string error: {0}")]
     HeaderToStrError(#[from] http::header::ToStrError),
     #[error("Missing URI host")]
@@ -144,7 +146,7 @@ impl IntoResponse for HttpError {
             | HttpError::InvalidHttpVersion(_)
             | HttpError::MissingUpgradeHeader => StatusCode::BAD_REQUEST,
             HttpError::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
-            HttpError::HandlerNotFound => StatusCode::NOT_FOUND,
+            HttpError::HandlerNotFound | HttpError::ChannelRequestDenied => StatusCode::NOT_FOUND,
             HttpError::HyperError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
         .into_response()
@@ -198,7 +200,7 @@ pub(crate) async fn proxy_handler<B, M, H, T>(
     tcp_address: SocketAddr,
     fingerprint: Option<Fingerprint>,
     proxy_data: Arc<ProxyData<M, H, T>>,
-) -> anyhow::Result<Response<AxumBody>>
+) -> color_eyre::Result<Response<AxumBody>>
 where
     M: ConnectionGetByHttpHost<Arc<H>>,
     H: ConnectionHandler<T>,
@@ -350,7 +352,7 @@ where
         }
     }) else {
         // If getting the handler failed, return 404 (they may have an allowlist for fingerprints/IP networks)
-        return Err(HttpError::HandlerNotFound);
+        return Err(HttpError::ChannelRequestDenied);
     };
     let tx = handler.log_channel();
     let is_http2 = http_data.as_ref().map(|data| data.http2).unwrap_or(false);

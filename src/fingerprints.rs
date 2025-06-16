@@ -120,7 +120,7 @@ impl FingerprintsValidator {
     pub(crate) async fn watch(
         user_keys_directory: PathBuf,
         admin_keys_directory: PathBuf,
-    ) -> anyhow::Result<Self> {
+    ) -> color_eyre::Result<Self> {
         if !user_keys_directory.as_path().is_dir() {
             return Err(ServerError::MissingDirectory(user_keys_directory).into());
         }
@@ -232,7 +232,7 @@ impl FingerprintsValidator {
     }
 
     // Delete a user key from the fingerprints matcher and the filesystem
-    pub(crate) fn remove_user_key(&self, fingerprint: &Fingerprint) -> anyhow::Result<()> {
+    pub(crate) fn remove_user_key(&self, fingerprint: &Fingerprint) -> color_eyre::Result<()> {
         match self.user_fingerprints.write().unwrap().remove(fingerprint) {
             Some(KeyData { file, .. }) => Ok(remove_file(file)?),
             _ => Err(ServerError::NoMatchingUserKey.into()),
