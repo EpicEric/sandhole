@@ -1,9 +1,9 @@
 # Sandhole
 
-[![Github Actions workflow status](https://img.shields.io/github/actions/workflow/status/EpicEric/sandhole/validate.yml?label=tests&logo=githubactions)](https://github.com/EpicEric/sandhole/actions/workflows/validate.yml)
+[![Github Actions workflow status](https://img.shields.io/github/actions/workflow/status/EpicEric/sandhole/validate.yml?label=tests&logo=github)](https://github.com/EpicEric/sandhole/actions/workflows/validate.yml)
 [![Codecov](https://img.shields.io/codecov/c/github/EpicEric/sandhole?token=YNJUQDQ38S&logo=codecov)](https://app.codecov.io/github/EpicEric/sandhole)
 [![crates.io version](https://img.shields.io/crates/v/sandhole?logo=rust)](https://crates.io/crates/sandhole)
-[![Github license](https://img.shields.io/github/license/EpicEric/sandhole?logo=github)](https://github.com/EpicEric/sandhole/blob/main/LICENSE)
+[![Github license](https://img.shields.io/github/license/EpicEric/sandhole)](https://github.com/EpicEric/sandhole/blob/main/LICENSE)
 
 ![The Sandhole logo, with a crab partially inside a sand mound and the name "Sandhole" written in cursive beside them.](https://sandhole.com.br/logo.png)
 
