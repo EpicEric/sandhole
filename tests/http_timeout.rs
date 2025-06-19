@@ -49,7 +49,7 @@ async fn http_timeout() {
         "--https-port=18443",
         "--acme-use-staging",
         "--bind-hostnames=all",
-        "--idle-connection-timeout=1s",
+        "--idle-connection-timeout=500ms",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
         "--tcp-connection-timeout=500ms",

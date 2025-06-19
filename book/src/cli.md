@@ -241,11 +241,10 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           [default: 32KB]
 
       <b>--idle-connection-timeout</b> &lt;DURATION&gt;
-          Grace period for dangling/unauthenticated SSH connections before they
-          are forcefully disconnected.
+          Grace period for dangling/unauthenticated connections before they are
+          forcefully disconnected.
 
-          A low value may cause valid proxy/tunnel connections to be erroneously
-          removed.
+          A low value may cause valid connections to be erroneously removed.
 
           [default: 2s]
 

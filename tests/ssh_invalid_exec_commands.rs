@@ -11,7 +11,7 @@ use tokio::{
 };
 
 /// This test ensures that invalid exec options or combinations result in
-/// total or partial errors.
+/// disconnection errors.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn ssh_invalid_exec_commands() {
     // 1. Initialize Sandhole
@@ -51,366 +51,150 @@ async fn ssh_invalid_exec_commands() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2a. Start SSH user client that will fail to run user commands
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
-        None,
-    )
-    .expect("Missing file key1");
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let ssh_client = SshClient(tx);
-    let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
-    assert!(
-        session
-            .authenticate_publickey(
-                "user",
-                PrivateKeyWithHashAlg::new(
-                    Arc::new(key),
-                    session.best_supported_rsa_hash().await.unwrap().flatten()
-                )
-            )
-            .await
-            .expect("SSH authentication failed")
-            .success(),
-        "authentication didn't succeed"
-    );
-    let channel = session
-        .channel_open_session()
-        .await
-        .expect("channel_open_session failed");
-    // 2b. Fail to run `admin` as non-admin
-    channel
-        .exec(true, "admin")
-        .await
-        .expect("exec admin failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2c. Fail to run `allowed-fingerprints` with no fingerprint
-    channel
-        .exec(true, "allowed-fingerprints=")
-        .await
-        .expect("exec allowed-fingerprints failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2d. Fail to run `allowed-fingerprints` with invalid fingerprint
-    channel
-        .exec(true, "allowed-fingerprints=SHA256:blah")
-        .await
-        .expect("exec allowed-fingerprints failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2e. Fail to run `allowed-fingerprints` twice
-    channel
-        .exec(
-            true,
+    // 2. Start SSH user client that will fail to run user commands
+    for invalid_exec in [
+        // Admin console as non-admin
+        vec!["admin"],
+        // No fingerprints
+        vec!["allowed-fingerprints="],
+        // Invalid fingerprints
+        vec!["allowed-fingerprints=SHA256:blah"],
+        // Fingerprints incompatible with SNI proxy
+        vec![
+            "sni-proxy",
+            "allowed-fingerprints=SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+        ],
+        // `allowed-fingerprints` twice
+        vec![
             "allowed-fingerprints=SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ allowed-fingerprints=SHA256:bwf4FDtNeZzFv8xHBzHJwRpDRxssCll8w2tCHFC9n1o",
-        )
-        .await
-        .expect("exec allowed-fingerprints failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    channel
-        .exec(
-            true,
+        ],
+        vec![
+            "allowed-fingerprints=SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
             "allowed-fingerprints=SHA256:bwf4FDtNeZzFv8xHBzHJwRpDRxssCll8w2tCHFC9n1o",
+        ],
+        // TCP alias incompatible with SNI proxy
+        vec!["sni-proxy", "tcp-alias"],
+        // `tcp-alias` twice
+        vec!["tcp-alias tcp-alias"],
+        vec!["tcp-alias", "tcp-alias"],
+        // `force-https` twice
+        vec!["force-https force-https"],
+        vec!["force-https", "force-https"],
+        // `http2` twice
+        vec!["http2 http2"],
+        vec!["http2", "http2"],
+        // SNI proxy incompatible with TCP alias
+        vec!["tcp-alias", "sni-proxy"],
+        // `sni-proxy` twice
+        vec!["sni-proxy sni-proxy"],
+        vec!["sni-proxy", "sni-proxy"],
+        // Invalid CIDR in IP allowlist
+        vec!["ip-allowlist=10.0.0"],
+        // No CIDRs in IP allowlist
+        vec!["ip-allowlist="],
+        // `ip-allowlist` twice
+        vec!["ip-allowlist=192.168.0.0/16 ip-allowlist=dead:beef::/32"],
+        vec!["ip-allowlist=192.168.0.0/16", "ip-allowlist=dead:beef::/32"],
+        // Invalid CIDR in IP blocklist
+        vec!["ip-blocklist=10.0.0"],
+        // No CIDRs in IP blocklist
+        vec!["ip-blocklist="],
+        // `ip-blocklist` twice
+        vec!["ip-blocklist=192.168.0.0/16 ip-blocklist=dead:beef::/32"],
+        vec!["ip-blocklist=192.168.0.0/16", "ip-blocklist=dead:beef::/32"],
+        // Unknown command
+        vec!["unknown"],
+    ] {
+        let key = load_secret_key(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+            None,
         )
-        .await
-        .expect("exec allowed-fingerprints failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2f. Fail to run `tcp-alias` twice
-    channel
-        .exec(true, "tcp-alias tcp-alias")
-        .await
-        .expect("exec tcp-alias failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    channel
-        .exec(true, "tcp-alias")
-        .await
-        .expect("exec tcp-alias failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2g. Fail to run `force-https` twice
-    channel
-        .exec(true, "force-https force-https")
-        .await
-        .expect("exec force-https failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    channel
-        .exec(true, "force-https")
-        .await
-        .expect("exec force-https failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2h. Fail to run `http2` twice
-    channel
-        .exec(true, "http2 http2")
-        .await
-        .expect("exec http2 failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    channel
-        .exec(true, "http2")
-        .await
-        .expect("exec http2 failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2i. Fail to run `sni-proxy` twice
-    channel
-        .exec(true, "sni-proxy sni-proxy")
-        .await
-        .expect("exec sni-proxy failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    channel
-        .exec(true, "sni-proxy")
-        .await
-        .expect("exec sni-proxy failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2j. Fail to run `ip-allowlist` with invalid CIDR
-    channel
-        .exec(true, "ip-allowlist=10.0.0")
-        .await
-        .expect("exec ip-allowlist failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2k. Fail to run `ip-allowlist` with no CIDRs
-    channel
-        .exec(true, "ip-allowlist=")
-        .await
-        .expect("exec ip-allowlist failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2l. Fail to run `ip-allowlist` twice
-    channel
-        .exec(
-            true,
-            "ip-allowlist=192.168.0.0/16 ip-allowlist=dead:beef::/32",
-        )
-        .await
-        .expect("exec ip-allowlist failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    channel
-        .exec(true, "ip-allowlist=dead:beef::/32")
-        .await
-        .expect("exec ip-allowlist failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2m. Fail to run `ip-blocklist` with invalid CIDR
-    channel
-        .exec(true, "ip-blocklist=10.0.0")
-        .await
-        .expect("exec ip-blocklist failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2n. Fail to run `ip-blocklist` with no CIDRs
-    channel
-        .exec(true, "ip-blocklist=")
-        .await
-        .expect("exec ip-blocklist failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2o. Fail to run `ip-blocklist` twice
-    channel
-        .exec(
-            true,
-            "ip-blocklist=193.168.0.0/16 ip-blocklist=dead:ba11::/32",
-        )
-        .await
-        .expect("exec ip-blocklist failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    channel
-        .exec(true, "ip-blocklist=dead:ba11::/32")
-        .await
-        .expect("exec ip-blocklist failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 2p. Fail to run an unknown command
-    channel
-        .exec(true, "unknown-command")
-        .await
-        .expect("exec ip-blocklist failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    assert!(!session.is_closed(), "session shouldn't have been closed");
-
-    // 3a. Start SSH admin client that will fail to run admin commands
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/admin"),
-        None,
-    )
-    .expect("Missing file admin");
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let ssh_client = SshClient(tx);
-    let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
-    assert!(
-        session
-            .authenticate_publickey(
-                "admin",
-                PrivateKeyWithHashAlg::new(
-                    Arc::new(key),
-                    session.best_supported_rsa_hash().await.unwrap().flatten()
-                )
-            )
+        .expect("Missing file key1");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let ssh_client = SshClient(tx);
+        let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
             .await
-            .expect("SSH authentication failed")
-            .success(),
-        "authentication didn't succeed"
-    );
-    let mut channel = session
-        .channel_open_session()
-        .await
-        .expect("channel_open_session failed");
-    // 3b. Fail to run `admin` twice
-    channel
-        .exec(true, "admin admin")
-        .await
-        .expect("exec admin failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    channel
-        .exec(true, "admin")
-        .await
-        .expect("exec admin failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
-    else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
-    assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
-    // 3c. Ensure that at least one admin session is running
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let jh = tokio::spawn(async move {
-        let mut parser = vt100_ctt::Parser::new(30, 140, 0);
-        let mut screen = Vec::new();
-        while let Some(msg) = channel.wait().await {
-            if let russh::ChannelMsg::Data { data } = msg {
-                parser.process(&data);
-                let new_screen = parser.screen();
-                let contents_formatted = new_screen.contents_formatted();
-                if contents_formatted != screen {
-                    screen = contents_formatted;
-                    let _ = tx.send(new_screen.contents());
-                }
-            }
+            .expect("Failed to connect to SSH server");
+        assert!(
+            session
+                .authenticate_publickey(
+                    "user",
+                    PrivateKeyWithHashAlg::new(
+                        Arc::new(key),
+                        session.best_supported_rsa_hash().await.unwrap().flatten()
+                    )
+                )
+                .await
+                .expect("SSH authentication failed")
+                .success(),
+            "authentication didn't succeed"
+        );
+        let channel = session
+            .channel_open_session()
+            .await
+            .expect("channel_open_session failed");
+        for exec in invalid_exec.clone() {
+            channel.exec(true, exec).await.expect("exec failed");
         }
-    });
-    if timeout(Duration::from_secs(4), async move {
-        loop {
-            let screen = rx.recv().await.unwrap();
-            if screen.contains("Ctrl-C") {
-                break;
-            }
-        }
-    })
-    .await
-    .is_err()
-    {
-        panic!("Timed out waiting for admin interface.");
+        let Ok(channel_id) =
+            timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+        else {
+            panic!("Timeout waiting for server to reply.");
+        };
+        assert_eq!(channel_id, channel.id());
+        assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
+        assert!(
+            timeout(Duration::from_secs(1), session).await.is_ok(),
+            "Didn't remove connection after runnning commands: {invalid_exec:?}"
+        );
     }
-    assert!(!session.is_closed(), "session shouldn't have been closed");
-    jh.abort();
+
+    // 3. Start SSH admin client that will fail to run admin commands
+    for invalid_exec in [
+        // `admin` twice
+        vec!["admin admin"],
+        vec!["admin", "admin"],
+    ] {
+        let key = load_secret_key(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/admin"),
+            None,
+        )
+        .expect("Missing file admin");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let ssh_client = SshClient(tx);
+        let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+            .await
+            .expect("Failed to connect to SSH server");
+        assert!(
+            session
+                .authenticate_publickey(
+                    "admin",
+                    PrivateKeyWithHashAlg::new(
+                        Arc::new(key),
+                        session.best_supported_rsa_hash().await.unwrap().flatten()
+                    )
+                )
+                .await
+                .expect("SSH authentication failed")
+                .success(),
+            "authentication didn't succeed"
+        );
+        let channel = session
+            .channel_open_session()
+            .await
+            .expect("channel_open_session failed");
+        for exec in invalid_exec {
+            channel.exec(true, exec).await.expect("exec failed");
+        }
+        let Ok(channel_id) =
+            timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
+        else {
+            panic!("Timeout waiting for server to reply.");
+        };
+        assert_eq!(channel_id, channel.id());
+        assert!(rx.is_empty(), "rx shouldn't have any remaining messages");
+        assert!(timeout(Duration::from_secs(1), session).await.is_ok());
+    }
 }
 
 struct SshClient(mpsc::UnboundedSender<ChannelId>);

@@ -308,9 +308,9 @@ pub struct ApplicationConfig {
     )]
     pub buffer_size: usize,
 
-    /// Grace period for dangling/unauthenticated SSH connections before they are forcefully disconnected.
+    /// Grace period for dangling/unauthenticated connections before they are forcefully disconnected.
     ///
-    /// A low value may cause valid proxy/tunnel connections to be erroneously removed.
+    /// A low value may cause valid connections to be erroneously removed.
     #[arg(
         long,
         default_value = "2s",

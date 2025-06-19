@@ -91,6 +91,7 @@ mod login;
 mod quota;
 mod reactor;
 mod ssh;
+mod ssh_exec;
 mod tcp;
 mod tcp_alias;
 mod telemetry;
@@ -597,7 +598,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         ssh_port: config.ssh_port.into(),
         force_random_ports: !config.allow_requested_ports,
         disable_http: config.disable_http,
-        disable_sni: config.disable_sni,
+        disable_sni: config.disable_http || config.disable_https || config.disable_sni,
         disable_tcp: config.disable_tcp,
         disable_aliasing: config.disable_aliasing,
         buffer_size: config.buffer_size,
@@ -836,16 +837,9 @@ fn handle_https_connection(
 ) {
     tokio::spawn(async move {
         let mut buf = [0u8; 4096];
-        let n = if let Some(tcp_connection_timeout) = sandhole.tcp_connection_timeout {
-            let Ok(Ok(n)) = timeout(tcp_connection_timeout, stream.peek(&mut buf)).await else {
-                return;
-            };
-            n
-        } else {
-            let Ok(n) = stream.peek(&mut buf).await else {
-                return;
-            };
-            n
+        let Ok(Ok(n)) = timeout(sandhole.idle_connection_timeout, stream.peek(&mut buf)).await
+        else {
+            return;
         };
         if connect_ssh_on_https_port && buf[..n].starts_with(b"SSH-2.0-") {
             // Handle as an SSH connection instead of HTTPS.

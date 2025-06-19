@@ -1,6 +1,6 @@
 use std::{
     borrow::Borrow,
-    collections::{BTreeSet, HashMap},
+    collections::HashMap,
     fmt::Display,
     mem,
     net::{IpAddr, SocketAddr},
@@ -23,13 +23,18 @@ use crate::{
     ip::{IpFilter, IpFilterConfig},
     login::AuthenticationRequest,
     quota::{TokenHolder, UserIdentification},
+    ssh_exec::{
+        AdminCommand, AllowedFingerprintsCommand, ExecCommandFlag, ForceHttpsCommand, Http2Command,
+        IpAllowlistCommand, IpBlocklistCommand, SniProxyCommand, SshCommand, SshCommandContext,
+        TcpAliasCommand,
+    },
     tcp::PortHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
 };
 
 use async_speed_limit::{Limiter, Resource, clock::StandardClock};
 use color_eyre::eyre::eyre;
-use enumflags2::{BitFlags, bitflags};
+use enumflags2::BitFlags;
 use http::Request;
 use hyper::{body::Incoming, service::service_fn};
 use hyper_util::{
@@ -61,23 +66,23 @@ type FingerprintFn = dyn Fn(Option<&Fingerprint>) -> bool + Send + Sync;
 #[derive(Clone)]
 pub(crate) struct SshTunnelHandler {
     // Closure to verify valid fingerprints for local forwardings. Default is to allow all.
-    allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
+    pub(crate) allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
     // Optional extra data available for HTTP tunneling/aliasing connections.
-    http_data: Option<Arc<RwLock<ConnectionHttpData>>>,
+    pub(crate) http_data: Option<Arc<RwLock<ConnectionHttpData>>>,
     // Optional IP filtering for this handler's tunneling and aliasing channels.
-    ip_filter: Arc<RwLock<Option<IpFilter>>>,
+    pub(crate) ip_filter: Arc<RwLock<Option<IpFilter>>>,
     // Handle to the SSH connection, in order to create remote forwarding channels.
-    handle: russh::server::Handle,
+    pub(crate) handle: russh::server::Handle,
     // Sender to the opened data session for logging.
-    tx: ServerHandlerSender,
+    pub(crate) tx: ServerHandlerSender,
     // IP and port of the SSH connection, for logging.
-    peer: SocketAddr,
+    pub(crate) peer: SocketAddr,
     // Address used for the remote forwarding, required for the client to open the correct session channels.
-    address: String,
+    pub(crate) address: String,
     // Port used for the remote forwarding, required for the client to open the correct session channels.
-    port: u32,
+    pub(crate) port: u32,
     // Limiter for rate limiting.
-    limiter: Limiter,
+    pub(crate) limiter: Limiter,
 }
 
 impl Drop for SshTunnelHandler {
@@ -172,32 +177,39 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
     }
 }
 
-// Data shared by user and admin SSH sessions,
-struct UserData {
-    // Closure to verify valid fingerprints for local forwardings. Default is to allow all.
-    allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
-    // Extra data available for HTTP tunneling/aliasing connections.
-    http_data: Arc<RwLock<ConnectionHttpData>>,
-    // Optional IP filtering for this connection's tunneling and aliasing channels.
-    ip_filter: Arc<RwLock<Option<IpFilter>>>,
-    // Whether this session only has aliases, from the `tcp-alias`` or `allowed-fingerprints` options.
-    tcp_alias_only: bool,
+pub(crate) enum UserSessionRestriction {
+    // No restriction on the session.
+    None,
+    // Whether this session only has aliases, from the `tcp-alias` or `allowed-fingerprints` options.
+    TcpAliasOnly,
     // Whether this session only has SNI proxies, from the `sni-proxy` option.
-    sni_proxy_only: bool,
+    SniProxyOnly,
+}
+
+// Data shared by user and admin SSH sessions,
+pub(crate) struct UserData {
+    // Closure to verify valid fingerprints for local forwardings. Default is to allow all.
+    pub(crate) allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
+    // Extra data available for HTTP tunneling/aliasing connections.
+    pub(crate) http_data: Arc<RwLock<ConnectionHttpData>>,
+    // Optional IP filtering for this connection's tunneling and aliasing channels.
+    pub(crate) ip_filter: Arc<RwLock<Option<IpFilter>>>,
+    // What kind of restriction to impose on tunnels and aliases for this session.
+    pub(crate) session_restriction: UserSessionRestriction,
     // Identifier for the user, used for creating quota tokens.
-    quota_key: TokenHolder,
+    pub(crate) quota_key: TokenHolder,
     // Map to keep track of opened host-based connections (HTTP and SSH), to clean up when the forwarding is canceled.
-    host_addressing: HashMap<TcpAlias, String>,
+    pub(crate) host_addressing: HashMap<TcpAlias, String>,
     // Map to keep track of opened port-based connections (TCP), to clean up when the forwarding is canceled.
-    port_addressing: HashMap<TcpAlias, u16>,
+    pub(crate) port_addressing: HashMap<TcpAlias, u16>,
     // Map to keep track of opened alias-based connections (aliases), to clean up when the forwarding is canceled.
-    alias_addressing: HashMap<TcpAlias, TcpAlias>,
+    pub(crate) alias_addressing: HashMap<TcpAlias, TcpAlias>,
     // IPs allowed to connect to this user's services.
-    allowlist: Option<Vec<IpNet>>,
+    pub(crate) allowlist: Option<Vec<IpNet>>,
     // IPs disallowed from connecting to this user's services.
-    blocklist: Option<Vec<IpNet>>,
+    pub(crate) blocklist: Option<Vec<IpNet>>,
     // Rate limiter for this user's services.
-    limiter: Limiter,
+    pub(crate) limiter: Limiter,
 }
 
 impl UserData {
@@ -210,8 +222,7 @@ impl UserData {
                 http2: false,
             })),
             ip_filter: Arc::new(RwLock::new(None)),
-            tcp_alias_only: false,
-            sni_proxy_only: false,
+            session_restriction: UserSessionRestriction::None,
             quota_key,
             host_addressing: Default::default(),
             port_addressing: Default::default(),
@@ -224,16 +235,16 @@ impl UserData {
 }
 
 // Data exclusive to the admin SSH session.
-struct AdminData {
+pub(crate) struct AdminData {
     // Flag indicating whether this session has any forwardings associated with it.
     // Used to prevent forwardings and the admin interface from being used together in a single session.
-    is_forwarding: bool,
+    pub(crate) is_forwarding: bool,
     // An allocated pseudo-terminal with the admin TUI.
-    admin_interface: Option<AdminInterface>,
+    pub(crate) admin_interface: Option<AdminInterface>,
     // Width (in columns) of the user's pseudo-terminal.
-    col_width: Option<u32>,
+    pub(crate) col_width: Option<u32>,
     // Height (in rows) of the user's pseudo-terminal.
-    row_height: Option<u32>,
+    pub(crate) row_height: Option<u32>,
 }
 
 impl AdminData {
@@ -248,7 +259,7 @@ impl AdminData {
 }
 
 // Possible authentication states and data.
-enum AuthenticatedData {
+pub(crate) enum AuthenticatedData {
     // User is not authenticated; only allowed to local forward connections.
     None {
         proxy_count: Arc<AtomicUsize>,
@@ -272,20 +283,6 @@ impl Display for AuthenticatedData {
             AuthenticatedData::Admin { .. } => f.write_str("ADMIN"),
         }
     }
-}
-
-#[bitflags]
-#[repr(u16)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ExecCommand {
-    Admin,
-    AllowedFingerprints,
-    TcpAlias,
-    ForceHttps,
-    Http2,
-    SniProxy,
-    IpAllowlist,
-    IpBlocklist,
 }
 
 #[derive(Debug, Clone)]
@@ -325,7 +322,7 @@ pub(crate) struct ServerHandler {
     // Reference to the Sandhole data, for accessing configuration and services.
     server: Arc<SandholeServer>,
     // Commands running on the open session channel.
-    commands: BitFlags<ExecCommand>,
+    commands: BitFlags<ExecCommandFlag>,
 }
 
 pub(crate) trait Server {
@@ -614,418 +611,239 @@ impl Handler for ServerHandler {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        if let AuthenticatedData::None { .. } = self.auth_data {
+            return Err(russh::Error::Disconnect);
+        };
         debug!(peer = %self.peer, ?data, "Received exec_request data.");
         let mut success = true;
         let cmd = String::from_utf8_lossy(data);
         // Split commands by whitespace and handle each.
-        'parse: for command in cmd.split_whitespace() {
-            match (command, &mut self.auth_data) {
+        for command in cmd.split_whitespace() {
+            match command {
                 // - `admin` command creates an admin interface if the user is an admin
-                ("admin", AuthenticatedData::Admin { admin_data, .. }) => {
-                    if self.commands.contains(ExecCommand::Admin) {
-                        let _ = self
-                            .tx
-                            .send(b"Invalid option \"admin\": duplicated command\r\n".to_vec());
-                        success = false;
-                        break;
-                    }
-                    if admin_data.is_forwarding {
-                        let _ = self.tx.send(
-                            b"Invalid option \"admin\": cannot open admin interface while forwarding\r\n"
-                                .to_vec(),
-                        );
-                        success = false;
-                        self.cancellation_token.cancel();
-                        break;
-                    }
-                    let tx = self.tx.clone();
-                    let mut admin_interface = AdminInterface::new(tx, Arc::clone(&self.server));
-                    // Resize if we already have data about the PTY
-                    if let (Some(col_width), Some(row_height)) =
-                        (admin_data.col_width, admin_data.row_height)
+                "admin" => {
+                    let mut command = AdminCommand;
+                    match command
+                        .execute(&mut SshCommandContext {
+                            server: &self.server,
+                            auth_data: &mut self.auth_data,
+                            peer: &self.peer,
+                            commands: &mut self.commands,
+                            tx: &self.tx,
+                        })
+                        .await
                     {
-                        let _ = admin_interface.resize(col_width as u16, row_height as u16);
+                        Ok(_) => {}
+                        Err(error) => {
+                            debug!(peer = %self.peer, %error, "'admin' command failed.");
+                            let _ = self
+                                .tx
+                                .send(format!("'admin' command failed: {error}\r\n").into());
+                            success = false;
+                            self.cancellation_token.cancel();
+                            break;
+                        }
                     }
-                    admin_data.admin_interface = Some(admin_interface);
-                    self.commands.insert(ExecCommand::Admin);
                 }
                 // - `allowed-fingerprints` sets this connection as alias-only,
                 //   and requires local forwardings to have one of the specified key fingerprints.
-                (
-                    command,
-                    AuthenticatedData::User { user_data, .. }
-                    | AuthenticatedData::Admin { user_data, .. },
-                ) if command.starts_with("allowed-fingerprints=") => {
-                    if self.server.disable_aliasing {
-                        let _ = self.tx.send(
-                            b"Invalid option \"allowed-fingerprints\": aliasing is disabled\r\n"
-                                .to_vec(),
-                        );
-                        success = false;
-                        break;
-                    }
-                    if user_data.sni_proxy_only {
-                        let _ = self.tx.send(
-                            b"Invalid option \"allowed-fingerprints\": not compatible with SNI proxy\r\n".to_vec(),
-                        );
-                        success = false;
-                        break;
-                    }
-                    if self.commands.contains(ExecCommand::AllowedFingerprints) {
-                        let _ = self.tx.send(
-                            b"Invalid option \"allowed-fingerprints\": duplicated command\r\n"
-                                .to_vec(),
-                        );
-                        success = false;
-                        break;
-                    }
-                    user_data.tcp_alias_only = true;
-                    user_data.http_data.write().await.is_aliasing = true;
-                    // Create a set from the provided list of fingerprints
-                    let set: Result<BTreeSet<Fingerprint>, _> = command
+                command if command.starts_with("allowed-fingerprints=") => {
+                    let set = command
                         .trim_start_matches("allowed-fingerprints=")
                         .split(',')
                         .filter(|a| !a.is_empty())
                         .map(|key| key.parse::<Fingerprint>())
                         .collect();
-                    let set = match set {
-                        Ok(set) => set,
+                    let mut command = AllowedFingerprintsCommand(set);
+                    match command
+                        .execute(&mut SshCommandContext {
+                            server: &self.server,
+                            auth_data: &mut self.auth_data,
+                            peer: &self.peer,
+                            commands: &mut self.commands,
+                            tx: &self.tx,
+                        })
+                        .await
+                    {
+                        Ok(_) => {}
                         Err(error) => {
+                            debug!(peer = %self.peer, %error, "'allowed-fingerprints' command failed.");
                             let _ = self.tx.send(
-                                format!("Error parsing fingerprints: {error}\r\n").into_bytes(),
+                                format!("'allowed-fingerprints' command failed: {error}\r\n")
+                                    .into(),
                             );
                             success = false;
+                            self.cancellation_token.cancel();
                             break;
                         }
-                    };
-                    if set.is_empty() {
-                        let _ = self.tx.send(b"No fingerprints provided\r\n".to_vec());
-                        success = false;
-                        break;
                     }
-                    // Create a validation closure that verifies that the fingerprint is in our new set
-                    *user_data.allow_fingerprint.write().await =
-                        Box::new(move |fingerprint| fingerprint.is_some_and(|fp| set.contains(fp)));
-                    // Reject TCP ports
-                    if !self.server.tcp.remove_by_address(&self.peer).is_empty() {
-                        let _ = self
-                            .tx
-                            .send(b"Cannot convert TCP port(s) into aliases\r\n".to_vec());
-                        success = false;
-                        self.cancellation_token.cancel();
-                        break;
-                    }
-                    // Change any existing HTTP handlers into TCP alias handlers.
-                    let handlers = self.server.http.remove_by_address(&self.peer);
-                    for (_, handler) in handlers.into_iter() {
-                        let address = handler.address.clone();
-                        // Ensure that the forwarding address is an alias, otherwise error.
-                        if !self.server.is_alias(&address) {
-                            let _ = self.tx.send(
-                                format!(
-                                    "Cannot listen to HTTP alias of '{address}' (must be alias, not localhost)\r\n"
-                                )
-                                .into_bytes(),
-                            );
-                            success = false;
-                            self.cancellation_token.cancel();
-                            break 'parse;
-                        }
-                        // Insert our handler into the TCP alias connections map.
-                        if let Err(error) = self.server.alias.insert(
-                            TcpAlias(address.clone(), 80),
-                            self.peer,
-                            user_data.quota_key.clone(),
-                            handler,
-                        ) {
-                            info!(
-                                peer = %self.peer, alias = %address, %error,
-                                "Failed to bind HTTP alias.",
-                            );
-                            let _ = self.tx.send(
-                                format!(
-                                    "Cannot listen to HTTP alias of '{}' ({})\r\n",
-                                    &address, error,
-                                )
-                                .into_bytes(),
-                            );
-                            success = false;
-                            self.cancellation_token.cancel();
-                            break 'parse;
-                        }
-                    }
-                    self.commands.insert(ExecCommand::AllowedFingerprints);
                 }
                 // - `tcp-alias` sets this connection as alias-only.
-                (
-                    "tcp-alias",
-                    AuthenticatedData::User { user_data, .. }
-                    | AuthenticatedData::Admin { user_data, .. },
-                ) => {
-                    if self.server.disable_aliasing {
-                        let _ = self.tx.send(
-                            b"Invalid option \"tcp-alias\": aliasing is disabled\r\n".to_vec(),
-                        );
-                        success = false;
-                        break;
-                    }
-                    if user_data.sni_proxy_only {
-                        let _ = self.tx.send(
-                            b"Invalid option \"tcp-alias\": not compatible with SNI proxy\r\n"
-                                .to_vec(),
-                        );
-                        success = false;
-                        break;
-                    }
-                    if self.commands.contains(ExecCommand::TcpAlias) {
-                        let _ = self
-                            .tx
-                            .send(b"Invalid option \"tcp-alias\": duplicated command\r\n".to_vec());
-                        success = false;
-                        break;
-                    }
-                    user_data.tcp_alias_only = true;
-                    user_data.http_data.write().await.is_aliasing = true;
-                    // Reject TCP ports
-                    if !self.server.tcp.remove_by_address(&self.peer).is_empty() {
-                        let _ = self
-                            .tx
-                            .send(b"Cannot convert TCP port(s) into aliases\r\n".to_vec());
-                        success = false;
-                        self.cancellation_token.cancel();
-                        break;
-                    }
-                    // Change any existing HTTP handlers into TCP alias handlers.
-                    let handlers = self.server.http.remove_by_address(&self.peer);
-                    for (_, handler) in handlers.into_iter() {
-                        let address = handler.address.clone();
-                        // Ensure that the forwarding address is an alias, otherwise error.
-                        if !self.server.is_alias(&address) {
-                            let _ = self.tx.send(
-                                format!(
-                                    "Cannot listen to HTTP alias of '{address}' (must be alias, not localhost)\r\n"
-                                )
-                                .into_bytes(),
-                            );
+                "tcp-alias" => {
+                    let mut command = TcpAliasCommand;
+                    match command
+                        .execute(&mut SshCommandContext {
+                            server: &self.server,
+                            auth_data: &mut self.auth_data,
+                            peer: &self.peer,
+                            commands: &mut self.commands,
+                            tx: &self.tx,
+                        })
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(error) => {
+                            debug!(peer = %self.peer, %error, "'tcp-alias' command failed.");
+                            let _ = self
+                                .tx
+                                .send(format!("'tcp-alias' command failed: {error}\r\n").into());
                             success = false;
                             self.cancellation_token.cancel();
-                            break 'parse;
-                        }
-                        // Insert our handler into the TCP alias connections map.
-                        if let Err(error) = self.server.alias.insert(
-                            TcpAlias(address.clone(), 80),
-                            self.peer,
-                            user_data.quota_key.clone(),
-                            handler,
-                        ) {
-                            info!(
-                                peer = %self.peer, alias = %address, %error,
-                                "Failed to bind HTTP alias.",
-                            );
-                            let _ = self.tx.send(
-                                format!(
-                                    "Cannot listen to HTTP alias of '{}' ({})\r\n",
-                                    &address, error,
-                                )
-                                .into_bytes(),
-                            );
-                            success = false;
-                            self.cancellation_token.cancel();
-                            break 'parse;
+                            break;
                         }
                     }
-                    self.commands.insert(ExecCommand::TcpAlias);
                 }
                 // - `force-https` causes tunneled HTTP requests to be redirected to HTTPS.
-                (
-                    "force-https",
-                    AuthenticatedData::User { user_data, .. }
-                    | AuthenticatedData::Admin { user_data, .. },
-                ) => {
-                    if self.commands.contains(ExecCommand::ForceHttps) {
-                        let _ = self.tx.send(
-                            b"Invalid option \"force-https\": duplicated command\r\n".to_vec(),
-                        );
-                        success = false;
-                        break;
-                    }
-                    user_data
-                        .http_data
-                        .write()
+                "force-https" => {
+                    let mut command = ForceHttpsCommand;
+                    match command
+                        .execute(&mut SshCommandContext {
+                            server: &self.server,
+                            auth_data: &mut self.auth_data,
+                            peer: &self.peer,
+                            commands: &mut self.commands,
+                            tx: &self.tx,
+                        })
                         .await
-                        .redirect_http_to_https_port = Some(self.server.https_port);
-                    self.commands.insert(ExecCommand::ForceHttps);
+                    {
+                        Ok(_) => {}
+                        Err(error) => {
+                            debug!(peer = %self.peer, %error, "'force-https' command failed.");
+                            let _ = self
+                                .tx
+                                .send(format!("'force-https' command failed: {error}\r\n").into());
+                            success = false;
+                            self.cancellation_token.cancel();
+                            break;
+                        }
+                    }
                 }
                 // - `http2` allows serving HTTP/2 to the HTTP endpoints.
-                (
-                    "http2",
-                    AuthenticatedData::User { user_data, .. }
-                    | AuthenticatedData::Admin { user_data, .. },
-                ) => {
-                    if self.commands.contains(ExecCommand::Http2) {
-                        let _ = self
-                            .tx
-                            .send(b"Invalid option \"http2\": duplicated command\r\n".to_vec());
-                        success = false;
-                        break;
+                "http2" => {
+                    let mut command = Http2Command;
+                    match command
+                        .execute(&mut SshCommandContext {
+                            server: &self.server,
+                            auth_data: &mut self.auth_data,
+                            peer: &self.peer,
+                            commands: &mut self.commands,
+                            tx: &self.tx,
+                        })
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(error) => {
+                            debug!(peer = %self.peer, %error, "'http2' command failed.");
+                            let _ = self
+                                .tx
+                                .send(format!("'http2' command failed: {error}\r\n").into());
+                            success = false;
+                            self.cancellation_token.cancel();
+                            break;
+                        }
                     }
-                    user_data.http_data.write().await.http2 = true;
-                    self.commands.insert(ExecCommand::Http2);
                 }
                 // - `sni-proxy` allows the user to handle the certificates themselves for HTTPS traffic.
-                (
-                    "sni-proxy",
-                    AuthenticatedData::User { user_data, .. }
-                    | AuthenticatedData::Admin { user_data, .. },
-                ) => {
-                    if self.server.disable_sni || self.server.disable_http {
-                        let _ = self.tx.send(
-                            b"Invalid option \"sni-proxy\": SNI proxying is disabled\r\n".to_vec(),
-                        );
-                        success = false;
-                        break;
-                    }
-                    if user_data.tcp_alias_only {
-                        let _ = self.tx.send(
-                            b"Invalid option \"sni-proxy\": not compatible with TCP aliasing\r\n"
-                                .to_vec(),
-                        );
-                        success = false;
-                        break;
-                    }
-                    if self.commands.contains(ExecCommand::SniProxy) {
-                        let _ = self
-                            .tx
-                            .send(b"Invalid option \"sni-proxy\": duplicated command\r\n".to_vec());
-                        success = false;
-                        break;
-                    }
-                    user_data.sni_proxy_only = true;
-                    // Change any existing HTTP handlers into SNI proxy handlers.
-                    let handlers = self.server.http.remove_by_address(&self.peer);
-                    for (_, handler) in handlers.into_iter() {
-                        let address = handler.address.clone();
-                        // Ensure that the SNI address is an alias, otherwise error.
-                        if !self.server.is_alias(&address) {
-                            let _ = self.tx.send(
-                                format!(
-                                    "Cannot listen to SNI proxy of '{address}' (must be alias, not localhost)\r\n"
-                                )
-                                .into_bytes(),
-                            );
+                "sni-proxy" => {
+                    let mut command = SniProxyCommand;
+                    match command
+                        .execute(&mut SshCommandContext {
+                            server: &self.server,
+                            auth_data: &mut self.auth_data,
+                            peer: &self.peer,
+                            commands: &mut self.commands,
+                            tx: &self.tx,
+                        })
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(error) => {
+                            debug!(peer = %self.peer, %error, "'sni-proxy' command failed.");
+                            let _ = self
+                                .tx
+                                .send(format!("'sni-proxy' command failed: {error}\r\n").into());
                             success = false;
                             self.cancellation_token.cancel();
-                            break 'parse;
-                        }
-                        // Insert our handler into the SNI proxy connections map.
-                        if let Err(error) = self.server.sni.insert(
-                            address.clone(),
-                            self.peer,
-                            user_data.quota_key.clone(),
-                            handler,
-                        ) {
-                            info!(
-                                peer = %self.peer, host = %address, %error,
-                                "Failed to bind SNI proxy.",
-                            );
-                            let _ = self.tx.send(
-                                format!(
-                                    "Cannot listen to SNI proxy of '{}' ({})\r\n",
-                                    &address, error,
-                                )
-                                .into_bytes(),
-                            );
-                            success = false;
-                            self.cancellation_token.cancel();
-                            break 'parse;
+                            break;
                         }
                     }
-                    self.commands.insert(ExecCommand::SniProxy);
                 }
                 // - `ip-allowlist` requires tunneling/aliasing connections to come from
                 //   specific IP ranges.
-                (
-                    command,
-                    AuthenticatedData::User { user_data, .. }
-                    | AuthenticatedData::Admin { user_data, .. },
-                ) if command.starts_with("ip-allowlist=") => {
-                    if self.commands.contains(ExecCommand::IpAllowlist)
-                        || user_data.allowlist.is_some()
-                    {
-                        let _ = self.tx.send(
-                            b"Invalid option \"ip-allowlist\": duplicated command\r\n".to_vec(),
-                        );
-                        success = false;
-                        break;
-                    }
+                command if command.starts_with("ip-allowlist=") => {
                     let list: Result<Vec<IpNet>, _> = command
                         .trim_start_matches("ip-allowlist=")
                         .split(',')
                         .filter(|a| !a.is_empty())
                         .map(|network| network.parse::<IpNet>())
                         .collect();
-                    let list = match list {
-                        Ok(list) => list,
+                    let mut command = IpAllowlistCommand(list);
+                    match command
+                        .execute(&mut SshCommandContext {
+                            server: &self.server,
+                            auth_data: &mut self.auth_data,
+                            peer: &self.peer,
+                            commands: &mut self.commands,
+                            tx: &self.tx,
+                        })
+                        .await
+                    {
+                        Ok(_) => {}
                         Err(error) => {
-                            let _ = self.tx.send(
-                                format!("Error parsing allowlist networks: {error}\r\n")
-                                    .into_bytes(),
-                            );
+                            debug!(peer = %self.peer, %error, "'ip-allowlist' command failed.");
+                            let _ = self
+                                .tx
+                                .send(format!("'ip-allowlist' command failed: {error}\r\n").into());
                             success = false;
+                            self.cancellation_token.cancel();
                             break;
                         }
-                    };
-                    if list.is_empty() {
-                        let _ = self.tx.send(b"No allowlist networks provided\r\n".to_vec());
-                        success = false;
-                        break;
                     }
-                    user_data.allowlist = Some(list);
-                    self.commands.insert(ExecCommand::IpAllowlist);
                 }
                 // - `ip-blocklist` requires tunneling/aliasing connections to come from
                 //   specific IP ranges.
-                (
-                    command,
-                    AuthenticatedData::User { user_data, .. }
-                    | AuthenticatedData::Admin { user_data, .. },
-                ) if command.starts_with("ip-blocklist=") => {
-                    if self.commands.contains(ExecCommand::IpBlocklist)
-                        || user_data.blocklist.is_some()
-                    {
-                        let _ = self.tx.send(
-                            b"Invalid option \"ip-blocklist\": duplicated command\r\n".to_vec(),
-                        );
-                        success = false;
-                        break;
-                    }
+                command if command.starts_with("ip-blocklist=") => {
                     let list: Result<Vec<IpNet>, _> = command
                         .trim_start_matches("ip-blocklist=")
                         .split(',')
                         .filter(|a| !a.is_empty())
                         .map(|network| network.parse::<IpNet>())
                         .collect();
-                    let list = match list {
-                        Ok(list) => list,
+                    let mut command = IpBlocklistCommand(list);
+                    match command
+                        .execute(&mut SshCommandContext {
+                            server: &self.server,
+                            auth_data: &mut self.auth_data,
+                            peer: &self.peer,
+                            commands: &mut self.commands,
+                            tx: &self.tx,
+                        })
+                        .await
+                    {
+                        Ok(_) => {}
                         Err(error) => {
-                            let _ = self.tx.send(
-                                format!("Error parsing blocklist networks: {error}\r\n")
-                                    .into_bytes(),
-                            );
+                            debug!(peer = %self.peer, %error, "'ip-blocklist' command failed.");
+                            let _ = self
+                                .tx
+                                .send(format!("'ip-blocklist' command failed: {error}\r\n").into());
                             success = false;
+                            self.cancellation_token.cancel();
                             break;
                         }
-                    };
-                    if list.is_empty() {
-                        let _ = self.tx.send(b"No blocklist networks provided\r\n".to_vec());
-                        success = false;
-                        break;
                     }
-                    user_data.blocklist = Some(list);
-                    self.commands.insert(ExecCommand::IpBlocklist);
                 }
                 // - Unknown command
-                (command, _) => {
+                command => {
                     debug!(
                         peer = %self.peer, %command, role = %self.auth_data, "Invalid SSH command received."
                     );
@@ -1033,6 +851,7 @@ impl Handler for ServerHandler {
                         .tx
                         .send(format!("Error: invalid command {command}...").into_bytes());
                     success = false;
+                    self.cancellation_token.cancel();
                     break;
                 }
             }
@@ -1067,6 +886,7 @@ impl Handler for ServerHandler {
                                     .into_bytes(),
                             );
                             success = false;
+                            self.cancellation_token.cancel();
                         }
                     }
                 }
@@ -1253,7 +1073,10 @@ impl Handler for ServerHandler {
             // Assign HTTP host through config (specified by the usual HTTP/HTTPS ports)
             80 | 443 => {
                 // Handle alias-only mode
-                if user_data.tcp_alias_only {
+                if matches!(
+                    user_data.session_restriction,
+                    UserSessionRestriction::TcpAliasOnly
+                ) {
                     // HTTP host must be alias (to be accessed via local forwarding)
                     if !self.server.is_alias(address) {
                         let error = eyre!("must be alias, not localhost");
@@ -1317,7 +1140,10 @@ impl Handler for ServerHandler {
                         }
                     }
                 // Handle SNI proxy-only mode
-                } else if user_data.sni_proxy_only {
+                } else if matches!(
+                    user_data.session_restriction,
+                    UserSessionRestriction::SniProxyOnly
+                ) {
                     // Assign an HTTP address according to server policies
                     let assigned_host = self
                         .server
@@ -1483,7 +1309,10 @@ impl Handler for ServerHandler {
                     );
                     Ok(false)
                 // Forbid binding TCP on alias-only mode
-                } else if user_data.tcp_alias_only {
+                } else if matches!(
+                    user_data.session_restriction,
+                    UserSessionRestriction::TcpAliasOnly
+                ) {
                     let error = eyre!("session is in alias-only mode");
                     info!(
                         peer = %self.peer, %port, %error,
@@ -1727,7 +1556,10 @@ impl Handler for ServerHandler {
             }
             // Handle HTTP disconnection
             80 | 443 => {
-                if user_data.tcp_alias_only {
+                if matches!(
+                    user_data.session_restriction,
+                    UserSessionRestriction::TcpAliasOnly
+                ) {
                     // Handle TCP alias-only mode
                     if let Some(assigned_alias) = user_data
                         .alias_addressing
@@ -1743,7 +1575,10 @@ impl Handler for ServerHandler {
                     } else {
                         Ok(false)
                     }
-                } else if user_data.sni_proxy_only {
+                } else if matches!(
+                    user_data.session_restriction,
+                    UserSessionRestriction::SniProxyOnly
+                ) {
                     // Handle TCP alias-only mode
                     if let Some(assigned_alias) = user_data
                         .host_addressing

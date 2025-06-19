@@ -2,7 +2,11 @@
 
 ## Unreleased
 
+### Changed
+
+- **BREAKING**: Always disconnect on invalid SSH exec commands.
 - Replace `anyhow` with `color-eyre`.
+- Use `--idle-connection-timeout` for dangling TLS connections.
 
 ## 0.5.4 (2025-06-08)
 
