@@ -177,7 +177,7 @@ mod alpn_challenge_resolver_tests {
     use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
     use tokio_rustls::{LazyConfigAcceptor, TlsConnector};
 
-    use crate::DroppableHandle;
+    use crate::droppable_handle::DroppableHandle;
 
     use super::{AcmeResolver, AlpnChallengeResolver, MockResolver, MockResolverState};
 

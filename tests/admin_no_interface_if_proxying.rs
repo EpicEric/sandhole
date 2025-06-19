@@ -99,7 +99,7 @@ async fn admin_no_interface_if_proxying() {
     assert!(
         session
             .authenticate_publickey(
-                "user",
+                "admin",
                 PrivateKeyWithHashAlg::new(
                     Arc::new(key),
                     session.best_supported_rsa_hash().await.unwrap().flatten()
@@ -144,7 +144,7 @@ async fn admin_no_interface_if_proxying() {
     assert!(
         session
             .authenticate_publickey(
-                "user",
+                "admin",
                 PrivateKeyWithHashAlg::new(
                     Arc::new(key),
                     session.best_supported_rsa_hash().await.unwrap().flatten()

@@ -112,13 +112,47 @@ async fn config_disable_aliasing() {
         .exec(true, "tcp-alias")
         .await
         .expect("shouldn't error synchronously for invalid tcp-alias option");
-    assert!(!session_one.is_closed(), "shouldn't have closed connection");
     let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.recv().await.unwrap() }).await
     else {
         panic!("Timeout waiting for server to reply.");
     };
     assert_eq!(channel_id, channel.id());
-    assert!(!session_one.is_closed(), "shouldn't have closed connection");
+    assert!(
+        timeout(Duration::from_secs(1), session_one).await.is_ok(),
+        "Didn't remove connection after runnning invalid tcp-alias command"
+    );
+    let key = load_secret_key(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        None,
+    )
+    .expect("Missing file key1");
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let ssh_client = SshClientOne(tx);
+    let mut session_one = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
+    assert!(
+        session_one
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session_one
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
+            )
+            .await
+            .expect("SSH authentication failed")
+            .success(),
+        "authentication didn't succeed"
+    );
+    let channel = session_one
+        .channel_open_session()
+        .await
+        .expect("channel_open_session_failed");
     channel
         .exec(
             true,
@@ -134,7 +168,38 @@ async fn config_disable_aliasing() {
         panic!("Timeout waiting for server to reply.");
     };
     assert_eq!(channel_id, channel.id());
-    assert!(!session_one.is_closed(), "shouldn't have closed connection");
+    assert!(
+        timeout(Duration::from_secs(1), session_one).await.is_ok(),
+        "Didn't remove connection after runnning invalid tcp-alias command"
+    );
+    let key = load_secret_key(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        None,
+    )
+    .expect("Missing file key1");
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let ssh_client = SshClientOne(tx);
+    let mut session_one = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
+    assert!(
+        session_one
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session_one
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
+            )
+            .await
+            .expect("SSH authentication failed")
+            .success(),
+        "authentication didn't succeed"
+    );
     assert!(
         session_one
             .tcpip_forward("test.foobar.tld", 80)

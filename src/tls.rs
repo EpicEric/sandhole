@@ -30,7 +30,7 @@ mod peek_sni_and_alpn_tests {
     use tokio::io::{AsyncReadExt, duplex};
     use tokio_rustls::TlsConnector;
 
-    use crate::peek_sni_and_alpn;
+    use super::peek_sni_and_alpn;
 
     #[test_log::test(tokio::test)]
     async fn fails_on_empty_buffer() {

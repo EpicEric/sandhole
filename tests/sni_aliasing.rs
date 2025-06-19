@@ -142,7 +142,7 @@ async fn sni_aliasing() {
     assert!(
         session_one
             .authenticate_publickey(
-                "user",
+                "user1",
                 PrivateKeyWithHashAlg::new(
                     Arc::new(key),
                     session_one
@@ -200,7 +200,7 @@ async fn sni_aliasing() {
     assert!(
         session_two
             .authenticate_publickey(
-                "user1",
+                "user2",
                 PrivateKeyWithHashAlg::new(
                     Arc::new(key),
                     session_two
