@@ -43,12 +43,12 @@ const X_FORWARDED_PORT: &str = "X-Forwarded-Port";
 
 struct TimedResponse {
     response: Response<AxumBody>,
-    log: Option<Box<dyn FnOnce() -> () + Send + Sync + 'static>>,
+    log: Option<Box<dyn FnOnce() + Send + Sync + 'static>>,
 }
 
 struct TimedResponseBody {
     body: AxumBody,
-    log: Option<Box<dyn FnOnce() -> () + Send + Sync + 'static>>,
+    log: Option<Box<dyn FnOnce() + Send + Sync + 'static>>,
 }
 
 impl IntoResponse for TimedResponse {
