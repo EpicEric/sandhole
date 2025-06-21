@@ -988,7 +988,7 @@ impl Handler for ServerHandler {
                 key_fingerprint: &mut self.key_fingerprint,
                 tx: &mut self.tx,
             },
-            address,
+            address.trim(),
             port,
             handle,
         )
@@ -1021,7 +1021,7 @@ impl Handler for ServerHandler {
                 key_fingerprint: &mut self.key_fingerprint,
                 tx: &mut self.tx,
             },
-            address,
+            address.trim(),
             port as u16,
         )
         .await
@@ -1070,9 +1070,9 @@ impl Handler for ServerHandler {
                 cancellation_token: &self.cancellation_token,
                 tx: &mut self.tx,
             },
-            host_to_connect,
+            host_to_connect.trim(),
             port_to_connect,
-            originator_address,
+            originator_address.trim(),
             originator_port as u16,
             channel,
         )

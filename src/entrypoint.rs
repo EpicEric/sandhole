@@ -461,6 +461,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         ssh_port: config.ssh_port.into(),
         force_random_ports: !config.allow_requested_ports,
         disable_http: config.disable_http,
+        disable_https: config.disable_http || config.disable_https,
         disable_sni: config.disable_http || config.disable_https || config.disable_sni,
         disable_tcp: config.disable_tcp,
         disable_aliasing: config.disable_aliasing,

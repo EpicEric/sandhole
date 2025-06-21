@@ -636,22 +636,32 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                                 80 => "".into(),
                                 port => format!(":{port}"),
                             },
-                            address,
-                        )
-                        .into_bytes(),
-                    );
-                    let _ = context.tx.send(
-                        format!(
-                            "Serving HTTPS on https://{}{} for {}\r\n",
-                            &assigned_host,
-                            match context.server.https_port {
-                                443 => "".into(),
-                                port => format!(":{port}"),
+                            if address.is_empty() {
+                                "unspecified address"
+                            } else {
+                                address
                             },
-                            address,
                         )
                         .into_bytes(),
                     );
+                    if !context.server.disable_https {
+                        let _ = context.tx.send(
+                            format!(
+                                "Serving HTTPS on https://{}{} for {}\r\n",
+                                &assigned_host,
+                                match context.server.https_port {
+                                    443 => "".into(),
+                                    port => format!(":{port}"),
+                                },
+                                if address.is_empty() {
+                                    "unspecified address"
+                                } else {
+                                    address
+                                },
+                            )
+                            .into_bytes(),
+                        );
+                    }
                     context
                         .user_data
                         .host_addressing

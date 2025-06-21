@@ -135,6 +135,8 @@ pub(crate) struct SandholeServer {
     pub(crate) force_random_ports: bool,
     // If true, HTTP is disabled.
     pub(crate) disable_http: bool,
+    // If true, HTTPS is disabled.
+    pub(crate) disable_https: bool,
     // If true, SNI is disabled.
     pub(crate) disable_sni: bool,
     // If true, TCP is disabled for all ports except for HTTP.

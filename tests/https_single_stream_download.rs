@@ -3,10 +3,13 @@ use std::{sync::Arc, time::Duration};
 use axum::{
     Router,
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Path, Request},
-    routing::post,
+    extract::{Path, Request, State},
+    response::IntoResponse,
+    routing::get,
 };
 use clap::Parser;
+use http::header::CONTENT_LENGTH;
+use http_body_util::BodyExt;
 use hyper::{StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
@@ -33,10 +36,10 @@ use tokio::{
 use tokio_rustls::TlsConnector;
 use tower::Service;
 
-/// This test ensures that a service can handle multiple big uploads at the same
-/// time (mostly for profiling purposes).
+/// This test ensures that a service can handle a single large download
+/// (mostly for profiling purposes).
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn https_multi_stream_upload() {
+async fn https_single_stream_download() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -80,13 +83,16 @@ async fn https_multi_stream_upload() {
         None,
     )
     .expect("Missing file key1");
-    let ssh_client = SshClient;
+    let file_size = 50_000_000;
+    let mut data = vec![0u8; file_size];
+    rand::rng().fill_bytes(&mut data);
+    let ssh_client = SshClient(Bytes::from_static(data.leak()));
     let mut session = russh::client::connect(
         Arc::new(Config {
             preferred: Preferred {
                 cipher: std::borrow::Cow::Borrowed(&[
-                    russh::cipher::CHACHA20_POLY1305,
-                    // russh::cipher::AES_256_GCM,
+                    // russh::cipher::CHACHA20_POLY1305,
+                    russh::cipher::AES_256_GCM,
                 ]),
                 ..Default::default()
             },
@@ -131,54 +137,58 @@ async fn https_multi_stream_upload() {
             .with_root_certificates(root_store)
             .with_no_client_auth(),
     );
-    let mut data = vec![0u8; 20_000_000];
-    rand::rng().fill_bytes(&mut data);
-    let data: &'static [u8] = data.leak();
-    let mut jh_vec = vec![];
-    for file_size in [7_500_000, 10_000_000, 15_000_000, 20_000_000] {
-        let connector = TlsConnector::from(Arc::clone(&tls_config));
-        let tcp_stream = TcpStream::connect("127.0.0.1:18443")
+    let connector = TlsConnector::from(Arc::clone(&tls_config));
+    let tcp_stream = TcpStream::connect("127.0.0.1:18443")
+        .await
+        .expect("TCP connection failed");
+    let tls_stream = connector
+        .connect("foobar.tld".try_into().unwrap(), tcp_stream)
+        .await
+        .expect("TLS stream failed");
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls_stream))
+        .await
+        .expect("HTTP handshake failed");
+    tokio::spawn(async move {
+        if let Err(error) = conn.await {
+            eprintln!("Connection failed: {error:?}");
+        }
+    });
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/{file_size}"))
+        .header("host", "foobar.tld")
+        .body(Body::empty())
+        .unwrap();
+    let Ok(mut response) = timeout(Duration::from_secs(60), async move {
+        sender
+            .send_request(request)
             .await
-            .expect("TCP connection failed");
-        let tls_stream = connector
-            .connect("foobar.tld".try_into().unwrap(), tcp_stream)
-            .await
-            .expect("TLS stream failed");
-        let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls_stream))
-            .await
-            .expect("HTTP handshake failed");
-        tokio::spawn(async move {
-            if let Err(error) = conn.await {
-                eprintln!("Connection failed: {error:?}");
-            }
-        });
-        let jh = tokio::spawn(async move {
-            let request = Request::builder()
-                .method("POST")
-                .uri(format!("/{file_size}"))
-                .header("host", "foobar.tld")
-                .body(Body::from(&data[..file_size]))
-                .unwrap();
-            let Ok(response) = timeout(Duration::from_secs(60), async move {
-                sender
-                    .send_request(request)
-                    .await
-                    .expect("Error sending HTTP request")
-            })
-            .await
-            else {
-                panic!("Timeout waiting for request to finish.");
-            };
-            assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        });
-        jh_vec.push(jh);
+            .expect("Error sending HTTP request")
+    })
+    .await
+    else {
+        panic!("Timeout waiting for request to finish.");
+    };
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(CONTENT_LENGTH)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        file_size.to_string(),
+        "Content-Length didn't match file size"
+    );
+    let body = response.body_mut();
+    let mut size = 0usize;
+    while let Some(Ok(frame)) = body.frame().await {
+        size += frame.data_ref().unwrap().len();
     }
-    for jh in jh_vec.into_iter() {
-        jh.await.expect("Join handle panicked");
-    }
+    assert_eq!(size, file_size, "Response size didn't match file size");
 }
 
-struct SshClient;
+struct SshClient(Bytes);
 
 impl russh::client::Handler for SshClient {
     type Error = color_eyre::eyre::Error;
@@ -199,17 +209,21 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let router = Router::new().route(
-            "/{file_size}",
-            post(async |Path(file_size): Path<usize>, body: Bytes| {
-                if file_size == body.len() {
-                    StatusCode::NO_CONTENT
-                } else {
-                    StatusCode::BAD_REQUEST
-                }
-            })
-            .layer(DefaultBodyLimit::max(20_000_000)),
-        );
+        let data = self.0.clone();
+        let router = Router::new()
+            .route(
+                "/{file_size}",
+                get(
+                    async |Path(file_size): Path<usize>, State(data): State<Bytes>| {
+                        if file_size > data.len() {
+                            StatusCode::BAD_REQUEST.into_response()
+                        } else {
+                            data.slice(..file_size).into_response()
+                        }
+                    },
+                ),
+            )
+            .with_state(data);
         let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         tokio::spawn(async move {
             Builder::new(TokioExecutor::new())
