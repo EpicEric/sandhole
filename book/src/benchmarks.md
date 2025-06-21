@@ -4,12 +4,12 @@ This page includes some benchmarks comparing Sandhole and competing solutions.
 
 ## Methodology
 
-- Test service: [sandhole-benchmark](https://github.com/EpicEric/sandhole-benchmark) in dev profile.
-- Test client: Postman v11.50.5
-- Proxy server specs:
+- **Test service**: [sandhole-benchmark](https://github.com/EpicEric/sandhole-benchmark) in dev profile.
+- **Test client**: Postman v11.50.5
+- **Proxy server specs**:
   - 2 vCPU (AMD EPYC 7002 series)
   - 2 GB RAM
-- Service-to-proxy latency:
+- **Service-to-proxy latency**:
 
 ```
 --- sandhole.com.br ping statistics ---
@@ -17,12 +17,12 @@ This page includes some benchmarks comparing Sandhole and competing solutions.
 rtt min/avg/max/mdev = 140.542/142.646/146.181/1.102 ms
 ```
 
-- Client-to-proxy latency: Same as above.
-- Times measured through the Postman client, by taking 6 measurements, discarding the first result, and taking an average of the remaining five.
+- **Client-to-proxy latency**: Same as above.
+- **Measurements**: Times reported by the Postman client. First result is discarded, then we take an average of the next five.
 
 ## Results
 
-|                 | sandhole 4dfc112 | sish v2.19.0 | Speedup |
+|                 | sandhole 6850f0a | sish v2.19.0 | Speedup |
 | --------------- | ---------------- | ------------ | ------- |
 | HTTPS GET 10MB  | 3.072s           | 2.655s       | 0.864x  |
 | HTTPS GET 50MB  | 10.766s          | 8.732s       | 0.811x  |

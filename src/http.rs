@@ -2,9 +2,12 @@ use std::{
     error::Error,
     fmt::Debug,
     marker::PhantomData,
+    net::SocketAddr,
+    pin::Pin,
     str::FromStr,
+    sync::Arc,
+    task::{Context, Poll},
     time::{Duration, Instant},
-    {net::SocketAddr, sync::Arc},
 };
 
 use crate::connection_handler::ConnectionHandler;
@@ -38,13 +41,68 @@ const X_FORWARDED_HOST: &str = "X-Forwarded-Host";
 const X_FORWARDED_PROTO: &str = "X-Forwarded-Proto";
 const X_FORWARDED_PORT: &str = "X-Forwarded-Port";
 
+struct TimedResponse {
+    response: Response<AxumBody>,
+    log: Option<Box<dyn FnOnce() -> () + Send + Sync + 'static>>,
+}
+
+struct TimedResponseBody {
+    body: AxumBody,
+    log: Option<Box<dyn FnOnce() -> () + Send + Sync + 'static>>,
+}
+
+impl IntoResponse for TimedResponse {
+    fn into_response(self) -> axum::response::Response {
+        let (parts, body) = self.response.into_parts();
+        Response::from_parts(
+            parts,
+            AxumBody::new(TimedResponseBody {
+                body,
+                log: self.log,
+            }),
+        )
+    }
+}
+
+impl Body for TimedResponseBody {
+    type Data = bytes::Bytes;
+
+    type Error = axum::Error;
+
+    #[inline]
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
+        Pin::new(&mut self.body).poll_frame(cx)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        self.body.size_hint()
+    }
+
+    #[inline]
+    fn is_end_stream(&self) -> bool {
+        self.body.is_end_stream()
+    }
+}
+
+impl Drop for TimedResponseBody {
+    fn drop(&mut self) {
+        if let Some(log) = self.log.take() {
+            (log)()
+        }
+    }
+}
+
 #[derive(Builder)]
-struct HttpLog<'a> {
-    ip: &'a str,
+struct HttpLog {
+    ip: String,
     status: u16,
-    method: &'a str,
-    host: &'a str,
-    uri: &'a str,
+    method: String,
+    host: String,
+    uri: String,
     elapsed_time: Duration,
 }
 
@@ -65,7 +123,7 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
         500..=599 => "31",
         _ => unreachable!(),
     };
-    let method_escape_color = match method {
+    let method_escape_color = match method.as_str() {
         "POST" => "42",
         "PUT" => "43",
         "DELETE" => "41",
@@ -210,7 +268,7 @@ where
     <B as Body>::Error: Error + Send + Sync + 'static,
 {
     match proxy_handler_inner(request, tcp_address, fingerprint, proxy_data).await {
-        Ok(response) => Ok(response),
+        Ok(response) => Ok(response.into_response()),
         Err(error) => Ok(error.into_response()),
     }
 }
@@ -221,7 +279,7 @@ async fn proxy_handler_inner<B, M, H, T>(
     tcp_address: SocketAddr,
     fingerprint: Option<Fingerprint>,
     proxy_data: Arc<ProxyData<M, H, T>>,
-) -> Result<Response<AxumBody>, HttpError>
+) -> Result<TimedResponse, HttpError>
 where
     M: ConnectionGetByHttpHost<Arc<H>>,
     H: ConnectionHandler<T>,
@@ -256,26 +314,27 @@ where
     let method = request.method().to_owned();
     let uri = request.uri().to_owned();
     let http_log_builder = HttpLog::builder()
-        .ip(&ip)
-        .host(&host)
-        .uri(uri.path())
-        .method(method.as_str());
+        .ip(ip.clone())
+        .host(host.clone())
+        .uri(uri.path().into())
+        .method(method.as_str().into());
     // Find the HTTP handler for the given host
     let Some(handler) = conn_manager.get_by_http_host(&host) else {
         // If no handler was found, check if this is a request to the root domain
         if domain_redirect.from == host {
             // If so, redirect to the configured URL
-            let elapsed_time = timer.elapsed();
             let response = Redirect::to(&domain_redirect.to).into_response();
-            http_log(
-                http_log_builder
-                    .status(response.status().as_u16())
-                    .elapsed_time(elapsed_time)
-                    .build(),
-                None,
-                disable_http_logs,
-            );
-            return Ok(response);
+            let http_log_builder = http_log_builder.status(response.status().as_u16());
+            return Ok(TimedResponse {
+                response,
+                log: Some(Box::new(move || {
+                    http_log(
+                        http_log_builder.elapsed_time(timer.elapsed()).build(),
+                        None,
+                        disable_http_logs,
+                    )
+                })),
+            });
         }
         // No handler was found, return 404
         return Err(HttpError::HandlerNotFound);
@@ -296,7 +355,6 @@ where
         // If force-https is true, redirect this HTTP request to HTTPS
         (Protocol::Http { .. }, Some(port), ProxyType::Tunneling)
         | (Protocol::TlsRedirect { to: port, .. }, _, ProxyType::Tunneling) => {
-            let elapsed_time = timer.elapsed();
             let response = Redirect::permanent(
                 format!(
                     "https://{}:{}{}",
@@ -311,15 +369,17 @@ where
                 .as_str(),
             )
             .into_response();
-            http_log(
-                http_log_builder
-                    .status(response.status().as_u16())
-                    .elapsed_time(elapsed_time)
-                    .build(),
-                None,
-                disable_http_logs,
-            );
-            return Ok(response);
+            let http_log_builder = http_log_builder.status(response.status().as_u16());
+            return Ok(TimedResponse {
+                response,
+                log: Some(Box::new(move || {
+                    http_log(
+                        http_log_builder.elapsed_time(timer.elapsed()).build(),
+                        None,
+                        disable_http_logs,
+                    )
+                })),
+            });
         }
         (Protocol::Http { port }, _, _)
         | (Protocol::TlsRedirect { from: port, .. }, _, ProxyType::Aliasing) => ("http", *port),
@@ -387,16 +447,17 @@ where
                 }
                 None => sender.send_request(request).await?,
             };
-            let elapsed_time = timer.elapsed();
-            http_log(
-                http_log_builder
-                    .status(response.status().as_u16())
-                    .elapsed_time(elapsed_time)
-                    .build(),
-                Some(tx),
-                disable_http_logs,
-            );
-            Ok(response.into_response())
+            let http_log_builder = http_log_builder.status(response.status().as_u16());
+            Ok(TimedResponse {
+                response: response.into_response(),
+                log: Some(Box::new(move || {
+                    http_log(
+                        http_log_builder.elapsed_time(timer.elapsed()).build(),
+                        Some(tx),
+                        disable_http_logs,
+                    )
+                })),
+            })
         }
         Version::HTTP_11 | Version::HTTP_2 => {
             // Ensure best-effort compatibility of proxy request with HTTP/1.1 format
@@ -464,15 +525,6 @@ where
                     }
                     None => sender.send_request(request).await?,
                 };
-                let elapsed_time = timer.elapsed();
-                http_log(
-                    http_log_builder
-                        .status(response.status().as_u16())
-                        .elapsed_time(elapsed_time)
-                        .build(),
-                    Some(tx),
-                    disable_http_logs,
-                );
                 // Check if the underlying server accepts the Upgrade request
                 match response.status() {
                     StatusCode::SWITCHING_PROTOCOLS => {
@@ -520,9 +572,31 @@ where
                             });
                         }
                         // Return the response to the client
-                        Ok(response.into_response())
+                        let http_log_builder = http_log_builder.status(response.status().as_u16());
+                        Ok(TimedResponse {
+                            response: response.into_response(),
+                            log: Some(Box::new(move || {
+                                http_log(
+                                    http_log_builder.elapsed_time(timer.elapsed()).build(),
+                                    Some(tx),
+                                    disable_http_logs,
+                                )
+                            })),
+                        })
                     }
-                    _ => Ok(response.into_response()),
+                    _ => {
+                        let http_log_builder = http_log_builder.status(response.status().as_u16());
+                        Ok(TimedResponse {
+                            response: response.into_response(),
+                            log: Some(Box::new(move || {
+                                http_log(
+                                    http_log_builder.elapsed_time(timer.elapsed()).build(),
+                                    Some(tx),
+                                    disable_http_logs,
+                                )
+                            })),
+                        })
+                    }
                 }
             } else {
                 // If Upgrade header is not present, simply handle the request
@@ -552,17 +626,18 @@ where
                     }
                     None => sender.send_request(request).await?,
                 };
-                let elapsed_time = timer.elapsed();
-                http_log(
-                    http_log_builder
-                        .status(response.status().as_u16())
-                        .elapsed_time(elapsed_time)
-                        .build(),
-                    Some(tx),
-                    disable_http_logs,
-                );
                 // Return the received response to the client
-                Ok(response.into_response())
+                let http_log_builder = http_log_builder.status(response.status().as_u16());
+                Ok(TimedResponse {
+                    response: response.into_response(),
+                    log: Some(Box::new(move || {
+                        http_log(
+                            http_log_builder.elapsed_time(timer.elapsed()).build(),
+                            Some(tx),
+                            disable_http_logs,
+                        )
+                    })),
+                })
             }
         }
         version => Err(HttpError::InvalidHttpVersion(version)),
@@ -1380,11 +1455,12 @@ mod proxy_handler_tests {
             ),
         )
         .await;
-        assert!(!logging_rx.is_empty(), "should log after proxying request");
         let response = response.expect("should return response after proxy");
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().frame().await.unwrap().unwrap();
         assert_eq!(body.data_ref(), Some(&Bytes::copy_from_slice(b"Success.")));
+        drop(body);
+        assert!(!logging_rx.is_empty(), "should log after proxying request");
         jh.abort();
     }
 
@@ -1476,12 +1552,13 @@ mod proxy_handler_tests {
             ),
         )
         .await;
-        assert!(!logging_rx.is_empty(), "should log after proxying request");
         let response = response.expect("should return response after proxy");
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body();
         let body = axum::body::to_bytes(body, 32).await.unwrap();
         assert_eq!(body, bytes::Bytes::from("Success."));
+        drop(body);
+        assert!(!logging_rx.is_empty(), "should log after proxying request");
         jh.abort();
     }
 
@@ -1573,12 +1650,13 @@ mod proxy_handler_tests {
             ),
         )
         .await;
-        assert!(!logging_rx.is_empty(), "should log after proxying request");
         let response = response.expect("should return response after proxying request");
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body();
         let body = axum::body::to_bytes(body, 32).await.unwrap();
         assert_eq!(body, bytes::Bytes::from("Success."));
+        drop(body);
+        assert!(!logging_rx.is_empty(), "should log after proxying request");
         jh.abort();
     }
 
@@ -1668,11 +1746,12 @@ mod proxy_handler_tests {
         let (mut websocket, response) = client_async("ws://with.websocket/ws", stream)
             .await
             .unwrap();
+        assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+        drop(response);
         assert!(
             !logging_rx.is_empty(),
             "should log after upgrade proxying request"
         );
-        assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
         assert_eq!(
             websocket.next().await.unwrap().unwrap().to_text().unwrap(),
             "Success."
@@ -1785,7 +1864,6 @@ mod proxy_handler_tests {
             .send_request(request)
             .await
             .expect("should return response after proxy");
-        assert!(!logging_rx.is_empty(), "should log after proxying request");
         assert_eq!(response.status(), StatusCode::OK);
         let body = String::from_utf8(
             response
@@ -1798,6 +1876,8 @@ mod proxy_handler_tests {
         )
         .unwrap();
         assert_eq!(body, "Success.");
+        drop(body);
+        assert!(!logging_rx.is_empty(), "should log after proxying request");
         jh.abort();
         jh2.abort();
         jh3.abort();

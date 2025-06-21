@@ -8,6 +8,10 @@
 - **BREAKING**: Use `--idle-connection-timeout` for dangling TLS connections instead of `--tcp-connection-timeout`.
 - Replace `anyhow` with `color-eyre`.
 
+### Fixed
+
+- Defer HTTP logs to when body is fully transmitted.
+
 ## 0.5.4 (2025-06-08)
 
 ### Added
