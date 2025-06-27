@@ -91,8 +91,8 @@ async fn https_single_stream_download() {
         Arc::new(Config {
             preferred: Preferred {
                 cipher: std::borrow::Cow::Borrowed(&[
-                    // russh::cipher::CHACHA20_POLY1305,
-                    russh::cipher::AES_256_GCM,
+                    russh::cipher::CHACHA20_POLY1305,
+                    // russh::cipher::AES_256_GCM,
                 ]),
                 ..Default::default()
             },

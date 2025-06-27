@@ -33,5 +33,5 @@ Sandhole is in active development. Contributions are welcome, but try it in prod
 - [sish](https://github.com/antoniomika/sish) - Main inspiration for this project. Written in Golang.
 - [rlt](https://github.com/kaichaosun/rlt) - Uses localtunnel's protocol instead of SSH. Written in Rust.
 - [wstunnel](https://github.com/erebe/wstunnel) - Uses its WebSocket-based protocol instead of SSH. Written in Rust.
-- [rathole](https://github.com/rapiz1/rathole) - A highly configurable reverse proxy with NAT traversal and a great name. Written in Rust.
+- [rathole](https://github.com/rathole-org/rathole) - A highly configurable reverse proxy with NAT traversal and a great name. Written in Rust.
 - [sshuttle](https://github.com/sshuttle/sshuttle) - A smarter proxy service, also based on SSH, that only needs Python in the server. Written in Python.

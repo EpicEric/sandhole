@@ -4,11 +4,8 @@ This page includes some benchmarks comparing Sandhole and competing solutions.
 
 ## Methodology
 
-- **Test service**: [sandhole-benchmark](https://github.com/EpicEric/sandhole-benchmark) in dev profile.
-- **Test client**: Postman v11.50.5
-- **Proxy server specs**:
-  - 2 vCPU (AMD EPYC 7002 series)
-  - 2 GB RAM
+- **Test service**: [sandhole-benchmark/service](https://github.com/EpicEric/sandhole-benchmark) in dev profile.
+- **Test client**: [sandhole-benchmark/measure](https://github.com/EpicEric/sandhole-benchmark) in dev profile.
 - **Service-to-proxy latency**:
 
 ```
@@ -18,13 +15,15 @@ rtt min/avg/max/mdev = 140.542/142.646/146.181/1.102 ms
 ```
 
 - **Client-to-proxy latency**: Same as above.
-- **Measurements**: Times reported by the Postman client. First result is discarded, then we take an average of the next five.
+- **Measurements**: Average of five results, discarding outliers.
 
 ## Results
 
-|                 | sandhole 6850f0a | sish v2.19.0 | Speedup |
-| --------------- | ---------------- | ------------ | ------- |
-| HTTPS GET 10MB  | 3.072s           | 2.655s       | 0.864x  |
-| HTTPS GET 50MB  | 10.766s          | 8.732s       | 0.811x  |
-| HTTPS POST 10MB | 3.144s           | 4.746s       | 1.510x  |
-| HTTPS POST 50MB | 10.582s          | 14.902s      | 1.408x  |
+|                                | sandhole d6fc28d | sish v2.19.0 | Speedup |
+| ------------------------------ | ---------------- | ------------ | ------- |
+| HTTPS GET 10MB                 | 3.853s           | 2.697s       | 0.700x  |
+| HTTPS GET 10MB x5 concurrency  | 11.245s          | 10.041s      | 0.893x  |
+| HTTPS GET 50MB                 | 11.832s          | 8.790s       | 0.743x  |
+| HTTPS POST 10MB                | 3.539s           | 4.811s       | 1.359x  |
+| HTTPS POST 10MB x5 concurrency | 9.748s           | 11.556s      | 1.186x  |
+| HTTPS POST 50MB                | 11.700s          | 14.400s      | 1.231x  |
