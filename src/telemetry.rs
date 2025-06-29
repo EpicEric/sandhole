@@ -3,6 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use ahash::RandomState;
 use dashmap::DashMap;
 
 use crate::tcp_alias::TcpAlias;
@@ -121,25 +122,25 @@ mod counter_tests {
 // Metadata to display on the admin interface.
 pub(crate) struct Telemetry {
     // Connections per minute for each SSH alias.
-    ssh_connections_per_minute: DashMap<String, Counter>,
+    ssh_connections_per_minute: DashMap<String, Counter, RandomState>,
     // Requests per minute for each HTTP host.
-    http_requests_per_minute: DashMap<String, Counter>,
+    http_requests_per_minute: DashMap<String, Counter, RandomState>,
     // Connections per minute for each SNI host.
-    sni_connections_per_minute: DashMap<String, Counter>,
+    sni_connections_per_minute: DashMap<String, Counter, RandomState>,
     // Connections per minute for each TCP port.
-    tcp_connections_per_minute: DashMap<u16, Counter>,
+    tcp_connections_per_minute: DashMap<u16, Counter, RandomState>,
     // Connections per minute for each local-forwarded alias.
-    alias_connections_per_minute: DashMap<TcpAlias, Counter>,
+    alias_connections_per_minute: DashMap<TcpAlias, Counter, RandomState>,
 }
 
 impl Telemetry {
     pub(crate) fn new() -> Self {
         Telemetry {
-            ssh_connections_per_minute: DashMap::new(),
-            http_requests_per_minute: DashMap::new(),
-            sni_connections_per_minute: DashMap::new(),
-            tcp_connections_per_minute: DashMap::new(),
-            alias_connections_per_minute: DashMap::new(),
+            ssh_connections_per_minute: DashMap::default(),
+            http_requests_per_minute: DashMap::default(),
+            sni_connections_per_minute: DashMap::default(),
+            tcp_connections_per_minute: DashMap::default(),
+            alias_connections_per_minute: DashMap::default(),
         }
     }
 
@@ -189,7 +190,7 @@ impl Telemetry {
     }
 
     // Return data on all SSH connections per minute.
-    pub(crate) fn get_ssh_connections_per_minute(&self) -> HashMap<String, f64> {
+    pub(crate) fn get_ssh_connections_per_minute(&self) -> HashMap<String, f64, RandomState> {
         self.ssh_connections_per_minute
             .iter_mut()
             .map(|mut entry| {
@@ -200,7 +201,7 @@ impl Telemetry {
     }
 
     // Return data on all HTTP requests per minute.
-    pub(crate) fn get_http_requests_per_minute(&self) -> HashMap<String, f64> {
+    pub(crate) fn get_http_requests_per_minute(&self) -> HashMap<String, f64, RandomState> {
         self.http_requests_per_minute
             .iter_mut()
             .map(|mut entry| {
@@ -211,7 +212,7 @@ impl Telemetry {
     }
 
     // Return data on all HTTP requests per minute.
-    pub(crate) fn get_sni_connections_per_minute(&self) -> HashMap<String, f64> {
+    pub(crate) fn get_sni_connections_per_minute(&self) -> HashMap<String, f64, RandomState> {
         self.sni_connections_per_minute
             .iter_mut()
             .map(|mut entry| {
@@ -222,7 +223,7 @@ impl Telemetry {
     }
 
     // Return data on all TCP connections per minute.
-    pub(crate) fn get_tcp_connections_per_minute(&self) -> HashMap<u16, f64> {
+    pub(crate) fn get_tcp_connections_per_minute(&self) -> HashMap<u16, f64, RandomState> {
         self.tcp_connections_per_minute
             .iter_mut()
             .map(|mut entry| {
@@ -233,7 +234,7 @@ impl Telemetry {
     }
 
     // Return data on all alias connections per minute.
-    pub(crate) fn get_alias_connections_per_minute(&self) -> HashMap<TcpAlias, f64> {
+    pub(crate) fn get_alias_connections_per_minute(&self) -> HashMap<TcpAlias, f64, RandomState> {
         self.alias_connections_per_minute
             .iter_mut()
             .map(|mut entry| {

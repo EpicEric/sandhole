@@ -1,7 +1,7 @@
 use std::{
     borrow::Borrow,
     net::SocketAddr,
-    sync::{Arc, atomic::Ordering},
+    sync::{Arc, Mutex, atomic::Ordering},
 };
 
 use color_eyre::eyre::eyre;
@@ -18,7 +18,6 @@ use russh::{
 };
 use tokio::{
     io::copy_bidirectional_with_sizes,
-    sync::Mutex,
     time::{sleep, timeout},
 };
 use tokio_util::sync::CancellationToken;
@@ -342,7 +341,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                 match context.auth_data {
                     // Serve SSH for unauthed user, then add disconnection timeout if this is the last proxy connection
                     AuthenticatedData::None { proxy_count } => {
-                        context.timeout_handle.lock().await.take();
+                        context.timeout_handle.lock().unwrap().take();
                         proxy_count.fetch_add(1, Ordering::Release);
                         let proxy_count = Arc::clone(proxy_count);
                         let timeout_handle = Arc::clone(context.timeout_handle);
@@ -377,7 +376,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                                 }
                             }
                             if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
-                                *timeout_handle.lock().await =
+                                *timeout_handle.lock().unwrap() =
                                     Some(DroppableHandle(tokio::spawn(async move {
                                         sleep(unproxied_connection_timeout).await;
                                         cancellation_token.cancel();
@@ -787,14 +786,11 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
             .conn_manager()
             .get_by_http_host(address)
         {
-            if handler
-                .can_alias(
-                    context.peer.ip(),
-                    context.peer.port(),
-                    context.key_fingerprint.as_ref(),
-                )
-                .await
-            {
+            if handler.can_alias(
+                context.peer.ip(),
+                context.peer.port(),
+                context.key_fingerprint.as_ref(),
+            ) {
                 let peer = *context.peer;
                 let fingerprint = *context.key_fingerprint;
                 let proxy_data = Arc::clone(&context.server.aliasing_proxy_data);
@@ -810,7 +806,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 match context.auth_data {
                     // Serve HTTP for unauthed user, then add disconnection timeout if this is the last proxy connection
                     AuthenticatedData::None { proxy_count } => {
-                        context.timeout_handle.lock().await.take();
+                        context.timeout_handle.lock().unwrap().take();
                         proxy_count.fetch_add(1, Ordering::Release);
                         let proxy_count = Arc::clone(proxy_count);
                         let timeout_handle = Arc::clone(context.timeout_handle);
@@ -829,7 +825,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                                 }
                             }
                             if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
-                                *timeout_handle.lock().await =
+                                *timeout_handle.lock().unwrap() =
                                     Some(DroppableHandle(tokio::spawn(async move {
                                         sleep(unproxied_connection_timeout).await;
                                         cancellation_token.cancel();
@@ -1008,7 +1004,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                 match context.auth_data {
                     // Serve TCP for unauthed user, then add disconnection timeout if this is the last proxy connection
                     AuthenticatedData::None { proxy_count } => {
-                        context.timeout_handle.lock().await.take();
+                        context.timeout_handle.lock().unwrap().take();
                         proxy_count.fetch_add(1, Ordering::Release);
                         let proxy_count = Arc::clone(proxy_count);
                         let timeout_handle = Arc::clone(context.timeout_handle);
@@ -1043,7 +1039,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                                 }
                             }
                             if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
-                                *timeout_handle.lock().await =
+                                *timeout_handle.lock().unwrap() =
                                     Some(DroppableHandle(tokio::spawn(async move {
                                         sleep(unproxied_connection_timeout).await;
                                         cancellation_token.cancel();
@@ -1304,7 +1300,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                 match context.auth_data {
                     // Serve TCP for unauthed user, then add disconnection timeout if this is the last proxy connection
                     AuthenticatedData::None { proxy_count } => {
-                        context.timeout_handle.lock().await.take();
+                        context.timeout_handle.lock().unwrap().take();
                         proxy_count.fetch_add(1, Ordering::Release);
                         let proxy_count = Arc::clone(proxy_count);
                         let timeout_handle = Arc::clone(context.timeout_handle);
@@ -1339,7 +1335,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                                 }
                             }
                             if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
-                                *timeout_handle.lock().await =
+                                *timeout_handle.lock().unwrap() =
                                     Some(DroppableHandle(tokio::spawn(async move {
                                         sleep(unproxied_connection_timeout).await;
                                         cancellation_token.cancel();

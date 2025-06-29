@@ -96,14 +96,14 @@ impl SshCommand for AllowedFingerprintsCommand {
                     return Err(eyre!("not compatible with SNI proxy"));
                 }
                 user_data.session_restriction = UserSessionRestriction::TcpAliasOnly;
-                user_data.http_data.write().await.is_aliasing = true;
+                user_data.http_data.write().unwrap().is_aliasing = true;
                 // Create a set from the provided list of fingerprints
                 let set = mem::replace(&mut self.0, Ok(Default::default()))?;
                 if set.is_empty() {
                     return Err(eyre!("no fingerprints provided"));
                 }
                 // Create a validation closure that verifies that the fingerprint is in our new set
-                *user_data.allow_fingerprint.write().await =
+                *user_data.allow_fingerprint.write().unwrap() =
                     Box::new(move |fingerprint| fingerprint.is_some_and(|fp| set.contains(fp)));
                 // Reject TCP ports
                 if !context
@@ -165,7 +165,7 @@ impl SshCommand for TcpAliasCommand {
                     return Err(eyre!("not compatible with SNI proxy"));
                 }
                 user_data.session_restriction = UserSessionRestriction::TcpAliasOnly;
-                user_data.http_data.write().await.is_aliasing = true;
+                user_data.http_data.write().unwrap().is_aliasing = true;
                 // Reject TCP ports
                 if !context
                     .server
@@ -217,7 +217,7 @@ impl SshCommand for ForceHttpsCommand {
                 user_data
                     .http_data
                     .write()
-                    .await
+                    .unwrap()
                     .redirect_http_to_https_port = Some(context.server.https_port);
                 context.commands.insert(self.flag());
                 Ok(())
@@ -240,7 +240,7 @@ impl SshCommand for Http2Command {
         }
         match context.auth_data {
             AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
-                user_data.http_data.write().await.http2 = true;
+                user_data.http_data.write().unwrap().http2 = true;
                 context.commands.insert(self.flag());
                 Ok(())
             }

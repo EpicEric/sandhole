@@ -22,19 +22,28 @@ Host mysshserver.com
 
 Websockets are always enabled for HTTP services.
 
+## How do I retrieve proxy information for my HTTP service?
+
+You can use the standard proxy headers set by Sandhole:
+
+- `X-Forwarded-For`: Client IP address.
+- `X-Forwarded-Host`: Original hostname header.
+- `X-Forwarded-Proto`: Protocol (`http` or `https`).
+- `X-Forwarded-Port`: Proxy port number.
+
 ## What if I need to run another HTTP/HTTPS service on the machine instead of Sandhole?
 
 It's simple: just let Sandhole take care of that for you! Nothing stops you from connecting to Sandhole on localhost, and just like any reverse proxy, it will redirect the traffic appropriately for you.
 
 ## How do I squeeze out more performance?
 
-The biggest bottleneck in Sandhole is SSH message encryption and decryption. If both client and server support hardware instructions for AES (i.e. most x64 processors), you should prefer the AES-GCM cypher by passing the `-c aes256-gcm@openssh.com` flag to your OpenSSH client, at the cost of [revealing packet lengths to potential attackers](https://infosec.mozilla.org/guidelines/openssh#ciphers-and-algorithms-choice).
+If both client and server support hardware instructions for AES (i.e. most x64 processors), you should prefer the AES-GCM cipher by passing the `-c aes256-gcm@openssh.com` flag to your OpenSSH client, as it's generally faster. For ARM processors running a modern version of OpenSSH, `-c chacha20-poly1305@openssh.com` might be the faster cipher out of the two options.
 
-For ARM processors running a modern version of OpenSSH, `chacha20-poly1305@openssh.com` should be the faster cypher out of the two options.
+Another option is to use compression for HTTP services (such as gzip), in order to reduce the amount of data that has to be encrypted.
 
 ## How do I disable HTTP/TCP/aliasing?
 
-With the `--disable--http`, `--disable-tcp`, and `--disable-aliasing` [CLI flags](./cli.md) respectively. Note that you cannot disable all three at once, as that would remove all of Sandhole's functionality.
+With the `--disable--http`, `--disable-tcp`, and `--disable-aliasing` [CLI flags](./cli.md) respectively. Note that you cannot disable all three at once, as that would remove all of Sandhole's functionality. You can also disable HTTPS and SNI with `--disable-https` and `--disable-sni`, respectively.
 
 ## How do I prevent multiple services from load-balancing?
 

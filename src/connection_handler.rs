@@ -26,12 +26,7 @@ pub(crate) trait ConnectionHandler<T: Sync> {
 
     // Whether the given credentials can create an aliasing channel to this handler.
     #[expect(clippy::needless_lifetimes)]
-    async fn can_alias<'a>(
-        &self,
-        ip: IpAddr,
-        port: u16,
-        fingerprint: Option<&'a Fingerprint>,
-    ) -> bool;
+    fn can_alias<'a>(&self, ip: IpAddr, port: u16, fingerprint: Option<&'a Fingerprint>) -> bool;
 
     // Return an aliasing channel for this handler.
     #[expect(clippy::needless_lifetimes)]
@@ -43,5 +38,5 @@ pub(crate) trait ConnectionHandler<T: Sync> {
     ) -> color_eyre::Result<T>;
 
     // Returns HTTP-specific data for this handler.
-    async fn http_data(&self) -> Option<ConnectionHttpData>;
+    fn http_data(&self) -> Option<ConnectionHttpData>;
 }

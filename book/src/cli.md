@@ -162,7 +162,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
       <b>--disable-http</b>
           Disable all HTTP tunneling. By default, this is enabled globally
 
-      <b>--disable-http</b>
+      <b>--disable-https</b>
           Disable all HTTPS tunneling. By default, this is enabled globally
 
       <b>--disable-sni</b>
@@ -234,11 +234,11 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           unknown IPs to connect, unless --ip-allowlist is set
 
       <b>--buffer-size</b> &lt;SIZE&gt;
-          Size to use for bidirectional buffers.
+          Size to use for bidirectional buffers, in bytes.
 
           A higher value will lead to higher memory consumption.
 
-          [default: 32KB]
+          [default: 32768B]
 
       <b>--idle-connection-timeout</b> &lt;DURATION&gt;
           Grace period for dangling/unauthenticated connections before they are

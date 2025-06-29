@@ -771,11 +771,7 @@ fn handle_https_connection(
         };
         let tunnel_handler = sandhole.http.get(&sni);
         let is_http2 = match tunnel_handler.as_ref() {
-            Some(conn) => conn
-                .http_data()
-                .await
-                .map(|data| data.http2)
-                .unwrap_or_default(),
+            Some(conn) => conn.http_data().map(|data| data.http2).unwrap_or_default(),
             None => false,
         };
         let server_config = if is_http2 {

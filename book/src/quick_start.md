@@ -49,3 +49,12 @@ By default, this will expose ports 80 (for HTTP), 443 (for HTTPS), and 2222 (for
 ```
 
 Now you're ready to dig sandholes like a crab! 🦀
+
+## 4. Next steps
+
+Once Sandhole is up and running, you should:
+
+1. [**Customize settings**](./configuration.md) - Adjust configuration options for your deployment.
+2. [**Set up authentication**](./configuration.md#adding-users-and-admins) - Add SSH public keys for users and admins.
+3. [**Configure services**](./exposing_your_first_service.md) - Use SSH tunneling to expose your first service.
+4. [**Access admin interface**](./admin_interface.md) - Connect via SSH as an admin user for system management.

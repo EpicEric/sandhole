@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+use ahash::RandomState;
 use async_speed_limit::{Limiter, Resource, clock::StandardClock};
 use russh::{ChannelStream, keys::ssh_key::Fingerprint, server::Msg};
 use tokio_util::sync::CancellationToken;
@@ -71,7 +72,7 @@ struct SystemData {
 }
 
 // A list of sessions and their cancelation channels.
-type SessionMap = (Limiter, HashMap<usize, CancellationToken>);
+type SessionMap = (Limiter, HashMap<usize, CancellationToken, RandomState>);
 // A generic table with data for the admin interface.
 type DataTable<K, V> = Arc<RwLock<BTreeMap<K, V>>>;
 // Helper type for HTTP proxy data types.
@@ -86,7 +87,7 @@ pub(crate) struct SandholeServer {
     // A unique ID assigned for each SSH session.
     pub(crate) session_id: AtomicUsize,
     // A map of all sessions for a given user authenticated with a username+password pair.
-    pub(crate) sessions_password: Mutex<HashMap<String, SessionMap>>,
+    pub(crate) sessions_password: Mutex<HashMap<String, SessionMap, RandomState>>,
     // A map of all sessions for a given user authenticated with a public key.
     pub(crate) sessions_publickey: Mutex<BTreeMap<Fingerprint, SessionMap>>,
     // The map for forwarded SSH connections.

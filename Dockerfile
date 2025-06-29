@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM rust:1.87.0-alpine3.22 AS builder
+FROM --platform=$BUILDPLATFORM rust:1.88.0-alpine3.22 AS builder
 ENV PKGCONFIG_SYSROOTDIR=/
 RUN apk add --no-cache musl-dev libressl-dev perl build-base zig
 RUN cargo install --locked cargo-zigbuild
@@ -7,7 +7,6 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock .
 RUN mkdir src \
   && echo "fn main() {}" > src/main.rs \
-  && cargo fetch \
   && cargo zigbuild --release --locked --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl \
   && rm src/main.rs
 COPY src ./src

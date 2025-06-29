@@ -6,6 +6,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use ahash::RandomState;
 use bon::Builder;
 use dashmap::DashMap;
 use rand::{rng, seq::IndexedRandom};
@@ -37,8 +38,8 @@ pub(crate) struct ConnectionMap<K: Eq + Hash, H, R = DummyConnectionMapReactor> 
     // Policy on how to handle new services getting added to this map.
     load_balancing: LoadBalancing,
     // The actual data structure storing connections, selected by key.
-    #[builder(skip = DashMap::new())]
-    map: DashMap<K, Vec<ConnectionMapEntry<H>>>,
+    #[builder(skip = DashMap::default())]
+    map: DashMap<K, Vec<ConnectionMapEntry<H>>, RandomState>,
     // Service to generate new QuotaTokens.
     quota_handler: Arc<Box<dyn QuotaHandler + Send + Sync>>,
     // Optional callable to send data to when the list of connection keys changes.

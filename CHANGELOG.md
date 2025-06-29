@@ -6,6 +6,7 @@
 
 - **BREAKING**: Always disconnect on invalid SSH exec commands.
 - **BREAKING**: Use `--idle-connection-timeout` for dangling TLS connections instead of `--tcp-connection-timeout`.
+- Make performance improvements.
 - Replace `anyhow` with `color-eyre`.
 
 ### Fixed

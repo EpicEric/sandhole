@@ -4,7 +4,7 @@ use std::{
     mem,
     net::{IpAddr, SocketAddr},
     sync::{
-        Arc,
+        Arc, Mutex, RwLock,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -29,6 +29,7 @@ use crate::{
     tcp_alias::TcpAlias,
 };
 
+use ahash::RandomState;
 use async_speed_limit::{Limiter, Resource, clock::StandardClock};
 use enumflags2::BitFlags;
 use ipnet::IpNet;
@@ -38,10 +39,7 @@ use russh::{
     server::{Auth, Handler, Msg, Session},
 };
 use tokio::{
-    sync::{
-        Mutex, RwLock,
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
-    },
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
     time::{sleep, timeout},
 };
 use tokio_util::sync::CancellationToken;
@@ -99,13 +97,13 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
         port: u16,
     ) -> color_eyre::Result<Resource<ChannelStream<Msg>, StandardClock>> {
         // Check if this IP is not blocked
-        if self
+        let tunneling_allowed = self
             .ip_filter
             .read()
-            .await
+            .unwrap()
             .as_ref()
-            .is_none_or(|filter| filter.is_allowed(ip))
-        {
+            .is_none_or(|filter| filter.is_allowed(ip));
+        if tunneling_allowed {
             let channel = self
                 .handle
                 .channel_open_forwarded_tcpip(
@@ -122,20 +120,15 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
         }
     }
 
-    async fn can_alias(
-        &self,
-        ip: IpAddr,
-        _port: u16,
-        fingerprint: Option<&'_ Fingerprint>,
-    ) -> bool {
+    fn can_alias(&self, ip: IpAddr, _port: u16, fingerprint: Option<&'_ Fingerprint>) -> bool {
         // Check if this IP is not blocked for the alias
         self.ip_filter
             .read()
-            .await
+            .unwrap()
             .as_ref()
             .is_none_or(|filter| filter.is_allowed(ip))
             // Check if the given fingerprint is allowed to local-forward this alias
-            && (self.allow_fingerprint.read().await)(fingerprint)
+            && (self.allow_fingerprint.read().unwrap())(fingerprint)
     }
 
     async fn aliasing_channel(
@@ -144,7 +137,7 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
         port: u16,
         fingerprint: Option<&'_ Fingerprint>,
     ) -> color_eyre::Result<Resource<ChannelStream<Msg>, StandardClock>> {
-        if self.can_alias(ip, port, fingerprint).await {
+        if self.can_alias(ip, port, fingerprint) {
             let channel = self
                 .handle
                 .channel_open_forwarded_tcpip(
@@ -161,8 +154,8 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
         }
     }
 
-    async fn http_data(&self) -> Option<ConnectionHttpData> {
-        Some(self.http_data.as_ref()?.read().await.clone())
+    fn http_data(&self) -> Option<ConnectionHttpData> {
+        Some(self.http_data.as_ref()?.read().unwrap().clone())
     }
 }
 
@@ -188,11 +181,11 @@ pub(crate) struct UserData {
     // Identifier for the user, used for creating quota tokens.
     pub(crate) quota_key: TokenHolder,
     // Map to keep track of opened host-based connections (HTTP and SSH), to clean up when the forwarding is canceled.
-    pub(crate) host_addressing: HashMap<TcpAlias, String>,
+    pub(crate) host_addressing: HashMap<TcpAlias, String, RandomState>,
     // Map to keep track of opened port-based connections (TCP), to clean up when the forwarding is canceled.
-    pub(crate) port_addressing: HashMap<TcpAlias, u16>,
+    pub(crate) port_addressing: HashMap<TcpAlias, u16, RandomState>,
     // Map to keep track of opened alias-based connections (aliases), to clean up when the forwarding is canceled.
-    pub(crate) alias_addressing: HashMap<TcpAlias, TcpAlias>,
+    pub(crate) alias_addressing: HashMap<TcpAlias, TcpAlias, RandomState>,
     // IPs allowed to connect to this user's services.
     pub(crate) allowlist: Option<Vec<IpNet>>,
     // IPs disallowed from connecting to this user's services.
@@ -501,7 +494,7 @@ impl Handler for ServerHandler {
                     // Otherwise, the connection will be canceled upon expiration
                     let cancellation_token = self.cancellation_token.clone();
                     let timeout = self.server.idle_connection_timeout;
-                    *self.timeout_handle.lock().await =
+                    *self.timeout_handle.lock().unwrap() =
                         Some(DroppableHandle(tokio::spawn(async move {
                             sleep(timeout).await;
                             cancellation_token.cancel();
@@ -867,7 +860,7 @@ impl Handler for ServerHandler {
                         blocklist,
                     }) {
                         Ok(ip_filter) => {
-                            *user_data.ip_filter.write().await = Some(ip_filter);
+                            *user_data.ip_filter.write().unwrap() = Some(ip_filter);
                         }
                         Err(error) => {
                             let _ = self.tx.send(

@@ -5,6 +5,7 @@ use crate::{
     droppable_handle::DroppableHandle, ip::IpFilter, reactor::TcpReactor, ssh::SshTunnelHandler,
     telemetry::Telemetry,
 };
+use ahash::RandomState;
 use bon::Builder;
 use color_eyre::eyre::Context;
 use dashmap::DashMap;
@@ -17,8 +18,8 @@ pub(crate) struct TcpHandler {
     // Address to listen to when creating sockets.
     listen_address: IpAddr,
     // Map containing spawned tasks of connections for each socket.
-    #[builder(skip = DashMap::new())]
-    sockets: DashMap<u16, DroppableHandle<()>>,
+    #[builder(skip = DashMap::default())]
+    sockets: DashMap<u16, DroppableHandle<()>, RandomState>,
     // Connection map to assign a tunneling service for each incoming connection.
     conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
     // Telemetry server to keep track of the total connections.

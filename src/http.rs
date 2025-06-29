@@ -339,7 +339,7 @@ where
         // No handler was found, return 404
         return Err(HttpError::HandlerNotFound);
     };
-    let http_data = handler.http_data().await;
+    let http_data = handler.http_data();
     let redirect_http_to_https_port =
         http_data
             .as_ref()
@@ -465,7 +465,7 @@ where
             request
                 .headers_mut()
                 .entry(HOST)
-                .or_insert_with(|| host.clone().try_into().unwrap());
+                .or_insert_with(|| host.try_into().unwrap());
             // -> Change URI to only include path and query
             *request.uri_mut() = request
                 .uri()

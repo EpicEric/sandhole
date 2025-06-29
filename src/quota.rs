@@ -1,5 +1,6 @@
 use std::{hash::Hash, num::NonZero, sync::Arc};
 
+use ahash::RandomState;
 use dashmap::DashMap;
 #[cfg(test)]
 use mockall::automock;
@@ -85,14 +86,14 @@ pub(crate) struct QuotaMap {
     // The maximum quota for each user.
     max_quota: NonZero<u32>,
     // The structure storing data for each user.
-    map: DashMap<UserIdentification, u32>,
+    map: DashMap<UserIdentification, u32, RandomState>,
 }
 
 impl QuotaMap {
     pub(crate) fn new(max_quota: NonZero<u32>) -> Self {
         QuotaMap {
             max_quota,
-            map: DashMap::new(),
+            map: DashMap::default(),
         }
     }
 }
