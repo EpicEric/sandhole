@@ -5,6 +5,7 @@ use std::{
 
 use ahash::RandomState;
 use dashmap::DashMap;
+use tracing::debug;
 
 use crate::tcp_alias::TcpAlias;
 
@@ -146,6 +147,7 @@ impl Telemetry {
 
     // Take into account an SSH connection to the given hostname.
     pub(crate) fn add_ssh_connection(&self, alias: String) {
+        debug!(monotonic_counter.ssh_connections = 1, %alias);
         self.ssh_connections_per_minute
             .entry(alias)
             .or_insert_with(|| Counter::new(Duration::from_secs(120), Duration::from_secs(60)))
@@ -155,6 +157,7 @@ impl Telemetry {
 
     // Take into account an HTTP request to the given hostname.
     pub(crate) fn add_http_request(&self, hostname: String) {
+        debug!(monotonic_counter.http_requests = 1, %hostname);
         self.http_requests_per_minute
             .entry(hostname)
             .or_insert_with(|| Counter::new(Duration::from_secs(120), Duration::from_secs(60)))
@@ -164,6 +167,7 @@ impl Telemetry {
 
     // Take into account an SNI request to the given hostname.
     pub(crate) fn add_sni_connection(&self, hostname: String) {
+        debug!(monotonic_counter.sni_connections = 1, %hostname);
         self.sni_connections_per_minute
             .entry(hostname)
             .or_insert_with(|| Counter::new(Duration::from_secs(120), Duration::from_secs(60)))
@@ -173,6 +177,7 @@ impl Telemetry {
 
     // Take into account a TCP connection to the given port.
     pub(crate) fn add_tcp_connection(&self, port: u16) {
+        debug!(monotonic_counter.tcp_connections = 1, %port);
         self.tcp_connections_per_minute
             .entry(port)
             .or_insert_with(|| Counter::new(Duration::from_secs(120), Duration::from_secs(60)))
@@ -182,6 +187,7 @@ impl Telemetry {
 
     // Take into account a local-forwarded connection to the given alias.
     pub(crate) fn add_alias_connection(&self, alias: TcpAlias) {
+        debug!(monotonic_counter.alias_connections = 1, %alias);
         self.alias_connections_per_minute
             .entry(alias)
             .or_insert_with(|| Counter::new(Duration::from_secs(120), Duration::from_secs(60)))

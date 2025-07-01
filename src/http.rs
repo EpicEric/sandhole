@@ -34,7 +34,7 @@ use tokio::{
     io::{AsyncRead, AsyncWrite, copy_bidirectional_with_sizes},
     time::timeout,
 };
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 const X_FORWARDED_HOST: &str = "X-Forwarded-Host";
@@ -115,6 +115,7 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
         uri,
         elapsed_time,
     } = data;
+    debug!(histogram.http_elapsed_time = elapsed_time.as_secs_f64(), %status, %method, %host, %uri, %ip);
     let status_escape_color = match status {
         100..=199 => "37",
         200..=299 => "34",
@@ -135,21 +136,16 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
         // GET or other
         _ => "44",
     };
+    let duration = pretty_duration::pretty_duration(&elapsed_time, None);
     let line = format!(
-        "\x1b[2m{}\x1b[22m \x1b[{}m[{}] \x1b[0;1;30;{}m {} \x1b[0m {} => {} \x1b[2m({}) {}\x1b[0m\r\n",
-        chrono::Utc::now().to_rfc3339(),
-        status_escape_color,
-        status,
-        method_escape_color,
-        method,
-        host,
-        uri,
-        ip,
-        pretty_duration::pretty_duration(&elapsed_time, None)
+        "\x1b[{status_escape_color}m[{status}] \x1b[0;1;30;{method_escape_color}m {method} \x1b[0m {host} => {uri} \x1b[2m({ip}) {duration}\x1b[0m"
     );
-    print!("{line}");
+    info!("{line}");
     if !disable_http_logs {
-        let _ = tx.map(|tx| tx.send(line.into_bytes()));
+        let _ = tx.map(|tx| {
+            let time = chrono::Utc::now().to_rfc3339();
+            tx.send(format!("\x1b[2m{time}\x1b[22m {line}\r\n").into_bytes())
+        });
     }
 }
 

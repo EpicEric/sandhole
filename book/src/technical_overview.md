@@ -65,8 +65,7 @@ sequenceDiagram
   SS ->> M: Register tunnel handler
   Note over SC, HC: Traffic routing
   HC ->>+ HS: HTTP request to assigned domain
-  HS ->>+ M: Look up tunnel for domain
-  M -->>- HS: Return tunnel handler
+  HS ->> M: Look up tunnel for domain
   HS ->>+ SS: Forward request via tunnel
   SS ->>+ SC: Relay to local service
   SC -->>- SS: Response from local service

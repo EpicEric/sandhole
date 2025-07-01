@@ -3,6 +3,7 @@
 //!
 #![doc = include_str!("../README.md")]
 //!
+#![doc(html_logo_url = "https://sandhole.com.br/favicon.png")]
 
 use std::{
     collections::{BTreeMap, HashMap},
