@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Use tracing for HTTP logs.
+
 ## 0.6.0 (2025-06-29)
 
 ### Changed

@@ -16,6 +16,7 @@ async fn main() -> color_eyre::Result<()> {
                 .compact()
                 .with_timer(tracing_subscriber::fmt::time::ChronoUtc::rfc_3339()),
         )
+        .with(tracing_error::ErrorLayer::default())
         .init();
     color_eyre::install()?;
     let config = ApplicationConfig::parse();
