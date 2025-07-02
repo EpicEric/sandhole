@@ -106,11 +106,13 @@ vt100-ctt = { version = "0.16.0", default-features = false }
 strip = true
 lto = true
 
-[profile.bench]
-debug = true
-
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage_nightly)"] }
 
 [package.metadata.cargo-udeps.ignore]
 normal = ["openssl"]
+
+[package.metadata.binstall]
+pkg-url = "https://sandhole.com.br/download/v{ version }/sandhole-{ target-family }-{ target-arch }{ binary-ext }"
+pkg-fmt = "bin"
+disabled-strategies = ["quick-install"]
