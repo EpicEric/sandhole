@@ -5,6 +5,10 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
+    color_eyre::install()?;
+
+    let config = ApplicationConfig::parse();
+
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::builder()
@@ -17,9 +21,8 @@ async fn main() -> color_eyre::Result<()> {
                 .with_timer(tracing_subscriber::fmt::time::ChronoUtc::rfc_3339()),
         )
         .with(tracing_error::ErrorLayer::default())
-        .init();
-    color_eyre::install()?;
-    let config = ApplicationConfig::parse();
+        .try_init()?;
+
     if let Err(error) = entrypoint(config).await {
         error!(%error, "Unable to start Sandhole.");
         Err(error)

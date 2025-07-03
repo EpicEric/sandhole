@@ -47,5 +47,5 @@ ssh -p 2222 -R my.tunnel:80:localhost:8080 sandhole.com.br sni-proxy force-https
 These options allow you to limit the IP ranges for incoming proxy/alias connections.
 
 ```bash
-ssh -p 2222 -R website.com:80:localhost:3000 sandhole.com.br ip-allowlist=10.0.0.0/8 ip-blocklist=10.1.0.0/16
+ssh -p 2222 -R website.com:80:localhost:3000 sandhole.com.br ip-allowlist=10.0.0.0/8,20ff::/16 ip-blocklist=10.1.0.0/16
 ```
