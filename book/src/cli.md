@@ -176,6 +176,9 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           Disable all aliasing (i.e. local forwarding). By default, this is
           enabled globally
 
+      <b>--opentelemetry-exporter</b>
+          If enabled, exports OpenTelemetry tracing and metrics
+
       <b>--quota-per-user</b> &lt;MAX&gt;
           How many services can be exposed for a single user at once. Doesn&#39;t
           apply to admin users.

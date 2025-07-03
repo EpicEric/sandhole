@@ -46,6 +46,13 @@ fn init_tracer_provider() -> color_eyre::Result<opentelemetry_sdk::trace::SdkTra
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
+<<<<<<< HEAD
+    color_eyre::install()?;
+
+    let config = ApplicationConfig::parse();
+
+||||||| parent of 45d6aed ([wip] Add tracing-opentelemetry)
+=======
     color_eyre::install()?;
 
     let config = ApplicationConfig::parse();
@@ -62,6 +69,7 @@ async fn main() -> color_eyre::Result<()> {
         (None, None)
     };
 
+>>>>>>> 45d6aed ([wip] Add tracing-opentelemetry)
     tracing_subscriber::registry()
         .with(tracing_layer)
         .with(metrics_layer)
