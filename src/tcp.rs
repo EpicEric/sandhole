@@ -74,7 +74,7 @@ impl PortHandler for Arc<TcpHandler> {
                                 if !clone.disable_tcp_logs {
                                     let _ = handler.log_channel().send(
                                         format!(
-                                            "New connection from {}:{} to TCP port {}",
+                                            "New connection from {}:{} to TCP port {}\r\n",
                                             address.ip().to_canonical(),
                                             address.port(),
                                             port
@@ -83,27 +83,32 @@ impl PortHandler for Arc<TcpHandler> {
                                     );
                                 }
                                 // Copy data between the TCP stream and the reverse forwarding channel, with optional timeout
+                                let buffer_size = clone.buffer_size;
                                 match clone.tcp_connection_timeout {
                                     Some(duration) => {
-                                        let _ = timeout(duration, async {
-                                            copy_bidirectional_with_sizes(
-                                                &mut stream,
-                                                &mut channel,
-                                                clone.buffer_size,
-                                                clone.buffer_size,
-                                            )
-                                            .await
-                                        })
-                                        .await;
+                                        tokio::spawn(async move {
+                                            let _ = timeout(duration, async {
+                                                copy_bidirectional_with_sizes(
+                                                    &mut stream,
+                                                    &mut channel,
+                                                    buffer_size,
+                                                    buffer_size,
+                                                )
+                                                .await
+                                            })
+                                            .await;
+                                        });
                                     }
                                     None => {
-                                        let _ = copy_bidirectional_with_sizes(
-                                            &mut stream,
-                                            &mut channel,
-                                            clone.buffer_size,
-                                            clone.buffer_size,
-                                        )
-                                        .await;
+                                        tokio::spawn(async move {
+                                            let _ = copy_bidirectional_with_sizes(
+                                                &mut stream,
+                                                &mut channel,
+                                                buffer_size,
+                                                buffer_size,
+                                            )
+                                            .await;
+                                        });
                                     }
                                 }
                             }
