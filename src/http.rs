@@ -16,6 +16,7 @@ use crate::ssh::ServerHandlerSender;
 use crate::tcp_alias::TcpAlias;
 use crate::telemetry::Telemetry;
 
+use ansic::ansi;
 use axum::{
     body::Body as AxumBody,
     response::{IntoResponse, Redirect},
@@ -116,35 +117,34 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
         elapsed_time,
     } = data;
     debug!(histogram.http_elapsed_time = elapsed_time.as_secs_f64(), %status, %method, %host, %uri, %ip);
-    let status_escape_color = match status {
-        100..=199 => "37",
-        200..=299 => "34",
-        300..=399 => "32",
-        400..=499 => "33",
-        500..=599 => "31",
+    let status_style = match status {
+        100..=199 => ansi!(white),
+        200..=299 => ansi!(blue),
+        300..=399 => ansi!(green),
+        400..=499 => ansi!(yellow),
+        500..=599 => ansi!(red),
         _ => unreachable!(),
     };
-    let method_escape_color = match method.as_str() {
-        "POST" => "42",
-        "PUT" => "43",
-        "DELETE" => "41",
-        "HEAD" => "46",
-        "OPTIONS" => "45",
-        "CONNECT" => "45",
-        "PATCH" => "43",
-        "TRACE" => "45",
+    let method_style = match method.as_str() {
+        "POST" => ansi!(bg.green black bold),
+        "PUT" | "PATCH" => ansi!(bg.yellow black bold),
+        "DELETE" => ansi!(bg.red black bold),
+        "HEAD" => ansi!(bg.cyan black bold),
+        "OPTIONS" | "CONNECT" | "TRACE" => ansi!(bg.magenta black bold),
         // GET or other
-        _ => "44",
+        _ => ansi!(bg.blue black bold),
     };
+    let dimmed_style = ansi!(dim);
+    let reset_style = ansi!(reset);
     let duration = pretty_duration::pretty_duration(&elapsed_time, None);
     let line = format!(
-        "\x1b[{status_escape_color}m[{status}] \x1b[0;1;30;{method_escape_color}m {method} \x1b[0m {host} => {uri} \x1b[2m({ip}) {duration}\x1b[0m"
+        "{status_style}[{status}] {method_style} {method} {reset_style} {host} => {uri} {dimmed_style}({ip}) {duration}{reset_style}"
     );
     info!("{line}");
     if !disable_http_logs {
         let _ = tx.map(|tx| {
             let time = chrono::Utc::now().to_rfc3339();
-            tx.send(format!("\x1b[2m{time}\x1b[22m {line}\r\n").into_bytes())
+            tx.send(format!("{dimmed_style}{time}{reset_style} {line}\r\n").into_bytes())
         });
     }
 }

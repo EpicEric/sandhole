@@ -96,6 +96,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "ansic"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b0067e2aa0c3500c29f3509a17150259bd92f1caeb4529f12254500b10d2e79"
+dependencies = [
+ "ansic-macros",
+]
+
+[[package]]
+name = "ansic-macros"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dc11e49578ae4bf0df28f17516c0e9d006a04cefcedcb006b81134552e2cc8d"
+dependencies = [
+ "proc-macro2",
+ "syn",
+]
+
+[[package]]
 name = "anstream"
 version = "0.6.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3783,6 +3802,7 @@ name = "sandhole"
 version = "0.6.1"
 dependencies = [
  "ahash",
+ "ansic",
  "async-speed-limit",
  "aws-lc-rs",
  "axum",
