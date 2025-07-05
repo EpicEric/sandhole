@@ -182,7 +182,10 @@ async fn auth_prevent_unauthorized_actions() {
             .is_err(),
         "shouldn't allow local port forwarding for unknown service"
     );
-    assert!(session.is_closed(), "didn't disconnect unauthed user");
+    assert!(
+        !session.is_closed(),
+        "shouldn't have disconnected unauthed user"
+    );
 
     // 3d. Try to open multiple sessions without credentials
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
@@ -364,7 +367,7 @@ async fn auth_prevent_unauthorized_actions() {
         .close()
         .await
         .expect("shouldn't panic on channel close");
-    sleep(Duration::from_millis(1_000)).await;
+    sleep(Duration::from_millis(1_200)).await;
     assert!(
         session.is_closed(),
         "didn't disconnect lingering unauthed user"

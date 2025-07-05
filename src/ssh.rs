@@ -5,7 +5,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     sync::{
         Arc, Mutex, RwLock,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicIsize, Ordering},
     },
     time::Duration,
 };
@@ -159,6 +159,48 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
     }
 }
 
+pub(crate) struct ProxyAutoCancellation {
+    // Channel to communicate that this connection must be closed.
+    pub(crate) cancellation_token: CancellationToken,
+    // How long until an unauthed connection is closed AFTER it successfully local forwards.
+    pub(crate) unproxied_connection_timeout: Duration,
+    // The amount of proxy auto cancellation clones.
+    pub(crate) proxy_count: Arc<AtomicIsize>,
+    // A handle to a task that disconnects unauthed users after a while.
+    pub(crate) timeout_handle: Arc<Mutex<Option<DroppableHandle<()>>>>,
+}
+
+impl ProxyAutoCancellation {
+    fn start_timeout(&mut self, timeout: Duration) {
+        let cancellation_token = self.cancellation_token.clone();
+        *self.timeout_handle.lock().unwrap() = Some(DroppableHandle(tokio::spawn(async move {
+            sleep(timeout).await;
+            cancellation_token.cancel();
+        })));
+    }
+}
+
+impl Clone for ProxyAutoCancellation {
+    fn clone(&self) -> Self {
+        self.timeout_handle.lock().unwrap().take();
+        self.proxy_count.fetch_add(1, Ordering::Release);
+        Self {
+            unproxied_connection_timeout: self.unproxied_connection_timeout,
+            cancellation_token: self.cancellation_token.clone(),
+            proxy_count: self.proxy_count.clone(),
+            timeout_handle: self.timeout_handle.clone(),
+        }
+    }
+}
+
+impl Drop for ProxyAutoCancellation {
+    fn drop(&mut self) {
+        if self.proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.start_timeout(self.unproxied_connection_timeout);
+        }
+    }
+}
+
 pub(crate) enum UserSessionRestriction {
     // No restriction on the session.
     None,
@@ -244,7 +286,7 @@ impl AdminData {
 pub(crate) enum AuthenticatedData {
     // User is not authenticated; only allowed to local forward connections.
     None {
-        proxy_count: Arc<AtomicUsize>,
+        proxy_data: Box<ProxyAutoCancellation>,
     },
     // User is authenticated, and allowed to remote forward connections.
     User {
@@ -282,8 +324,6 @@ impl ServerHandlerSender {
 pub(crate) struct ServerHandler {
     // The unique ID of this connection.
     id: usize,
-    // A handle to a task that disconnects unauthed users after a while.
-    timeout_handle: Arc<Mutex<Option<DroppableHandle<()>>>>,
     // The IP and port of this connection.
     peer: SocketAddr,
     // The username from this connection's authentication (always present).
@@ -325,15 +365,20 @@ impl Server for Arc<SandholeServer> {
         let id = self.session_id.fetch_add(1, Ordering::AcqRel);
         info!(peer = %peer_address, "SSH client connected.");
         let (tx, rx) = mpsc::unbounded_channel();
+        let unproxied_connection_timeout = self.unproxied_connection_timeout;
         ServerHandler {
             id,
-            timeout_handle: Arc::new(Mutex::new(None)),
             peer: peer_address,
             user: None,
             key_fingerprint: None,
-            cancellation_token,
+            cancellation_token: cancellation_token.clone(),
             auth_data: AuthenticatedData::None {
-                proxy_count: Arc::new(AtomicUsize::new(0)),
+                proxy_data: Box::new(ProxyAutoCancellation {
+                    cancellation_token: cancellation_token.clone(),
+                    unproxied_connection_timeout,
+                    proxy_count: Arc::new(AtomicIsize::new(0)),
+                    timeout_handle: Arc::new(Mutex::new(None)),
+                }),
             },
             commands: Default::default(),
             channel_id: None,
@@ -492,13 +537,9 @@ impl Handler for ServerHandler {
                 } else {
                     // Start timer for user to do local port forwarding.
                     // Otherwise, the connection will be canceled upon expiration
-                    let cancellation_token = self.cancellation_token.clone();
-                    let timeout = self.server.idle_connection_timeout;
-                    *self.timeout_handle.lock().unwrap() =
-                        Some(DroppableHandle(tokio::spawn(async move {
-                            sleep(timeout).await;
-                            cancellation_token.cancel();
-                        })));
+                    if let AuthenticatedData::None { ref mut proxy_data } = self.auth_data {
+                        proxy_data.start_timeout(self.server.idle_connection_timeout);
+                    }
                 }
             }
             AuthenticationType::User => {
@@ -1059,8 +1100,6 @@ impl Handler for ServerHandler {
                 auth_data: &mut self.auth_data,
                 peer: &mut self.peer,
                 key_fingerprint: &mut self.key_fingerprint,
-                timeout_handle: &self.timeout_handle,
-                cancellation_token: &self.cancellation_token,
                 tx: &mut self.tx,
             },
             host_to_connect.trim(),
@@ -1073,11 +1112,6 @@ impl Handler for ServerHandler {
         {
             Ok(true)
         } else {
-            if let AuthenticatedData::None { ref proxy_count } = self.auth_data {
-                if proxy_count.load(Ordering::Acquire) == 0 {
-                    return Err(russh::Error::Disconnect);
-                }
-            }
             Ok(false)
         }
     }

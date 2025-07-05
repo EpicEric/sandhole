@@ -1,8 +1,4 @@
-use std::{
-    borrow::Borrow,
-    net::SocketAddr,
-    sync::{Arc, Mutex, atomic::Ordering},
-};
+use std::{borrow::Borrow, net::SocketAddr, sync::Arc};
 
 use color_eyre::eyre::eyre;
 use http::Request;
@@ -16,18 +12,13 @@ use russh::{
     keys::ssh_key::Fingerprint,
     server::{Handle, Msg},
 };
-use tokio::{
-    io::copy_bidirectional_with_sizes,
-    time::{sleep, timeout},
-};
-use tokio_util::sync::CancellationToken;
+use tokio::{io::copy_bidirectional_with_sizes, time::timeout};
 use tracing::info;
 
 use crate::{
     SandholeServer,
     connection_handler::ConnectionHandler,
     connections::ConnectionGetByHttpHost,
-    droppable_handle::DroppableHandle,
     http::proxy_handler,
     ssh::{
         AuthenticatedData, ServerHandlerSender, SshTunnelHandler, UserData, UserSessionRestriction,
@@ -50,8 +41,6 @@ pub(crate) struct LocalForwardingContext<'a> {
     pub(crate) auth_data: &'a mut AuthenticatedData,
     pub(crate) peer: &'a SocketAddr,
     pub(crate) key_fingerprint: &'a Option<Fingerprint>,
-    pub(crate) timeout_handle: &'a Arc<Mutex<Option<DroppableHandle<()>>>>,
-    pub(crate) cancellation_token: &'a CancellationToken,
     pub(crate) tx: &'a ServerHandlerSender,
 }
 
@@ -340,14 +329,8 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                     );
                 match context.auth_data {
                     // Serve SSH for unauthed user, then add disconnection timeout if this is the last proxy connection
-                    AuthenticatedData::None { proxy_count } => {
-                        context.timeout_handle.lock().unwrap().take();
-                        proxy_count.fetch_add(1, Ordering::Release);
-                        let proxy_count = Arc::clone(proxy_count);
-                        let timeout_handle = Arc::clone(context.timeout_handle);
-                        let unproxied_connection_timeout =
-                            context.server.unproxied_connection_timeout;
-                        let cancellation_token = context.cancellation_token.clone();
+                    AuthenticatedData::None { proxy_data } => {
+                        let guard = proxy_data.clone();
                         let tcp_connection_timeout = context.server.tcp_connection_timeout;
                         let buffer_size = context.server.buffer_size;
                         tokio::spawn(async move {
@@ -375,13 +358,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                                     .await;
                                 }
                             }
-                            if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
-                                *timeout_handle.lock().unwrap() =
-                                    Some(DroppableHandle(tokio::spawn(async move {
-                                        sleep(unproxied_connection_timeout).await;
-                                        cancellation_token.cancel();
-                                    })));
-                            }
+                            drop(guard);
                         });
                     }
                     // Serve SSH normally for authed user
@@ -805,14 +782,8 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 let tcp_connection_timeout = context.server.tcp_connection_timeout;
                 match context.auth_data {
                     // Serve HTTP for unauthed user, then add disconnection timeout if this is the last proxy connection
-                    AuthenticatedData::None { proxy_count } => {
-                        context.timeout_handle.lock().unwrap().take();
-                        proxy_count.fetch_add(1, Ordering::Release);
-                        let proxy_count = Arc::clone(proxy_count);
-                        let timeout_handle = Arc::clone(context.timeout_handle);
-                        let unproxied_connection_timeout =
-                            context.server.unproxied_connection_timeout;
-                        let cancellation_token = context.cancellation_token.clone();
+                    AuthenticatedData::None { proxy_data } => {
+                        let guard = proxy_data.clone();
                         tokio::spawn(async move {
                             let server = auto::Builder::new(TokioExecutor::new());
                             let conn = server.serve_connection_with_upgrades(io, service);
@@ -824,13 +795,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                                     let _ = conn.await;
                                 }
                             }
-                            if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
-                                *timeout_handle.lock().unwrap() =
-                                    Some(DroppableHandle(tokio::spawn(async move {
-                                        sleep(unproxied_connection_timeout).await;
-                                        cancellation_token.cancel();
-                                    })));
-                            }
+                            drop(guard);
                         });
                     }
                     // Serve HTTP normally for authed user
@@ -1003,14 +968,8 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                     );
                 match context.auth_data {
                     // Serve TCP for unauthed user, then add disconnection timeout if this is the last proxy connection
-                    AuthenticatedData::None { proxy_count } => {
-                        context.timeout_handle.lock().unwrap().take();
-                        proxy_count.fetch_add(1, Ordering::Release);
-                        let proxy_count = Arc::clone(proxy_count);
-                        let timeout_handle = Arc::clone(context.timeout_handle);
-                        let unproxied_connection_timeout =
-                            context.server.unproxied_connection_timeout;
-                        let cancellation_token = context.cancellation_token.clone();
+                    AuthenticatedData::None { proxy_data } => {
+                        let guard = proxy_data.clone();
                         let tcp_connection_timeout = context.server.tcp_connection_timeout;
                         let buffer_size = context.server.buffer_size;
                         tokio::spawn(async move {
@@ -1038,13 +997,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                                     .await;
                                 }
                             }
-                            if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
-                                *timeout_handle.lock().unwrap() =
-                                    Some(DroppableHandle(tokio::spawn(async move {
-                                        sleep(unproxied_connection_timeout).await;
-                                        cancellation_token.cancel();
-                                    })));
-                            }
+                            drop(guard);
                         });
                     }
                     // Serve alias normally for authed user
@@ -1299,14 +1252,8 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                     );
                 match context.auth_data {
                     // Serve TCP for unauthed user, then add disconnection timeout if this is the last proxy connection
-                    AuthenticatedData::None { proxy_count } => {
-                        context.timeout_handle.lock().unwrap().take();
-                        proxy_count.fetch_add(1, Ordering::Release);
-                        let proxy_count = Arc::clone(proxy_count);
-                        let timeout_handle = Arc::clone(context.timeout_handle);
-                        let unproxied_connection_timeout =
-                            context.server.unproxied_connection_timeout;
-                        let cancellation_token = context.cancellation_token.clone();
+                    AuthenticatedData::None { proxy_data } => {
+                        let guard = proxy_data.clone();
                         let tcp_connection_timeout = context.server.tcp_connection_timeout;
                         let buffer_size = context.server.buffer_size;
                         tokio::spawn(async move {
@@ -1334,13 +1281,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                                     .await;
                                 }
                             }
-                            if proxy_count.fetch_sub(1, Ordering::AcqRel) == 1 {
-                                *timeout_handle.lock().unwrap() =
-                                    Some(DroppableHandle(tokio::spawn(async move {
-                                        sleep(unproxied_connection_timeout).await;
-                                        cancellation_token.cancel();
-                                    })));
-                            }
+                            drop(guard);
                         });
                     }
                     // Serve TCP normally for authed user
