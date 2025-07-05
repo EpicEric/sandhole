@@ -163,8 +163,8 @@ async fn alias_timeout() {
     );
     sleep(Duration::from_millis(1500)).await;
     assert!(
-        client_session.is_closed(),
-        "anonymous session should've been closed"
+        !client_session.is_closed(),
+        "anonymous session shouldn't have been closed"
     );
 
     // 3. Start authenticated SSH client that will forward the proxies via aliasing

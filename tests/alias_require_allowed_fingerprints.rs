@@ -172,8 +172,8 @@ async fn alias_require_allowed_fingerprints() {
         "shouldn't be able to connect to restricted tunnel"
     );
     assert!(
-        session.is_closed(),
-        "didn't close connection for unauthenticated session"
+        !session.is_closed(),
+        "shouldn't immediately close connection for unauthenticated session"
     );
 }
 
