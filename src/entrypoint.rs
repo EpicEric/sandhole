@@ -14,6 +14,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
 };
+use metrics::{counter, gauge};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::{
@@ -45,20 +46,23 @@ use crate::{
     certificates::{AlpnChallengeResolver, CertificateResolver, DummyAlpnChallengeResolver},
     config::ApplicationConfig,
     connection_handler::ConnectionHandler,
-    connections::ConnectionMap,
-    connections::HttpAliasingConnection,
+    connections::{ConnectionMap, HttpAliasingConnection},
     droppable_handle::DroppableHandle,
     error::ServerError,
     fingerprints::FingerprintsValidator,
-    http::{DomainRedirect, ProxyData, ProxyType},
-    http::{Protocol, proxy_handler},
+    http::{DomainRedirect, Protocol, ProxyData, ProxyType, proxy_handler},
     ip::{IpFilter, IpFilterConfig},
     login::{ApiLogin, WebpkiVerifierConfigurer},
     quota::{DummyQuotaHandler, QuotaHandler, QuotaMap},
     reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
     ssh::Server,
     tcp::TcpHandler,
-    telemetry::Telemetry,
+    telemetry::{
+        TELEMETRY_COUNTER_NETWORK_RX_BYTES, TELEMETRY_COUNTER_NETWORK_TX_BYTES,
+        TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL, TELEMETRY_COUNTER_TOTAL_MEMORY_BYTES,
+        TELEMETRY_COUNTER_USED_MEMORY_BYTES, TELEMETRY_GAUGE_CPU_USAGE_PERCENT,
+        TELEMETRY_KEY_HOSTNAME, Telemetry,
+    },
     tls::{TlsPeekData, peek_sni_and_alpn},
 };
 
@@ -165,6 +169,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         blocklist: config.ip_blocklist,
     })?);
     let telemetry = Arc::new(Telemetry::new());
+    if let Err(error) = metrics::set_global_recorder(Arc::clone(&telemetry)) {
+        error!(%error, "Failed to install telemetry.");
+    };
     let quota_handler: Arc<Box<dyn QuotaHandler + Send + Sync>> = match config.quota_per_user {
         Some(max_quota) => Arc::new(Box::new(Arc::new(QuotaMap::new(max_quota.into())))),
         None => Arc::new(Box::new(DummyQuotaHandler)),
@@ -210,7 +217,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         TcpHandler::builder()
             .listen_address(config.listen_address)
             .conn_manager(Arc::clone(&tcp_connections))
-            .telemetry(Arc::clone(&telemetry))
             .ip_filter(Arc::clone(&ip_filter))
             .buffer_size(config.buffer_size)
             .disable_tcp_logs(config.disable_tcp_logs)
@@ -257,7 +263,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     });
 
     // Telemetry tasks
-    let ssh_data = Arc::new(RwLock::default());
+    let ssh_data = Arc::new(Mutex::default());
     if !config.disable_aliasing {
         let data_clone = Arc::clone(&ssh_data);
         let connections_clone = Arc::clone(&ssh_connections);
@@ -271,16 +277,16 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 let data = data
                     .into_iter()
                     .map(|(alias, addresses)| {
-                        let connections_per_minute = *telemetry.get(&alias).unwrap_or(&0f64);
+                        let connections_per_minute = *telemetry.get(&alias).unwrap_or(&0u64);
                         (alias, (addresses, connections_per_minute))
                     })
                     .collect();
-                *data_clone.write().unwrap() = data;
+                *data_clone.lock().unwrap() = data;
             }
         });
     }
-    let http_data = Arc::new(RwLock::default());
-    let sni_data = Arc::new(RwLock::default());
+    let http_data = Arc::new(Mutex::default());
+    let sni_data = Arc::new(Mutex::default());
     if !config.disable_http {
         let data_clone = Arc::clone(&http_data);
         let connections_clone = Arc::clone(&http_connections);
@@ -294,11 +300,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 let data = data
                     .into_iter()
                     .map(|(hostname, addresses)| {
-                        let requests_per_minute = *telemetry.get(&hostname).unwrap_or(&0f64);
+                        let requests_per_minute = *telemetry.get(&hostname).unwrap_or(&0u64);
                         (hostname, (addresses, requests_per_minute))
                     })
                     .collect();
-                *data_clone.write().unwrap() = data;
+                *data_clone.lock().unwrap() = data;
             }
         });
         if !config.disable_sni {
@@ -314,16 +320,16 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                     let data = data
                         .into_iter()
                         .map(|(hostname, addresses)| {
-                            let connections_per_minute = *telemetry.get(&hostname).unwrap_or(&0f64);
+                            let connections_per_minute = *telemetry.get(&hostname).unwrap_or(&0u64);
                             (hostname, (addresses, connections_per_minute))
                         })
                         .collect();
-                    *data_clone.write().unwrap() = data;
+                    *data_clone.lock().unwrap() = data;
                 }
             });
         }
     }
-    let tcp_data = Arc::new(RwLock::default());
+    let tcp_data = Arc::new(Mutex::default());
     if !config.disable_tcp {
         let data_clone = Arc::clone(&tcp_data);
         let connections_clone = Arc::clone(&tcp_connections);
@@ -337,15 +343,15 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 let data = data
                     .into_iter()
                     .map(|(port, addresses)| {
-                        let connections_per_minute = *telemetry.get(&port).unwrap_or(&0f64);
+                        let connections_per_minute = *telemetry.get(&port).unwrap_or(&0u64);
                         (port, (addresses, connections_per_minute))
                     })
                     .collect();
-                *data_clone.write().unwrap() = data;
+                *data_clone.lock().unwrap() = data;
             }
         });
     }
-    let alias_data = Arc::new(RwLock::default());
+    let alias_data = Arc::new(Mutex::default());
     if !config.disable_aliasing {
         let data_clone = Arc::clone(&alias_data);
         let connections_clone = Arc::clone(&alias_connections);
@@ -359,15 +365,15 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 let data = data
                     .into_iter()
                     .map(|(alias, addresses)| {
-                        let connections_per_minute = *telemetry.get(&alias).unwrap_or(&0f64);
+                        let connections_per_minute = *telemetry.get(&alias).unwrap_or(&0u64);
                         (alias, (addresses, connections_per_minute))
                     })
                     .collect();
-                *data_clone.write().unwrap() = data;
+                *data_clone.lock().unwrap() = data;
             }
         });
     }
-    let system_data = Arc::new(RwLock::default());
+    let system_data = Arc::new(Mutex::default());
     let data_clone = Arc::clone(&system_data);
     // Periodically update system data (every second, as to keep network TX/RX rates accurate).
     tokio::spawn(async move {
@@ -388,14 +394,22 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 Some((tx, rx)) => (tx, rx),
                 None => (0, 0),
             };
+            let cpu_usage = system.global_cpu_usage() / system.cpus().len() as f32;
+            gauge!(TELEMETRY_GAUGE_CPU_USAGE_PERCENT).set(cpu_usage / 100.0);
+            let used_memory = system.used_memory();
+            counter!(TELEMETRY_COUNTER_USED_MEMORY_BYTES).absolute(used_memory);
+            let total_memory = system.total_memory();
+            counter!(TELEMETRY_COUNTER_TOTAL_MEMORY_BYTES).absolute(total_memory);
+            counter!(TELEMETRY_COUNTER_NETWORK_TX_BYTES).increment(network_tx);
+            counter!(TELEMETRY_COUNTER_NETWORK_RX_BYTES).increment(network_rx);
             let data = SystemData {
-                cpu_usage: system.global_cpu_usage() / system.cpus().len() as f32,
-                used_memory: system.used_memory(),
-                total_memory: system.total_memory(),
+                cpu_usage,
+                used_memory,
+                total_memory,
                 network_tx,
                 network_rx,
             };
-            *data_clone.write().unwrap() = data;
+            *data_clone.lock().unwrap() = data;
         }
     });
 
@@ -420,7 +434,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 Arc::clone(&http_connections),
                 Arc::clone(&alias_connections),
             )))
-            .telemetry(Arc::clone(&telemetry))
             .domain_redirect(Arc::clone(&domain_redirect))
             // HTTP only.
             .protocol(Protocol::Http {
@@ -443,7 +456,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         ssh: ssh_connections,
         tcp: tcp_connections,
         alias: alias_connections,
-        telemetry: Arc::clone(&telemetry),
         http_data,
         sni_data,
         ssh_data,
@@ -493,7 +505,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let http_proxy_data = Arc::new(
             ProxyData::builder()
                 .conn_manager(Arc::clone(&http_connections))
-                .telemetry(Arc::clone(&telemetry))
                 .domain_redirect(Arc::clone(&domain_redirect))
                 // Use TLS redirect if --force-https is set, otherwise allow HTTP.
                 .protocol(if config.force_https {
@@ -580,7 +591,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let https_proxy_data = Arc::new(
             ProxyData::builder()
                 .conn_manager(Arc::clone(&http_connections))
-                .telemetry(Arc::clone(&telemetry))
                 .domain_redirect(Arc::clone(&domain_redirect))
                 .protocol(Protocol::Https {
                     port: config.https_port.into(),
@@ -743,7 +753,8 @@ fn handle_https_connection(
                 let _ = server.serve_connection(io, service).await;
                 return;
             };
-            sandhole.telemetry.add_sni_connection(sni);
+            counter!(TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL, TELEMETRY_KEY_HOSTNAME => sni.clone())
+                .increment(1);
             match sandhole.tcp_connection_timeout {
                 Some(duration) => {
                     let _ = timeout(duration, async {

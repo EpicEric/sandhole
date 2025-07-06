@@ -10,11 +10,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::connection_handler::ConnectionHandler;
-use crate::connections::ConnectionGetByHttpHost;
-use crate::ssh::ServerHandlerSender;
-use crate::tcp_alias::TcpAlias;
-use crate::telemetry::Telemetry;
+use crate::{
+    connection_handler::ConnectionHandler,
+    telemetry::{TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME_SECONDS, TELEMETRY_KEY_HOSTNAME},
+};
+use crate::{connections::ConnectionGetByHttpHost, telemetry::TELEMETRY_KEY_ALIAS};
+use crate::{ssh::ServerHandlerSender, telemetry::TELEMETRY_COUNTER_HTTP_REQUESTS_TOTAL};
+use crate::{tcp_alias::TcpAlias, telemetry::TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL};
 
 use ansic::ansi;
 use axum::{
@@ -30,6 +32,7 @@ use hyper::{
     header::{HOST, UPGRADE},
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
+use metrics::{counter, histogram};
 use russh::keys::ssh_key::Fingerprint;
 use tokio::{
     io::{AsyncRead, AsyncWrite, copy_bidirectional_with_sizes},
@@ -116,7 +119,15 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
         uri,
         elapsed_time,
     } = data;
-    debug!(histogram.http_elapsed_time = elapsed_time.as_secs_f64(), %status, %method, %host, %uri, %ip);
+    histogram!(
+        TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME_SECONDS,
+        "status" => status.to_string(),
+        "method" => method.clone(),
+        "host" => host.clone(),
+        "uri" => uri.clone(),
+        "ip" => ip.clone(),
+    )
+    .record(elapsed_time.as_secs_f64());
     let status_style = match status {
         100..=199 => ansi!(white),
         200..=299 => ansi!(blue),
@@ -217,8 +228,6 @@ where
 {
     // An HTTP connection manager (usually ConnectionMap) that returns a tunneling/aliasing handler.
     conn_manager: M,
-    // Telemetry service, where HTTP requests are tracked.
-    telemetry: Arc<Telemetry>,
     // Tuple containing where to redirect requests from the main domain to.
     domain_redirect: Arc<DomainRedirect>,
     // The HTTP protocol for the current connection.
@@ -285,7 +294,6 @@ where
     <B as Body>::Error: Error + Send + Sync + 'static,
 {
     let conn_manager = &proxy_data.conn_manager;
-    let telemetry = &proxy_data.telemetry;
     let domain_redirect = &proxy_data.domain_redirect;
     let protocol = &proxy_data.protocol;
     let disable_http_logs = proxy_data.disable_http_logs;
@@ -389,9 +397,11 @@ where
     headers.insert(X_FORWARDED_PORT, port.into());
     // Add this request to the telemetry for the host
     if http_data.as_ref().is_some_and(|data| data.is_aliasing) {
-        telemetry.add_alias_connection(TcpAlias(host.clone(), port));
+        counter!(TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL, TELEMETRY_KEY_ALIAS => TcpAlias(host.clone(), port).to_string())
+            .increment(1);
     } else {
-        telemetry.add_http_request(host.clone());
+        counter!(TELEMETRY_COUNTER_HTTP_REQUESTS_TOTAL, TELEMETRY_KEY_HOSTNAME => host.clone())
+            .increment(1);
     }
 
     // Find the appropriate handler for this proxy type
@@ -666,7 +676,6 @@ mod proxy_handler_tests {
         quota::{DummyQuotaHandler, TokenHolder, UserIdentification},
         reactor::MockConnectionMapReactor,
         ssh::ServerHandlerSender,
-        telemetry::Telemetry,
     };
 
     use super::{DomainRedirect, Protocol, ProxyData, ProxyType, proxy_handler};
@@ -697,7 +706,6 @@ mod proxy_handler_tests {
             Arc::new(
                 ProxyData::builder()
                     .conn_manager(Arc::clone(&conn_manager))
-                    .telemetry(Arc::new(Telemetry::new()))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
                         to: "https://example.com".into(),
@@ -741,7 +749,6 @@ mod proxy_handler_tests {
             Arc::new(
                 ProxyData::builder()
                     .conn_manager(Arc::clone(&conn_manager))
-                    .telemetry(Arc::new(Telemetry::new()))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
                         to: "https://example.com".into(),
@@ -785,7 +792,6 @@ mod proxy_handler_tests {
             Arc::new(
                 ProxyData::builder()
                     .conn_manager(Arc::clone(&conn_manager))
-                    .telemetry(Arc::new(Telemetry::new()))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
                         to: "https://example.com".into(),
@@ -851,7 +857,6 @@ mod proxy_handler_tests {
             Arc::new(
                 ProxyData::builder()
                     .conn_manager(Arc::clone(&conn_manager))
-                    .telemetry(Arc::new(Telemetry::new()))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
                         to: "https://example.com".into(),
@@ -917,7 +922,6 @@ mod proxy_handler_tests {
             Arc::new(
                 ProxyData::builder()
                     .conn_manager(Arc::clone(&conn_manager))
-                    .telemetry(Arc::new(Telemetry::new()))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
                         to: "https://example.com".into(),
@@ -984,7 +988,6 @@ mod proxy_handler_tests {
             Arc::new(
                 ProxyData::builder()
                     .conn_manager(Arc::clone(&conn_manager))
-                    .telemetry(Arc::new(Telemetry::new()))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
                         to: "https://example.com".into(),
@@ -1050,7 +1053,6 @@ mod proxy_handler_tests {
             Arc::new(
                 ProxyData::builder()
                     .conn_manager(Arc::clone(&conn_manager))
-                    .telemetry(Arc::new(Telemetry::new()))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
                         to: "https://example.com".into(),
@@ -1142,7 +1144,6 @@ mod proxy_handler_tests {
             Arc::new(
                 ProxyData::builder()
                     .conn_manager(Arc::clone(&conn_manager))
-                    .telemetry(Arc::new(Telemetry::new()))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
                         to: "https://example.com".into(),
@@ -1230,7 +1231,6 @@ mod proxy_handler_tests {
                 Arc::new(
                     ProxyData::builder()
                         .conn_manager(Arc::clone(&conn_manager))
-                        .telemetry(Arc::new(Telemetry::new()))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),
                             to: "https://example.com".into(),
@@ -1340,7 +1340,6 @@ mod proxy_handler_tests {
             Arc::new(
                 ProxyData::builder()
                     .conn_manager(Arc::clone(&conn_manager))
-                    .telemetry(Arc::new(Telemetry::new()))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
                         to: "https://example.com".into(),
@@ -1438,7 +1437,6 @@ mod proxy_handler_tests {
             Arc::new(
                 ProxyData::builder()
                     .conn_manager(Arc::clone(&conn_manager))
-                    .telemetry(Arc::new(Telemetry::new()))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
                         to: "https://example.com".into(),
@@ -1535,7 +1533,6 @@ mod proxy_handler_tests {
             Arc::new(
                 ProxyData::builder()
                     .conn_manager(Arc::clone(&conn_manager))
-                    .telemetry(Arc::new(Telemetry::new()))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
                         to: "https://example.com".into(),
@@ -1633,7 +1630,6 @@ mod proxy_handler_tests {
             Arc::new(
                 ProxyData::builder()
                     .conn_manager(Arc::clone(&conn_manager))
-                    .telemetry(Arc::new(Telemetry::new()))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "root.domain".into(),
                         to: "https://this.is.ignored".into(),
@@ -1720,7 +1716,6 @@ mod proxy_handler_tests {
                 Arc::new(
                     ProxyData::builder()
                         .conn_manager(Arc::clone(&conn_manager))
-                        .telemetry(Arc::new(Telemetry::new()))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),
                             to: "https://example.com".into(),
@@ -1827,7 +1822,6 @@ mod proxy_handler_tests {
                 Arc::new(
                     ProxyData::builder()
                         .conn_manager(Arc::clone(&conn_manager))
-                        .telemetry(Arc::new(Telemetry::new()))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),
                             to: "https://example.com".into(),

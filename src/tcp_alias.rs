@@ -4,7 +4,10 @@ use std::{
     borrow::Borrow,
     fmt::Display,
     hash::{Hash, Hasher},
+    str::FromStr,
 };
+
+use color_eyre::eyre::OptionExt;
 
 // A TCP alias, with an address and a port.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -13,6 +16,15 @@ pub(crate) struct TcpAlias(pub(crate) String, pub(crate) u16);
 impl Display for TcpAlias {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.0, self.1)
+    }
+}
+
+impl FromStr for TcpAlias {
+    type Err = color_eyre::Report;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (left, right) = s.rsplit_once(':').ok_or_eyre("Missing : separator")?;
+        Ok(TcpAlias(left.to_string(), right.parse()?))
     }
 }
 

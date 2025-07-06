@@ -1,14 +1,19 @@
 use std::{collections::HashSet, net::IpAddr, sync::Arc, time::Duration};
 
 use crate::{
-    connection_handler::ConnectionHandler, connections::ConnectionMap,
-    droppable_handle::DroppableHandle, ip::IpFilter, reactor::TcpReactor, ssh::SshTunnelHandler,
-    telemetry::Telemetry,
+    connection_handler::ConnectionHandler,
+    connections::ConnectionMap,
+    droppable_handle::DroppableHandle,
+    ip::IpFilter,
+    reactor::TcpReactor,
+    ssh::SshTunnelHandler,
+    telemetry::{TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL, TELEMETRY_KEY_PORT},
 };
 use ahash::RandomState;
 use bon::Builder;
 use color_eyre::eyre::Context;
 use dashmap::DashMap;
+use metrics::counter;
 use tokio::{io::copy_bidirectional_with_sizes, net::TcpListener, time::timeout};
 use tracing::{error, info, warn};
 
@@ -22,8 +27,6 @@ pub(crate) struct TcpHandler {
     sockets: DashMap<u16, DroppableHandle<()>, RandomState>,
     // Connection map to assign a tunneling service for each incoming connection.
     conn_manager: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
-    // Telemetry server to keep track of the total connections.
-    telemetry: Arc<Telemetry>,
     // Service that identifies whether to allow or block a given IP address.
     ip_filter: Arc<IpFilter>,
     // Buffer size for bidirectional copying.
@@ -69,7 +72,8 @@ impl PortHandler for Arc<TcpHandler> {
                                 .tunneling_channel(address.ip(), address.port())
                                 .await
                             {
-                                clone.telemetry.add_tcp_connection(port);
+                                counter!(TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL, TELEMETRY_KEY_PORT => port.to_string())
+                                    .increment(1);
                                 // Log new connection to SSH handler
                                 if !clone.disable_tcp_logs {
                                     let _ = handler.log_channel().send(

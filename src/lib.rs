@@ -8,7 +8,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     net::SocketAddr,
-    sync::{Arc, Mutex, RwLock, atomic::AtomicUsize},
+    sync::{Arc, Mutex, atomic::AtomicUsize},
     time::Duration,
 };
 
@@ -28,7 +28,6 @@ use crate::{
     ssh::SshTunnelHandler,
     tcp::TcpHandler,
     tcp_alias::TcpAlias,
-    telemetry::Telemetry,
 };
 
 #[doc(hidden)]
@@ -73,7 +72,7 @@ struct SystemData {
 // A list of sessions and their cancelation channels.
 type SessionMap = (Limiter, HashMap<usize, CancellationToken, RandomState>);
 // A generic table with data for the admin interface.
-type DataTable<K, V> = Arc<RwLock<BTreeMap<K, V>>>;
+type DataTable<K, V> = Arc<Mutex<BTreeMap<K, V>>>;
 // Helper type for HTTP proxy data types.
 type HttpProxyData<C> =
     Arc<ProxyData<Arc<C>, SshTunnelHandler, Resource<ChannelStream<Msg>, StandardClock>>>;
@@ -99,20 +98,18 @@ pub(crate) struct SandholeServer {
     pub(crate) tcp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
     // The map for forwarded aliased connections.
     pub(crate) alias: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, AliasReactor>>,
-    // A collection of telemetry for the multiple systems, in order to display data in the admin interface.
-    pub(crate) telemetry: Arc<Telemetry>,
     // Data related to the SSH forwardings for the admin interface.
-    pub(crate) ssh_data: DataTable<String, (BTreeMap<SocketAddr, String>, f64)>,
+    pub(crate) ssh_data: DataTable<String, (BTreeMap<SocketAddr, String>, u64)>,
     // Data related to the HTTP forwardings for the admin interface.
-    pub(crate) http_data: DataTable<String, (BTreeMap<SocketAddr, String>, f64)>,
+    pub(crate) http_data: DataTable<String, (BTreeMap<SocketAddr, String>, u64)>,
     // Data related to the SNI forwardings for the admin interface.
-    pub(crate) sni_data: DataTable<String, (BTreeMap<SocketAddr, String>, f64)>,
+    pub(crate) sni_data: DataTable<String, (BTreeMap<SocketAddr, String>, u64)>,
     // Data related to the TCP forwardings for the admin interface.
-    pub(crate) tcp_data: DataTable<u16, (BTreeMap<SocketAddr, String>, f64)>,
+    pub(crate) tcp_data: DataTable<u16, (BTreeMap<SocketAddr, String>, u64)>,
     // Data related to the alias forwardings for the admin interface.
-    pub(crate) alias_data: DataTable<TcpAlias, (BTreeMap<SocketAddr, String>, f64)>,
+    pub(crate) alias_data: DataTable<TcpAlias, (BTreeMap<SocketAddr, String>, u64)>,
     // System data for the admin interface.
-    pub(crate) system_data: Arc<RwLock<SystemData>>,
+    pub(crate) system_data: Arc<Mutex<SystemData>>,
     // HTTP proxy data used by the local forwarding aliasing connections.
     pub(crate) aliasing_proxy_data: AliasingProxyData,
     // Service for validating fingerprint authentications and automatically update its data when the filesystem changes.

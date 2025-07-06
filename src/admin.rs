@@ -325,7 +325,7 @@ impl AdminState {
         let table = match self.tab.current_tab() {
             Tab::Http => {
                 // Get data for HTTP
-                let data = self.server.http_data.read().unwrap().clone();
+                let data = self.server.http_data.lock().unwrap().clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each host
                 let rows: Vec<Row<'_>> = data
@@ -360,7 +360,7 @@ impl AdminState {
             }
             Tab::Sni => {
                 // Get data for aliases
-                let data = self.server.sni_data.read().unwrap().clone();
+                let data = self.server.sni_data.lock().unwrap().clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
@@ -395,7 +395,7 @@ impl AdminState {
             }
             Tab::Ssh => {
                 // Get data for SSH
-                let data = self.server.ssh_data.read().unwrap().clone();
+                let data = self.server.ssh_data.lock().unwrap().clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each alias
                 let rows: Vec<Row<'_>> = data
@@ -430,7 +430,7 @@ impl AdminState {
             }
             Tab::Tcp => {
                 // Get data for TCP
-                let data = self.server.tcp_data.read().unwrap().clone();
+                let data = self.server.tcp_data.lock().unwrap().clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
@@ -465,7 +465,7 @@ impl AdminState {
             }
             Tab::Alias => {
                 // Get data for aliases
-                let data = self.server.alias_data.read().unwrap().clone();
+                let data = self.server.alias_data.lock().unwrap().clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
@@ -516,7 +516,7 @@ impl AdminState {
             network_tx,
             network_rx,
             cpu_usage,
-        } = self.server.system_data.read().unwrap().clone();
+        } = self.server.system_data.lock().unwrap().clone();
         let block = Block::bordered().title("System information");
         // Break into four areas, first horizontally then vertically
         let [left_area, right_area] =
@@ -844,7 +844,7 @@ impl AdminInterface {
                                 .state
                                 .server
                                 .http_data
-                                .read()
+                                .lock()
                                 .unwrap()
                                 .values()
                                 .nth(row)
@@ -853,7 +853,7 @@ impl AdminInterface {
                                 .state
                                 .server
                                 .sni_data
-                                .read()
+                                .lock()
                                 .unwrap()
                                 .values()
                                 .nth(row)
@@ -862,7 +862,7 @@ impl AdminInterface {
                                 .state
                                 .server
                                 .ssh_data
-                                .read()
+                                .lock()
                                 .unwrap()
                                 .values()
                                 .nth(row)
@@ -871,7 +871,7 @@ impl AdminInterface {
                                 .state
                                 .server
                                 .tcp_data
-                                .read()
+                                .lock()
                                 .unwrap()
                                 .values()
                                 .nth(row)
@@ -880,7 +880,7 @@ impl AdminInterface {
                                 .state
                                 .server
                                 .alias_data
-                                .read()
+                                .lock()
                                 .unwrap()
                                 .values()
                                 .nth(row)
