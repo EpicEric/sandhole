@@ -4,8 +4,6 @@ use block_id::{Alphabet, BlockId};
 use bon::Builder;
 use hickory_resolver::{TokioResolver, proto::rr::RecordType};
 use itertools::Itertools;
-#[cfg(test)]
-use mockall::automock;
 use rand::{self, Rng, SeedableRng, seq::IndexedRandom};
 use rand_chacha::ChaCha20Rng;
 use rand_seeder::SipHasher;
@@ -20,7 +18,7 @@ use crate::config::{BindHostnames, RandomSubdomainSeed};
 pub(crate) struct DnsResolver(TokioResolver);
 
 // Trait for DNS record verification.
-#[cfg_attr(test, automock)]
+#[cfg_attr(test, mockall::automock)]
 pub(crate) trait Resolver {
     // Check if there is a TXT record for the provided fingerprint.
     async fn has_txt_record_for_fingerprint(

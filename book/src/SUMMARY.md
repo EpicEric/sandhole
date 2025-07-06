@@ -20,5 +20,6 @@
 # Reference
 
 - [Frequently asked questions](./faq.md)
-- [Benchmarks](./benchmarks.md)
+- [Features](./features.md)
 - [CLI](./cli.md)
+- [Benchmarks](./benchmarks.md)

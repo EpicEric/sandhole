@@ -2,8 +2,6 @@ use std::{hash::Hash, num::NonZero, sync::Arc};
 
 use ahash::RandomState;
 use dashmap::DashMap;
-#[cfg(test)]
-use mockall::automock;
 use russh::keys::ssh_key::Fingerprint;
 
 // The unique identifications for each user, to discriminate across multiple sessions.
@@ -64,7 +62,7 @@ pub(crate) fn get_test_token() -> QuotaToken {
     QuotaToken { callback: None }
 }
 
-#[cfg_attr(test, automock)]
+#[cfg_attr(test, mockall::automock)]
 // A trait for handlers that generate a token, indicating that some of the holder's quota is in use.
 // To get a new token once the maximum quota is reached, old tokens must be dropped
 // (which automatically cleans them up).

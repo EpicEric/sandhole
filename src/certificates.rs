@@ -6,8 +6,6 @@ use std::{
 };
 
 use crate::{directory::watch_directory, droppable_handle::DroppableHandle, error::ServerError};
-#[cfg(test)]
-use mockall::automock;
 use notify::RecommendedWatcher;
 use rustls::{
     ServerConfig,
@@ -26,7 +24,7 @@ use webpki::EndEntityCert;
 #[derive(Debug)]
 pub(crate) struct DummyAlpnChallengeResolver;
 
-#[cfg_attr(test, automock)]
+#[cfg_attr(test, mockall::automock)]
 pub(crate) trait AlpnChallengeResolver: Debug + Send + Sync {
     fn update_domains(&mut self, domains: Vec<String>);
     #[allow(clippy::needless_lifetimes)]

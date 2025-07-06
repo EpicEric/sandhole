@@ -1,7 +1,5 @@
 use std::net::IpAddr;
 
-#[cfg(test)]
-use mockall::automock;
 use russh::keys::ssh_key::Fingerprint;
 
 use crate::ssh::ServerHandlerSender;
@@ -16,7 +14,7 @@ pub(crate) struct ConnectionHttpData {
 }
 
 // Trait for creating tunneling or aliasing channels (via an underlying SSH session).
-#[cfg_attr(test, automock)]
+#[cfg_attr(test, mockall::automock)]
 pub(crate) trait ConnectionHandler<T: Sync> {
     // Return a copy of the logging channel associated with this handler.
     fn log_channel(&self) -> ServerHandlerSender;

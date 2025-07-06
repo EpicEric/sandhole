@@ -61,7 +61,7 @@ impl Resolver for AlpnAcmeResolver {
 }
 
 // Trait for ACME challenge resolution.
-#[cfg_attr(test, automock)]
+#[cfg_attr(test, mockall::automock)]
 pub(crate) trait ResolverState {
     // Create a configuration for TLS-ALPN-01 challenges.
     fn config(&self) -> Arc<ServerConfig>;

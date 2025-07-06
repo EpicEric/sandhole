@@ -1,8 +1,5 @@
 use std::sync::Arc;
 
-#[cfg(test)]
-use mockall::automock;
-
 use crate::{
     certificates::CertificateResolver,
     tcp::{PortHandler, TcpHandler},
@@ -10,7 +7,7 @@ use crate::{
     telemetry::Telemetry,
 };
 
-#[cfg_attr(test, automock)]
+#[cfg_attr(test, mockall::automock)]
 pub(crate) trait ConnectionMapReactor<K> {
     fn call(&self, identifiers: Vec<K>);
 }

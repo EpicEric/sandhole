@@ -3,8 +3,6 @@ use std::{marker::PhantomData, net::SocketAddr, sync::Arc, time::Duration};
 use color_eyre::eyre::{ContextCompat, WrapErr};
 use http::uri::Scheme;
 use hyper::Uri;
-#[cfg(test)]
-use mockall::automock;
 use reqwest::Client;
 use rustls::{ClientConfig, RootCertStore, client::WebPkiServerVerifier, crypto::CryptoProvider};
 use serde::Serialize;
@@ -30,7 +28,7 @@ pub(crate) struct AuthenticationRequest<'a> {
 }
 
 // Trait for TLS configuration setup.
-#[cfg_attr(test, automock)]
+#[cfg_attr(test, mockall::automock)]
 pub(crate) trait Configurer {
     // Returns the TLS client configuration.
     fn get_client_config(&self, provider: CryptoProvider) -> color_eyre::Result<ClientConfig>;
