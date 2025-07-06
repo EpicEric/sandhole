@@ -55,8 +55,6 @@ mod login;
 mod quota;
 mod reactor;
 mod ssh;
-mod ssh_exec;
-mod ssh_forwarding;
 mod tcp;
 mod tcp_alias;
 mod telemetry;

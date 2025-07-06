@@ -42,15 +42,15 @@ impl TcpAliasKey for BorrowedTcpAlias<'_> {
     }
 }
 
-impl PartialEq for (dyn TcpAliasKey + '_) {
+impl PartialEq for dyn TcpAliasKey + '_ {
     fn eq(&self, other: &Self) -> bool {
         self.key().eq(&other.key())
     }
 }
 
-impl Eq for (dyn TcpAliasKey + '_) {}
+impl Eq for dyn TcpAliasKey + '_ {}
 
-impl Hash for (dyn TcpAliasKey + '_) {
+impl Hash for dyn TcpAliasKey + '_ {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.key().hash(state)
     }

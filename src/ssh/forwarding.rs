@@ -21,7 +21,8 @@ use crate::{
     connections::ConnectionGetByHttpHost,
     http::proxy_handler,
     ssh::{
-        AuthenticatedData, ServerHandlerSender, SshTunnelHandler, UserData, UserSessionRestriction,
+        AuthenticatedData, ServerHandlerSender, SshTunnelHandler, UserData,
+        auth::UserSessionRestriction,
     },
     tcp::PortHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
