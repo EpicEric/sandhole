@@ -15,7 +15,7 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    admin::AdminInterface, connection_handler::ConnectionHttpData,
+    admin::interface::AdminInterface, connection_handler::ConnectionHttpData,
     droppable_handle::DroppableHandle, ip::IpFilter, quota::TokenHolder, ssh::FingerprintFn,
     tcp_alias::TcpAlias,
 };

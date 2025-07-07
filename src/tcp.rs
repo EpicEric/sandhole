@@ -6,7 +6,7 @@ use crate::{
     droppable_handle::DroppableHandle,
     ip::IpFilter,
     reactor::TcpReactor,
-    ssh::SshTunnelHandler,
+    ssh::connection_handler::SshTunnelHandler,
     telemetry::{TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL, TELEMETRY_KEY_PORT},
 };
 use ahash::RandomState;

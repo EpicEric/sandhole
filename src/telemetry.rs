@@ -10,13 +10,19 @@ use std::{
 use ahash::RandomState;
 use dashmap::DashMap;
 use itertools::Itertools;
-use metrics::{CounterFn, Recorder, Unit, describe_counter, describe_gauge, describe_histogram};
+use metrics::{
+    Counter, CounterFn, Recorder, Unit, describe_counter, describe_gauge, describe_histogram,
+};
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle, PrometheusRecorder};
+use tokio::time::sleep;
 use tracing::warn;
 
-use crate::tcp_alias::TcpAlias;
+use crate::{droppable_handle::DroppableHandle, tcp_alias::TcpAlias};
 
 // A value that increases with time.
 struct SlidingWindowCounter {
+    // Inner counter for metrics with a different exporter.
+    inner: Counter,
     // The history of the value across several instants.
     history: Mutex<VecDeque<(Instant, u64)>>,
     // The sliding window of values to consider.
@@ -27,6 +33,29 @@ struct SlidingWindowCounter {
 
 impl CounterFn for SlidingWindowCounter {
     fn increment(&self, value: u64) {
+        self.inner.increment(value);
+        self.clean();
+        self.count.fetch_add(value, Ordering::Release);
+    }
+
+    fn absolute(&self, value: u64) {
+        self.inner.absolute(value);
+        self.clean();
+        self.count.swap(value, Ordering::Release);
+    }
+}
+
+impl SlidingWindowCounter {
+    fn new(counter: Counter, window: Duration) -> Self {
+        SlidingWindowCounter {
+            inner: counter,
+            history: Mutex::new([(Instant::now(), 0)].into_iter().collect()),
+            window,
+            count: AtomicU64::new(0),
+        }
+    }
+
+    fn clean(&self) {
         let mut history = self.history.lock().unwrap();
         loop {
             let Some(element) = history.front() else {
@@ -46,21 +75,6 @@ impl CounterFn for SlidingWindowCounter {
             } else {
                 break;
             }
-        }
-        self.count.fetch_add(value, Ordering::Release);
-    }
-
-    fn absolute(&self, value: u64) {
-        self.count.swap(value, Ordering::Release);
-    }
-}
-
-impl SlidingWindowCounter {
-    fn new(window: Duration) -> Self {
-        SlidingWindowCounter {
-            history: Mutex::new([(Instant::now(), 0)].into_iter().collect()),
-            window,
-            count: AtomicU64::new(0),
         }
     }
 
@@ -102,26 +116,30 @@ pub(crate) const TELEMETRY_KEY_HOSTNAME: &str = "hostname";
 pub(crate) const TELEMETRY_KEY_PORT: &str = "port";
 pub(crate) const TELEMETRY_KEY_ALIAS: &str = "alias";
 
-pub(crate) const TELEMETRY_COUNTER_SSH_CONNECTIONS_TOTAL: &str = "sandhole.ssh_connections.total";
-pub(crate) const TELEMETRY_COUNTER_HTTP_REQUESTS_TOTAL: &str = "sandhole.http_requests.total";
-pub(crate) const TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL: &str = "sandhole.sni_connections.total";
+pub(crate) const TELEMETRY_COUNTER_SSH_CONNECTIONS_TOTAL: &str = "sandhole_ssh_connections_total";
+pub(crate) const TELEMETRY_COUNTER_HTTP_REQUESTS_TOTAL: &str = "sandhole_http_requests_total";
+pub(crate) const TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL: &str = "sandhole_sni_connections_total";
 pub(crate) const TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL: &str =
-    "sandhole.alias_connections.total";
-pub(crate) const TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL: &str = "sandhole.tcp_connections.total";
-pub(crate) const TELEMETRY_COUNTER_USED_MEMORY_BYTES: &str = "system.used_memory.bytes";
-pub(crate) const TELEMETRY_COUNTER_TOTAL_MEMORY_BYTES: &str = "system.total_memory.bytes";
-pub(crate) const TELEMETRY_COUNTER_NETWORK_TX_BYTES: &str = "system.network_tx.bytes";
-pub(crate) const TELEMETRY_COUNTER_NETWORK_RX_BYTES: &str = "system.network_rx.bytes";
+    "sandhole_alias_connections_total";
+pub(crate) const TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS_TOTAL: &str =
+    "sandhole_admin_alias_connections_total";
+pub(crate) const TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL: &str = "sandhole_tcp_connections_total";
+pub(crate) const TELEMETRY_COUNTER_USED_MEMORY_BYTES: &str = "system_used_memory_bytes";
+pub(crate) const TELEMETRY_COUNTER_TOTAL_MEMORY_BYTES: &str = "system_total_memory_bytes";
+pub(crate) const TELEMETRY_COUNTER_NETWORK_TX_BYTES: &str = "system_network_tx_bytes";
+pub(crate) const TELEMETRY_COUNTER_NETWORK_RX_BYTES: &str = "system_network_rx_bytes";
 
-pub(crate) const TELEMETRY_GAUGE_SSH_CONNECTIONS_CURRENT: &str = "sandhole.ssh_connections.current";
-pub(crate) const TELEMETRY_GAUGE_SNI_CONNECTIONS_CURRENT: &str = "sandhole.sni_connections.current";
+pub(crate) const TELEMETRY_GAUGE_SSH_CONNECTIONS_CURRENT: &str = "sandhole_ssh_connections_current";
+pub(crate) const TELEMETRY_GAUGE_SNI_CONNECTIONS_CURRENT: &str = "sandhole_sni_connections_current";
 pub(crate) const TELEMETRY_GAUGE_ALIAS_CONNECTIONS_CURRENT: &str =
-    "sandhole.alias_connections.current";
-pub(crate) const TELEMETRY_GAUGE_TCP_CONNECTIONS_CURRENT: &str = "sandhole.tcp_connections.current";
-pub(crate) const TELEMETRY_GAUGE_CPU_USAGE_PERCENT: &str = "system.cpu_usage.percent";
+    "sandhole_alias_connections_current";
+pub(crate) const TELEMETRY_GAUGE_ADMIN_ALIAS_CONNECTIONS_CURRENT: &str =
+    "sandhole_admin_alias_connections_current";
+pub(crate) const TELEMETRY_GAUGE_TCP_CONNECTIONS_CURRENT: &str = "sandhole_tcp_connections_current";
+pub(crate) const TELEMETRY_GAUGE_CPU_USAGE_PERCENT: &str = "system_cpu_usage_percent";
 
 pub(crate) const TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME_SECONDS: &str =
-    "sandhole.http_elapsed_time.seconds";
+    "sandhole_http_elapsed_time_seconds";
 
 // Metadata to display on the admin interface.
 pub(crate) struct Telemetry {
@@ -133,12 +151,50 @@ pub(crate) struct Telemetry {
     sni_connections_per_minute: DashMap<String, Arc<SlidingWindowCounter>, RandomState>,
     // Connections per minute for each local-forwarded alias.
     alias_connections_per_minute: DashMap<TcpAlias, Arc<SlidingWindowCounter>, RandomState>,
+    // Connections per minute for each admin alias.
+    admin_alias_connections_per_minute: DashMap<TcpAlias, Arc<SlidingWindowCounter>, RandomState>,
     // Connections per minute for each TCP port.
     tcp_connections_per_minute: DashMap<u16, Arc<SlidingWindowCounter>, RandomState>,
+    // Recorder for Prometheus metrics export.
+    prometheus_recorder: PrometheusRecorder,
+    // Join handle for the Prometheus upkeep task.
+    _join_handle: DroppableHandle<()>,
 }
 
 impl Telemetry {
     pub(crate) fn new() -> Self {
+        let prometheus_recorder = PrometheusBuilder::new()
+            .set_buckets_for_metric(
+                metrics_exporter_prometheus::Matcher::Full(
+                    TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME_SECONDS.to_string(),
+                ),
+                &[
+                    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0,
+                ],
+            )
+            .expect("values should not be empty")
+            .build_recorder();
+        let handle = prometheus_recorder.handle();
+        let join_handle = DroppableHandle(tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_secs(60)).await;
+                handle.run_upkeep();
+            }
+        }));
+
+        Telemetry {
+            ssh_connections_per_minute: DashMap::default(),
+            http_requests_per_minute: DashMap::default(),
+            sni_connections_per_minute: DashMap::default(),
+            alias_connections_per_minute: DashMap::default(),
+            admin_alias_connections_per_minute: DashMap::default(),
+            tcp_connections_per_minute: DashMap::default(),
+            prometheus_recorder,
+            _join_handle: join_handle,
+        }
+    }
+
+    pub(crate) fn register_metrics(&self) {
         describe_counter!(
             TELEMETRY_COUNTER_SSH_CONNECTIONS_TOTAL,
             "Total connections for SSH aliases"
@@ -154,6 +210,10 @@ impl Telemetry {
         describe_counter!(
             TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL,
             "Total connections for aliases"
+        );
+        describe_counter!(
+            TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS_TOTAL,
+            "Total connections for admin aliases"
         );
         describe_counter!(
             TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL,
@@ -189,14 +249,10 @@ impl Telemetry {
             TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME_SECONDS,
             "Time to handle an HTTP request"
         );
+    }
 
-        Telemetry {
-            ssh_connections_per_minute: DashMap::default(),
-            http_requests_per_minute: DashMap::default(),
-            sni_connections_per_minute: DashMap::default(),
-            tcp_connections_per_minute: DashMap::default(),
-            alias_connections_per_minute: DashMap::default(),
-        }
+    pub(crate) fn prometheus_handle(&self) -> PrometheusHandle {
+        self.prometheus_recorder.handle()
     }
 
     pub(crate) fn get_ssh_connections_per_minute(&self) -> HashMap<String, u64, RandomState> {
@@ -222,6 +278,15 @@ impl Telemetry {
 
     pub(crate) fn get_alias_connections_per_minute(&self) -> HashMap<TcpAlias, u64, RandomState> {
         self.alias_connections_per_minute
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().measure()))
+            .collect()
+    }
+
+    pub(crate) fn get_admin_alias_connections_per_minute(
+        &self,
+    ) -> HashMap<TcpAlias, u64, RandomState> {
+        self.admin_alias_connections_per_minute
             .iter()
             .map(|entry| (entry.key().clone(), entry.value().measure()))
             .collect()
@@ -268,33 +333,40 @@ impl Telemetry {
 impl Recorder for Telemetry {
     fn describe_counter(
         &self,
-        _key: metrics::KeyName,
-        _unit: Option<Unit>,
-        _description: metrics::SharedString,
+        key: metrics::KeyName,
+        unit: Option<Unit>,
+        description: metrics::SharedString,
     ) {
+        self.prometheus_recorder
+            .describe_counter(key, unit, description);
     }
 
     fn describe_gauge(
         &self,
-        _key: metrics::KeyName,
-        _unit: Option<Unit>,
-        _description: metrics::SharedString,
+        key: metrics::KeyName,
+        unit: Option<Unit>,
+        description: metrics::SharedString,
     ) {
+        self.prometheus_recorder
+            .describe_gauge(key, unit, description);
     }
 
     fn describe_histogram(
         &self,
-        _key: metrics::KeyName,
-        _unit: Option<Unit>,
-        _description: metrics::SharedString,
+        key: metrics::KeyName,
+        unit: Option<Unit>,
+        description: metrics::SharedString,
     ) {
+        self.prometheus_recorder
+            .describe_histogram(key, unit, description);
     }
 
     fn register_counter(
         &self,
         key: &metrics::Key,
-        _metadata: &metrics::Metadata<'_>,
+        metadata: &metrics::Metadata<'_>,
     ) -> metrics::Counter {
+        let prometheus_counter = self.prometheus_recorder.register_counter(key, metadata);
         let name = key.name();
         let labels: Vec<(&str, &str)> = key
             .labels()
@@ -309,6 +381,7 @@ impl Recorder for Telemetry {
                             self.ssh_connections_per_minute
                                 .entry(value.to_string())
                                 .or_insert(Arc::new(SlidingWindowCounter::new(
+                                    prometheus_counter,
                                     Duration::from_secs(60),
                                 )))
                                 .value(),
@@ -323,6 +396,7 @@ impl Recorder for Telemetry {
                             self.http_requests_per_minute
                                 .entry(value.to_string())
                                 .or_insert(Arc::new(SlidingWindowCounter::new(
+                                    prometheus_counter,
                                     Duration::from_secs(60),
                                 )))
                                 .value(),
@@ -337,6 +411,7 @@ impl Recorder for Telemetry {
                             self.sni_connections_per_minute
                                 .entry(value.to_string())
                                 .or_insert(Arc::new(SlidingWindowCounter::new(
+                                    prometheus_counter,
                                     Duration::from_secs(60),
                                 )))
                                 .value(),
@@ -346,13 +421,14 @@ impl Recorder for Telemetry {
             }
             TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL => {
                 for (key, value) in labels {
-                    if key == TELEMETRY_KEY_PORT {
+                    if key == TELEMETRY_KEY_ALIAS {
                         match value.parse::<TcpAlias>() {
                             Ok(port) => {
                                 return metrics::Counter::from_arc(Arc::clone(
                                     self.alias_connections_per_minute
                                         .entry(port)
                                         .or_insert(Arc::new(SlidingWindowCounter::new(
+                                            prometheus_counter,
                                             Duration::from_secs(60),
                                         )))
                                         .value(),
@@ -360,6 +436,28 @@ impl Recorder for Telemetry {
                             }
                             Err(error) => {
                                 warn!(alias = value, %error, "Invalid TCP alias in telemetry.")
+                            }
+                        }
+                    }
+                }
+            }
+            TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS_TOTAL => {
+                for (key, value) in labels {
+                    if key == TELEMETRY_KEY_ALIAS {
+                        match value.parse::<TcpAlias>() {
+                            Ok(port) => {
+                                return metrics::Counter::from_arc(Arc::clone(
+                                    self.admin_alias_connections_per_minute
+                                        .entry(port)
+                                        .or_insert(Arc::new(SlidingWindowCounter::new(
+                                            prometheus_counter,
+                                            Duration::from_secs(60),
+                                        )))
+                                        .value(),
+                                ));
+                            }
+                            Err(error) => {
+                                warn!(alias = value, %error, "Invalid admin alias in telemetry.")
                             }
                         }
                     }
@@ -374,6 +472,7 @@ impl Recorder for Telemetry {
                                     self.tcp_connections_per_minute
                                         .entry(port)
                                         .or_insert(Arc::new(SlidingWindowCounter::new(
+                                            prometheus_counter,
                                             Duration::from_secs(60),
                                         )))
                                         .value(),
@@ -386,23 +485,23 @@ impl Recorder for Telemetry {
             }
             _ => (),
         }
-        metrics::Counter::noop()
+        prometheus_counter
     }
 
     fn register_gauge(
         &self,
-        _key: &metrics::Key,
-        _metadata: &metrics::Metadata<'_>,
+        key: &metrics::Key,
+        metadata: &metrics::Metadata<'_>,
     ) -> metrics::Gauge {
-        metrics::Gauge::noop()
+        self.prometheus_recorder.register_gauge(key, metadata)
     }
 
     fn register_histogram(
         &self,
-        _key: &metrics::Key,
-        _metadata: &metrics::Metadata<'_>,
+        key: &metrics::Key,
+        metadata: &metrics::Metadata<'_>,
     ) -> metrics::Histogram {
-        metrics::Histogram::noop()
+        self.prometheus_recorder.register_histogram(key, metadata)
     }
 }
 
@@ -411,13 +510,13 @@ impl Recorder for Telemetry {
 mod counter_tests {
     use std::{thread::sleep, time::Duration};
 
-    use metrics::CounterFn;
+    use metrics::{Counter, CounterFn};
 
     use super::SlidingWindowCounter;
 
     #[test_log::test]
     fn takes_measurements() {
-        let counter = SlidingWindowCounter::new(Duration::from_secs(4));
+        let counter = SlidingWindowCounter::new(Counter::noop(), Duration::from_secs(4));
         assert_eq!(counter.measure(), 0);
         counter.increment(2);
         let measure_1 = counter.measure();
@@ -432,7 +531,7 @@ mod counter_tests {
 
     #[test_log::test]
     fn resets_on_moving_window() {
-        let counter = SlidingWindowCounter::new(Duration::from_millis(200));
+        let counter = SlidingWindowCounter::new(Counter::noop(), Duration::from_millis(200));
         counter.increment(10);
         let measure_1 = counter.measure();
         assert_eq!(measure_1, 10);

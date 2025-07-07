@@ -6,7 +6,7 @@ use russh::keys::ssh_key;
 
 use crate::{
     SandholeServer,
-    admin::AdminInterface,
+    admin::interface::AdminInterface,
     ssh::{AuthenticatedData, ServerHandlerSender, auth::UserSessionRestriction},
     tcp_alias::TcpAlias,
 };

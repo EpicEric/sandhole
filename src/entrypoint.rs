@@ -43,6 +43,10 @@ use crate::{
     SandholeServer, SystemData, TunnelingProxyData,
     acme::{AcmeResolver, AlpnAcmeResolver},
     addressing::{AddressDelegator, DnsResolver},
+    admin::{
+        ADMIN_ALIAS_PORT,
+        connection_handler::{AdminAliasHandler, get_prometheus_service},
+    },
     certificates::{AlpnChallengeResolver, CertificateResolver, DummyAlpnChallengeResolver},
     config::ApplicationConfig,
     connection_handler::ConnectionHandler,
@@ -53,10 +57,11 @@ use crate::{
     http::{DomainRedirect, Protocol, ProxyData, ProxyType, proxy_handler},
     ip::{IpFilter, IpFilterConfig},
     login::{ApiLogin, WebpkiVerifierConfigurer},
-    quota::{DummyQuotaHandler, QuotaHandler, QuotaMap},
+    quota::{DummyQuotaHandler, QuotaHandler, QuotaMap, TokenHolder},
     reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
     ssh::Server,
     tcp::TcpHandler,
+    tcp_alias::TcpAlias,
     telemetry::{
         TELEMETRY_COUNTER_NETWORK_RX_BYTES, TELEMETRY_COUNTER_NETWORK_TX_BYTES,
         TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL, TELEMETRY_COUNTER_TOTAL_MEMORY_BYTES,
@@ -169,8 +174,15 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         blocklist: config.ip_blocklist,
     })?);
     let telemetry = Arc::new(Telemetry::new());
-    if let Err(error) = metrics::set_global_recorder(Arc::clone(&telemetry)) {
-        error!(%error, "Failed to install telemetry.");
+    let prometheus_handle = match metrics::set_global_recorder(Arc::clone(&telemetry)) {
+        Ok(_) => {
+            telemetry.register_metrics();
+            Some(telemetry.prometheus_handle())
+        }
+        Err(error) => {
+            error!(%error, "Failed to install telemetry.");
+            None
+        }
     };
     let quota_handler: Arc<Box<dyn QuotaHandler + Send + Sync>> = match config.quota_per_user {
         Some(max_quota) => Arc::new(Box::new(Arc::new(QuotaMap::new(max_quota.into())))),
@@ -204,6 +216,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         ConnectionMap::builder()
             .load_balancing(config.load_balancing)
             .quota_handler(Arc::clone(&quota_handler))
+            .build(),
+    );
+    let admin_alias_connections = Arc::new(
+        ConnectionMap::builder()
+            .load_balancing(crate::LoadBalancing::Deny)
+            .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
             .build(),
     );
     let alias_connections = Arc::new(
@@ -354,20 +372,29 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     let alias_data = Arc::new(Mutex::default());
     if !config.disable_aliasing {
         let data_clone = Arc::clone(&alias_data);
-        let connections_clone = Arc::clone(&alias_connections);
+        let alias_connections_clone = Arc::clone(&alias_connections);
+        let admin_connections_clone = Arc::clone(&admin_alias_connections);
         let telemetry_clone = Arc::clone(&telemetry);
         // Periodically update alias data, based on the connection map.
         tokio::spawn(async move {
             loop {
                 sleep(Duration::from_millis(3_000)).await;
-                let data = connections_clone.data();
-                let telemetry = telemetry_clone.get_alias_connections_per_minute();
-                let data = data
+                let alias_data = alias_connections_clone.data();
+                let admin_data = admin_connections_clone.data();
+                let telemetry_alias = telemetry_clone.get_alias_connections_per_minute();
+                let telemetry_admin_alias =
+                    telemetry_clone.get_admin_alias_connections_per_minute();
+                let data = alias_data
                     .into_iter()
                     .map(|(alias, addresses)| {
-                        let connections_per_minute = *telemetry.get(&alias).unwrap_or(&0u64);
+                        let connections_per_minute = *telemetry_alias.get(&alias).unwrap_or(&0u64);
                         (alias, (addresses, connections_per_minute))
                     })
+                    .chain(admin_data.into_iter().map(|(alias, addresses)| {
+                        let connections_per_minute =
+                            *telemetry_admin_alias.get(&alias).unwrap_or(&0u64);
+                        (alias, (addresses, connections_per_minute))
+                    }))
                     .collect();
                 *data_clone.lock().unwrap() = data;
             }
@@ -430,10 +457,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     // Create the local forwarding-specific HTTP proxy data.
     let aliasing_proxy_data = Arc::new(
         ProxyData::builder()
-            .conn_manager(Arc::new(HttpAliasingConnection::new(
-                Arc::clone(&http_connections),
-                Arc::clone(&alias_connections),
-            )))
+            .conn_manager(Arc::new(
+                HttpAliasingConnection::builder()
+                    .http(Arc::clone(&http_connections))
+                    .alias(Arc::clone(&alias_connections))
+                    .build(),
+            ))
             .domain_redirect(Arc::clone(&domain_redirect))
             // HTTP only.
             .protocol(Protocol::Http {
@@ -455,6 +484,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         sni: sni_connections,
         ssh: ssh_connections,
         tcp: tcp_connections,
+        admin_alias: admin_alias_connections,
         alias: alias_connections,
         http_data,
         sni_data,
@@ -489,6 +519,24 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .unwrap_or(config.idle_connection_timeout),
         tcp_connection_timeout,
     });
+
+    // Admin aliases
+    if let Some(handle) = prometheus_handle {
+        let _ = sandhole.admin_alias.insert(
+            TcpAlias("prometheus.sandhole".into(), ADMIN_ALIAS_PORT),
+            SocketAddr::from(([0, 0, 0, 0], 0)),
+            TokenHolder::System,
+            Arc::new(AdminAliasHandler {
+                handler: Arc::new(move || {
+                    get_prometheus_service(
+                        handle.clone(),
+                        tcp_connection_timeout,
+                        config.buffer_size,
+                    )
+                }),
+            }),
+        );
+    }
 
     // HTTP handler
     let mut join_handle_http = if config.disable_http {

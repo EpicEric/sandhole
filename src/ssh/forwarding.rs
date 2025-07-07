@@ -14,22 +14,24 @@ use russh::{
     server::{Handle, Msg},
 };
 use tokio::{io::copy_bidirectional_with_sizes, time::timeout};
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::{
     SandholeServer,
+    admin::ADMIN_ALIAS_PORT,
     connection_handler::ConnectionHandler,
     connections::ConnectionGetByHttpHost,
     http::proxy_handler,
     ssh::{
-        AuthenticatedData, ServerHandlerSender, SshTunnelHandler, UserData,
-        auth::UserSessionRestriction,
+        AuthenticatedData, ServerHandlerSender, UserData, auth::UserSessionRestriction,
+        connection_handler::SshTunnelHandler,
     },
     tcp::PortHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
     telemetry::{
-        TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL, TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL,
-        TELEMETRY_COUNTER_SSH_CONNECTIONS_TOTAL, TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL,
+        TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS_TOTAL, TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL,
+        TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL, TELEMETRY_COUNTER_SSH_CONNECTIONS_TOTAL,
+        TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL, TELEMETRY_GAUGE_ADMIN_ALIAS_CONNECTIONS_CURRENT,
         TELEMETRY_GAUGE_ALIAS_CONNECTIONS_CURRENT, TELEMETRY_GAUGE_SNI_CONNECTIONS_CURRENT,
         TELEMETRY_GAUGE_SSH_CONNECTIONS_CURRENT, TELEMETRY_GAUGE_TCP_CONNECTIONS_CURRENT,
         TELEMETRY_KEY_ALIAS, TELEMETRY_KEY_HOSTNAME, TELEMETRY_KEY_PORT,
@@ -407,7 +409,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                         });
                     }
                 }
-                info!(
+                debug!(
                     peer = %context.peer, remote = %handler.peer, alias = %address,
                     "Accepted SSH connection.",
                 );
@@ -858,20 +860,33 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
         // If alias, the user must provide the port number themselves
         let assigned_port = if *port == 0 {
             let error = eyre!("cannot assign random port to alias");
-            info!(
+            debug!(
                 peer = %context.peer, alias = %address, %error,
-                "Failed to bind random TCP port for alias.",
+                "Failed to bind port for alias.",
             );
             let _ = context.tx.send(
                 format!(
-                    "Cannot listen to TCP on random port of {address} ({error})\r\n\
-                            Please specify the desired port.\r\n",
+                    "Cannot listen to random port for alias {address} ({error})\r\nPlease specify the desired port.\r\n",
                 )
                 .into_bytes(),
             );
             return Ok(false);
-        // Allow user-requested port
+        } else if *port == ADMIN_ALIAS_PORT as u32 {
+            // Port 10 is reserved for admin aliases
+            let error = eyre!("port {ADMIN_ALIAS_PORT} is reserved by Sandhole");
+            debug!(
+                peer = %context.peer, alias = %address, %error,
+                "Failed to bind port for alias.",
+            );
+            let _ = context.tx.send(
+                format!(
+                    "Cannot listen on port {port} for alias {address} ({error})\r\nPlease specify a different port.\r\n",
+                )
+                .into_bytes(),
+            );
+            return Ok(false);
         } else {
+            // Allow user-requested port
             *port as u16
         };
         // Add handler to alias connection map
@@ -895,11 +910,11 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                 // Adding to connection map failed.
                 info!(
                     peer = %context.peer, alias = %address, port = %assigned_port, %error,
-                    "Rejecting TCP port for alias.",
+                    "Rejecting port for alias.",
                 );
                 let _ = context.tx.send(
                     format!(
-                        "Cannot listen to TCP on port {} for alias {} ({})\r\n",
+                        "Cannot listen on port {} for alias {} ({})\r\n",
                         &assigned_port, address, error,
                     )
                     .into_bytes(),
@@ -914,11 +929,11 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                 );
                 info!(
                     peer = %context.peer, alias = %address, port = %assigned_port,
-                    "Tunneling TCP port for alias...",
+                    "Tunneling port for alias...",
                 );
                 let _ = context.tx.send(
                     format!(
-                        "Tunneling TCP port {} for alias {}\r\n",
+                        "Tunneling port {} for alias {}\r\n",
                         &assigned_port, address,
                     )
                     .into_bytes(),
@@ -962,6 +977,75 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
         channel: Channel<Msg>,
     ) -> Result<bool, russh::Error> {
         if let Some(handler) = context
+            .server
+            .admin_alias
+            .get(&BorrowedTcpAlias(address, &port) as &dyn TcpAliasKey)
+        {
+            if let AuthenticatedData::Admin { .. } = context.auth_data {
+                if let Ok(mut io) = handler
+                    .aliasing_channel(
+                        context.peer.ip(),
+                        context.peer.port(),
+                        context.key_fingerprint.as_ref(),
+                    )
+                    .await
+                {
+                    let alias = TcpAlias(address.into(), port);
+                    let gauge = gauge!(TELEMETRY_GAUGE_ADMIN_ALIAS_CONNECTIONS_CURRENT, TELEMETRY_KEY_ALIAS => alias.to_string());
+                    gauge.increment(1);
+                    counter!(TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS_TOTAL, TELEMETRY_KEY_ALIAS => alias.to_string())
+                    .increment(1);
+                    let _ = handler.log_channel().send(
+                        format!(
+                            "New TCP proxy from {originator_address}:{originator_port} => {address}:{port}\r\n"
+                        )
+                        .into_bytes(),
+                    );
+                    let tcp_connection_timeout = context.server.tcp_connection_timeout;
+                    let buffer_size = context.server.buffer_size;
+                    tokio::spawn(async move {
+                        let mut stream = channel.into_stream();
+                        match tcp_connection_timeout {
+                            Some(duration) => {
+                                let _ = timeout(duration, async {
+                                    copy_bidirectional_with_sizes(
+                                        &mut stream,
+                                        &mut io,
+                                        buffer_size,
+                                        buffer_size,
+                                    )
+                                    .await
+                                })
+                                .await;
+                            }
+                            None => {
+                                let _ = copy_bidirectional_with_sizes(
+                                    &mut stream,
+                                    &mut io,
+                                    buffer_size,
+                                    buffer_size,
+                                )
+                                .await;
+                            }
+                        }
+                        gauge.decrement(1);
+                    });
+                    debug!(
+                        peer = %context.peer, alias = %address, port = %port,
+                        "Accepted admin alias connection.",
+                    );
+                    let _ = context
+                        .tx
+                        .send(format!("Forwarding TCP from {address}:{port}\r\n").into_bytes());
+                    return Ok(true);
+                }
+            } else {
+                debug!(
+                    peer = %context.peer, fingerprint = ?context.key_fingerprint, alias = %address, port = %port,
+                    "Non-admin user attempt to local forward admin alias",
+                )
+            }
+        } else if let Some(handler) = context
             .server
             .alias
             .get(&BorrowedTcpAlias(address, &port) as &dyn TcpAliasKey)
@@ -1053,13 +1137,13 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                         });
                     }
                 }
-                info!(
+                debug!(
                     peer = %context.peer, remote = %handler.peer, alias = %address, port = %port,
                     "Accepted alias connection.",
                 );
                 let _ = context
                     .tx
-                    .send(format!("Forwarding TCP from {address}\r\n").into_bytes());
+                    .send(format!("Forwarding TCP from {address}:{port}\r\n").into_bytes());
                 return Ok(true);
             }
         }
@@ -1342,13 +1426,13 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                         });
                     }
                 }
-                info!(
+                debug!(
                     peer = %context.peer, remote = %handler.peer, port = %port,
                     "Accepted TCP connection.",
                 );
                 let _ = context
                     .tx
-                    .send(format!("Forwarding TCP from {address}\r\n").into_bytes());
+                    .send(format!("Forwarding TCP from port {port}\r\n").into_bytes());
                 return Ok(true);
             }
         }

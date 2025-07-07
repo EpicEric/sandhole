@@ -19,13 +19,14 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     addressing::{AddressDelegator, DnsResolver},
-    connections::ConnectionMap,
-    connections::HttpAliasingConnection,
+    admin::connection_handler::AdminAliasHandler,
+    connections::{ConnectionMap, HttpAliasingConnection},
     fingerprints::FingerprintsValidator,
     http::ProxyData,
     login::{ApiLogin, WebpkiVerifierConfigurer},
+    quota::TokenHolderUser,
     reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
-    ssh::SshTunnelHandler,
+    ssh::connection_handler::SshTunnelHandler,
     tcp::TcpHandler,
     tcp_alias::TcpAlias,
 };
@@ -96,18 +97,20 @@ pub(crate) struct SandholeServer {
     pub(crate) sni: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, SniReactor>>,
     // The map for forwarded TCP connections.
     pub(crate) tcp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
+    // The map for admin aliased connections.
+    pub(crate) admin_alias: Arc<ConnectionMap<TcpAlias, Arc<AdminAliasHandler>, AliasReactor>>,
     // The map for forwarded aliased connections.
     pub(crate) alias: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, AliasReactor>>,
     // Data related to the SSH forwardings for the admin interface.
-    pub(crate) ssh_data: DataTable<String, (BTreeMap<SocketAddr, String>, u64)>,
+    pub(crate) ssh_data: DataTable<String, (BTreeMap<SocketAddr, TokenHolderUser>, u64)>,
     // Data related to the HTTP forwardings for the admin interface.
-    pub(crate) http_data: DataTable<String, (BTreeMap<SocketAddr, String>, u64)>,
+    pub(crate) http_data: DataTable<String, (BTreeMap<SocketAddr, TokenHolderUser>, u64)>,
     // Data related to the SNI forwardings for the admin interface.
-    pub(crate) sni_data: DataTable<String, (BTreeMap<SocketAddr, String>, u64)>,
+    pub(crate) sni_data: DataTable<String, (BTreeMap<SocketAddr, TokenHolderUser>, u64)>,
     // Data related to the TCP forwardings for the admin interface.
-    pub(crate) tcp_data: DataTable<u16, (BTreeMap<SocketAddr, String>, u64)>,
+    pub(crate) tcp_data: DataTable<u16, (BTreeMap<SocketAddr, TokenHolderUser>, u64)>,
     // Data related to the alias forwardings for the admin interface.
-    pub(crate) alias_data: DataTable<TcpAlias, (BTreeMap<SocketAddr, String>, u64)>,
+    pub(crate) alias_data: DataTable<TcpAlias, (BTreeMap<SocketAddr, TokenHolderUser>, u64)>,
     // System data for the admin interface.
     pub(crate) system_data: Arc<Mutex<SystemData>>,
     // HTTP proxy data used by the local forwarding aliasing connections.

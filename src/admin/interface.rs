@@ -29,6 +29,7 @@ use crate::{
     SandholeServer, SystemData,
     droppable_handle::DroppableHandle,
     fingerprints::{AuthenticationType, KeyData},
+    quota::TokenHolderUser,
     ssh::ServerHandlerSender,
     tcp_alias::TcpAlias,
 };
@@ -121,16 +122,22 @@ impl TabData {
     }
 }
 
+enum UserData {
+    Password,
+    PublicKey(Fingerprint, KeyData),
+    System,
+}
+
 // Pop-up window displaying detailed information
 enum AdminPrompt {
     // General information
     Infobox(String),
     // User selection
-    SelectUser(Vec<String>, TableState),
+    SelectUser(Vec<TokenHolderUser>, TableState),
     // User details
-    UserDetails(String, Option<(Fingerprint, KeyData)>),
+    UserDetails(TokenHolderUser, UserData),
     // Prompt to remove a user
-    RemoveUser(String, Option<(Fingerprint, KeyData)>),
+    RemoveUser(TokenHolderUser, UserData),
 }
 
 // Data used to render the admin interface.
@@ -240,7 +247,7 @@ impl AdminState {
                         Line::from(vec![" <Enter> ".bold(), "Details ".into()]).centered(),
                     );
                     let users = Table::new(
-                        users.iter().map(|user| Row::new([user.as_str()])),
+                        users.iter().map(|user| Row::new([user.to_string()])),
                         [Constraint::Fill(1)],
                     )
                     .row_highlight_style(Style::new().black().on_blue());
@@ -249,42 +256,48 @@ impl AdminState {
                 }
                 // Show the user details pop-up
                 AdminPrompt::UserDetails(user, data) => {
-                    let block = block.title(Line::raw("User details")).title_bottom(
-                        if data
-                            .as_ref()
-                            .is_none_or(|(_, data)| data.auth == AuthenticationType::User)
-                        {
-                            Line::from(vec![
+                    let block = block
+                        .title(Line::raw("User details"))
+                        .title_bottom(match data {
+                            UserData::Password => Line::from(vec![
                                 " <Esc> ".bold(),
                                 "Close ".into(),
                                 " <Delete> ".bold(),
                                 "Remove ".into(),
                             ])
-                            .centered()
-                        } else {
-                            Line::from(vec![" <Esc> ".bold(), "Close ".into()]).centered()
-                        },
-                    );
-                    let user_data = data
-                        .as_ref()
-                        // If fingerprint, get key data
-                        .map(|(_, data)| {
-                            vec![
-                                Line::from(user.as_str()).centered(),
-                                Line::from(format!("Type: {}", data.auth)).centered(),
-                                Line::from(format!("Key comment: {}", data.comment)).centered(),
-                                Line::from(format!("Algorithm: {}", data.algorithm.as_str()))
-                                    .centered(),
-                            ]
-                        })
-                        // If not, get generic user data
-                        .unwrap_or_else(|| {
-                            vec![
-                                Line::from(user.as_str()).centered(),
-                                Line::from("Type: User").centered(),
-                                Line::from("(authenticated with password)").centered(),
-                            ]
+                            .centered(),
+                            UserData::PublicKey(_, KeyData { auth, .. })
+                                if *auth == AuthenticationType::User =>
+                            {
+                                Line::from(vec![
+                                    " <Esc> ".bold(),
+                                    "Close ".into(),
+                                    " <Delete> ".bold(),
+                                    "Remove ".into(),
+                                ])
+                                .centered()
+                            }
+                            _ => Line::from(vec![" <Esc> ".bold(), "Close ".into()]).centered(),
                         });
+                    let user_data = match data {
+                        UserData::Password => vec![
+                            Line::from(user.to_string()).centered(),
+                            Line::from("Type: User").centered(),
+                            Line::from("(authenticated with password)").centered(),
+                        ],
+                        UserData::PublicKey(_, key_data) => vec![
+                            Line::from(user.to_string()).centered(),
+                            Line::from(format!("Type: {}", key_data.auth)).centered(),
+                            Line::from(format!("Key comment: {}", key_data.comment)).centered(),
+                            Line::from(format!("Algorithm: {}", key_data.algorithm.as_str()))
+                                .centered(),
+                        ],
+                        UserData::System => vec![
+                            Line::from(user.to_string()).centered(),
+                            Line::from("Type: System").centered(),
+                            Line::from("(not a real user)").centered(),
+                        ],
+                    };
                     let text = Paragraph::new(user_data).wrap(Wrap { trim: true });
                     Widget::render(block, area, buf);
                     Widget::render(text, inner, buf);
@@ -303,8 +316,8 @@ impl AdminState {
                     let text = Paragraph::new(vec![
                         Line::from("Are you sure you want to remove the following user?")
                             .centered(),
-                        Line::from(user.as_str()).centered(),
-                        Line::from(if data.is_some() {
+                        Line::from(user.to_string()).centered(),
+                        Line::from(if let UserData::PublicKey(_, _) = data {
                             "Any keys in the given file will lose all forwarding permissions!"
                         } else {
                             "They might still be able to reconnect via the login API!"
@@ -773,7 +786,7 @@ impl AdminInterface {
                 // Confirm removal of the user
                 Some(AdminPrompt::RemoveUser(user, data)) => {
                     let mut text = "User removed successfully!".into();
-                    if let Some(fingerprint) = data.map(|(fingerprint, _)| fingerprint) {
+                    if let UserData::PublicKey(fingerprint, _) = data {
                         if let Err(error) = interface
                             .state
                             .server
@@ -782,7 +795,7 @@ impl AdminInterface {
                         {
                             text = format!("Error: {error}");
                         }
-                        if let Some(sessions) = interface
+                        if let Some((_, sessions)) = interface
                             .state
                             .server
                             .sessions_publickey
@@ -790,21 +803,23 @@ impl AdminInterface {
                             .unwrap()
                             .remove(&fingerprint)
                         {
-                            sessions.1.values().for_each(|cancellation_token| {
+                            sessions.values().for_each(|cancellation_token| {
                                 cancellation_token.cancel();
                             });
                         }
-                    } else if let Some(sessions) = interface
-                        .state
-                        .server
-                        .sessions_password
-                        .lock()
-                        .unwrap()
-                        .remove(&user)
-                    {
-                        sessions.1.values().for_each(|cancellation_token| {
-                            cancellation_token.cancel();
-                        });
+                    } else if let TokenHolderUser::Username(username) = user {
+                        if let Some((_, sessions)) = interface
+                            .state
+                            .server
+                            .sessions_password
+                            .lock()
+                            .unwrap()
+                            .remove(&username)
+                        {
+                            sessions.values().for_each(|cancellation_token| {
+                                cancellation_token.cancel();
+                            });
+                        }
                     }
                     interface.state.prompt = Some(AdminPrompt::Infobox(text));
                     true
@@ -816,16 +831,23 @@ impl AdminInterface {
                         .and_then(|selected| users.get(selected))
                     {
                         let user = user.clone();
-                        let fingerprint = user.parse().ok();
-                        let key_data = fingerprint.as_ref().and_then(|fingerprint| {
-                            interface
-                                .state
-                                .server
-                                .fingerprints_validator
-                                .get_data_for_fingerprint(fingerprint)
-                        });
-                        interface.state.prompt =
-                            Some(AdminPrompt::UserDetails(user, fingerprint.zip(key_data)));
+                        let user_data = match &user {
+                            TokenHolderUser::System => UserData::System,
+                            TokenHolderUser::PublicKey(fingerprint) => {
+                                if let Some(key_data) = interface
+                                    .state
+                                    .server
+                                    .fingerprints_validator
+                                    .get_data_for_fingerprint(fingerprint)
+                                {
+                                    UserData::PublicKey(*fingerprint, key_data)
+                                } else {
+                                    UserData::Password
+                                }
+                            }
+                            TokenHolderUser::Username(_) => UserData::Password,
+                        };
+                        interface.state.prompt = Some(AdminPrompt::UserDetails(user, user_data));
                         true
                     } else {
                         interface.state.prompt = Some(AdminPrompt::SelectUser(users, table_state));
@@ -839,53 +861,54 @@ impl AdminInterface {
                 // No prompt, select from table
                 None => match interface.state.table_state.selected() {
                     Some(row) => {
-                        let users: Option<Vec<String>> = match interface.state.tab.current_tab() {
-                            Tab::Http => interface
-                                .state
-                                .server
-                                .http_data
-                                .lock()
-                                .unwrap()
-                                .values()
-                                .nth(row)
-                                .map(|value| value.0.values().cloned().collect()),
-                            Tab::Sni => interface
-                                .state
-                                .server
-                                .sni_data
-                                .lock()
-                                .unwrap()
-                                .values()
-                                .nth(row)
-                                .map(|value| value.0.values().cloned().collect()),
-                            Tab::Ssh => interface
-                                .state
-                                .server
-                                .ssh_data
-                                .lock()
-                                .unwrap()
-                                .values()
-                                .nth(row)
-                                .map(|value| value.0.values().cloned().collect()),
-                            Tab::Tcp => interface
-                                .state
-                                .server
-                                .tcp_data
-                                .lock()
-                                .unwrap()
-                                .values()
-                                .nth(row)
-                                .map(|value| value.0.values().cloned().collect()),
-                            Tab::Alias => interface
-                                .state
-                                .server
-                                .alias_data
-                                .lock()
-                                .unwrap()
-                                .values()
-                                .nth(row)
-                                .map(|value| value.0.values().cloned().collect()),
-                        };
+                        let users: Option<Vec<TokenHolderUser>> =
+                            match interface.state.tab.current_tab() {
+                                Tab::Http => interface
+                                    .state
+                                    .server
+                                    .http_data
+                                    .lock()
+                                    .unwrap()
+                                    .values()
+                                    .nth(row)
+                                    .map(|value| value.0.values().cloned().collect()),
+                                Tab::Sni => interface
+                                    .state
+                                    .server
+                                    .sni_data
+                                    .lock()
+                                    .unwrap()
+                                    .values()
+                                    .nth(row)
+                                    .map(|value| value.0.values().cloned().collect()),
+                                Tab::Ssh => interface
+                                    .state
+                                    .server
+                                    .ssh_data
+                                    .lock()
+                                    .unwrap()
+                                    .values()
+                                    .nth(row)
+                                    .map(|value| value.0.values().cloned().collect()),
+                                Tab::Tcp => interface
+                                    .state
+                                    .server
+                                    .tcp_data
+                                    .lock()
+                                    .unwrap()
+                                    .values()
+                                    .nth(row)
+                                    .map(|value| value.0.values().cloned().collect()),
+                                Tab::Alias => interface
+                                    .state
+                                    .server
+                                    .alias_data
+                                    .lock()
+                                    .unwrap()
+                                    .values()
+                                    .nth(row)
+                                    .map(|value| value.0.values().cloned().collect()),
+                            };
                         match users {
                             None => {
                                 interface.state.prompt =
@@ -897,16 +920,24 @@ impl AdminInterface {
                             }
                             Some(mut users) if users.len() == 1 => {
                                 let user = users.remove(0);
-                                let fingerprint = user.parse().ok();
-                                let key_data = fingerprint.as_ref().and_then(|fingerprint| {
-                                    interface
-                                        .state
-                                        .server
-                                        .fingerprints_validator
-                                        .get_data_for_fingerprint(fingerprint)
-                                });
+                                let user_data = match &user {
+                                    TokenHolderUser::System => UserData::System,
+                                    TokenHolderUser::PublicKey(fingerprint) => {
+                                        if let Some(key_data) = interface
+                                            .state
+                                            .server
+                                            .fingerprints_validator
+                                            .get_data_for_fingerprint(fingerprint)
+                                        {
+                                            UserData::PublicKey(*fingerprint, key_data)
+                                        } else {
+                                            UserData::Password
+                                        }
+                                    }
+                                    TokenHolderUser::Username(_) => UserData::Password,
+                                };
                                 interface.state.prompt =
-                                    Some(AdminPrompt::UserDetails(user, fingerprint.zip(key_data)));
+                                    Some(AdminPrompt::UserDetails(user, user_data));
                             }
                             Some(users) => {
                                 interface.state.prompt =
@@ -933,18 +964,26 @@ impl AdminInterface {
         let notify = {
             let mut interface = self.interface.lock().unwrap();
             match interface.state.prompt.take() {
-                Some(AdminPrompt::UserDetails(user, data)) => {
-                    if data
-                        .as_ref()
-                        .is_none_or(|(_, data)| data.auth == AuthenticationType::User)
-                    {
+                Some(AdminPrompt::UserDetails(user, data)) => match data {
+                    UserData::Password => {
                         interface.state.prompt = Some(AdminPrompt::RemoveUser(user, data));
                         true
-                    } else {
+                    }
+                    UserData::PublicKey(
+                        _,
+                        KeyData {
+                            auth: AuthenticationType::User,
+                            ..
+                        },
+                    ) => {
+                        interface.state.prompt = Some(AdminPrompt::RemoveUser(user, data));
+                        true
+                    }
+                    _ => {
                         interface.state.prompt = Some(AdminPrompt::UserDetails(user, data));
                         false
                     }
-                }
+                },
                 Some(prompt) => {
                     interface.state.prompt = Some(prompt);
                     false

@@ -11,7 +11,7 @@ use tokio::{
 /// This test ensures that remote forwarded aliases cannot have the port 0
 /// assigned to them.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn alias_reject_port_0() {
+async fn alias_reject_special_ports() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -49,39 +49,44 @@ async fn alias_reject_port_0() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will fail to proxy on port 0
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
-        None,
-    )
-    .expect("Missing file key1");
-    let ssh_client = SshClient;
-    let mut proxy_session =
-        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-            .await
-            .expect("Failed to connect to SSH server");
-    assert!(
-        proxy_session
-            .authenticate_publickey(
-                "user",
-                PrivateKeyWithHashAlg::new(
-                    Arc::new(key),
-                    proxy_session
-                        .best_supported_rsa_hash()
-                        .await
-                        .unwrap()
-                        .flatten()
+    for port in [0, 10] {
+        // 2. Start SSH client that will fail to proxy on the port
+        let key = load_secret_key(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+            None,
+        )
+        .expect("Missing file key1");
+        let ssh_client = SshClient;
+        let mut proxy_session =
+            russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+                .await
+                .expect("Failed to connect to SSH server");
+        assert!(
+            proxy_session
+                .authenticate_publickey(
+                    "user",
+                    PrivateKeyWithHashAlg::new(
+                        Arc::new(key),
+                        proxy_session
+                            .best_supported_rsa_hash()
+                            .await
+                            .unwrap()
+                            .flatten()
+                    )
                 )
-            )
-            .await
-            .expect("SSH authentication failed")
-            .success(),
-        "authentication didn't succeed"
-    );
-    assert!(
-        proxy_session.tcpip_forward("my.tunnel", 0).await.is_err(),
-        "shouldn't alias on port 0"
-    );
+                .await
+                .expect("SSH authentication failed")
+                .success(),
+            "authentication didn't succeed"
+        );
+        assert!(
+            proxy_session
+                .tcpip_forward("my.tunnel", port)
+                .await
+                .is_err(),
+            "shouldn't alias on port 0"
+        );
+    }
 }
 
 struct SshClient;

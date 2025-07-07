@@ -1,8 +1,9 @@
-use std::{hash::Hash, num::NonZero, sync::Arc};
+use std::{fmt::Display, hash::Hash, num::NonZero, sync::Arc};
 
 use ahash::RandomState;
 use dashmap::DashMap;
 use russh::keys::ssh_key::Fingerprint;
+use serde::Serialize;
 
 // The unique identifications for each user, to discriminate across multiple sessions.
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -24,21 +25,53 @@ impl Hash for UserIdentification {
     }
 }
 
+#[derive(Clone)]
+pub(crate) enum TokenHolderUser {
+    PublicKey(Fingerprint),
+    Username(String),
+    System,
+}
+
+impl Display for TokenHolderUser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TokenHolderUser::PublicKey(fingerprint) => f.write_str(&fingerprint.to_string()),
+            TokenHolderUser::Username(username) => f.write_str(username),
+            TokenHolderUser::System => f.write_str("System"),
+        }
+    }
+}
+
+impl Serialize for TokenHolderUser {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
 // Which kind of user the quota token will be generated for.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) enum TokenHolder {
     User(UserIdentification),
     Admin(UserIdentification),
+    System,
 }
 
 // Return a string representation of the user identifier.
 impl TokenHolder {
-    pub(crate) fn get_user(&self) -> String {
+    pub(crate) fn get_user(&self) -> TokenHolderUser {
         match self {
             TokenHolder::User(user) | TokenHolder::Admin(user) => match user {
-                UserIdentification::PublicKey(fingerprint) => fingerprint.to_string(),
-                UserIdentification::Username(username) => username.clone(),
+                UserIdentification::PublicKey(fingerprint) => {
+                    TokenHolderUser::PublicKey(*fingerprint)
+                }
+                UserIdentification::Username(username) => {
+                    TokenHolderUser::Username(username.clone())
+                }
             },
+            TokenHolder::System => TokenHolderUser::System,
         }
     }
 }
@@ -122,7 +155,7 @@ impl QuotaHandler for Arc<QuotaMap> {
                 })
             }
             // If the holder is an admin, generate a new token indiscriminately
-            TokenHolder::Admin(_) => Some(QuotaToken { callback: None }),
+            TokenHolder::Admin(_) | TokenHolder::System => Some(QuotaToken { callback: None }),
         }
     }
 }

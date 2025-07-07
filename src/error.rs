@@ -20,6 +20,8 @@ pub(crate) enum ServerError {
     MissingDirectory(PathBuf),
     #[error("Duplicate network CIDR {0}")]
     DuplicateNetworkCidr(IpNet),
+    #[error("Tunneling unavailable")]
+    TunnelingUnavailable,
     #[error("Tunneling not allowed")]
     TunnelingNotAllowed,
     #[error("Aliasing not allowed")]

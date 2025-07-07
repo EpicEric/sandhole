@@ -121,11 +121,9 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
     } = data;
     histogram!(
         TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME_SECONDS,
-        "status" => status.to_string(),
         "method" => method.clone(),
         "host" => host.clone(),
         "uri" => uri.clone(),
-        "ip" => ip.clone(),
     )
     .record(elapsed_time.as_secs_f64());
     let status_style = match status {
@@ -1093,7 +1091,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || ServerHandlerSender(logging_tx));
+            .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -1185,7 +1183,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || ServerHandlerSender(logging_tx));
+            .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -1290,7 +1288,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || ServerHandlerSender(logging_tx));
+            .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -1381,7 +1379,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || ServerHandlerSender(logging_tx));
+            .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -1477,7 +1475,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || ServerHandlerSender(logging_tx));
+            .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_aliasing_channel()
             .once()
             .return_once(move |_, _, _| Ok(handler));
@@ -1574,7 +1572,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || ServerHandlerSender(logging_tx));
+            .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -1671,7 +1669,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || ServerHandlerSender(logging_tx));
+            .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));
@@ -1770,7 +1768,7 @@ mod proxy_handler_tests {
         let mut mock = MockConnectionHandler::new();
         mock.expect_log_channel()
             .once()
-            .return_once(move || ServerHandlerSender(logging_tx));
+            .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
             .return_once(move |_, _| Ok(handler));

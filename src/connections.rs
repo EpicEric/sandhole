@@ -14,16 +14,16 @@ use rand::{rng, seq::IndexedRandom};
 use crate::{
     config::LoadBalancing,
     error::ServerError,
-    quota::{QuotaHandler, QuotaToken, TokenHolder},
+    quota::{QuotaHandler, QuotaToken, TokenHolder, TokenHolderUser},
     reactor::{AliasReactor, ConnectionMapReactor, DummyConnectionMapReactor, HttpReactor},
-    ssh::SshTunnelHandler,
+    ssh::connection_handler::SshTunnelHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
 };
 
 // Data stored for a connection map entry.
 struct ConnectionMapEntry<H> {
     // The user that created this connection.
-    user: String,
+    user: TokenHolderUser,
     // The IP and socket for the SSH connection.
     address: SocketAddr,
     // Handler randomly selected for a given key (usually SshTunnelHandler).
@@ -212,7 +212,7 @@ where
     }
 
     // Return tabular data from all the existing connections.
-    pub(crate) fn data(&self) -> BTreeMap<K, BTreeMap<SocketAddr, String>> {
+    pub(crate) fn data(&self) -> BTreeMap<K, BTreeMap<SocketAddr, TokenHolderUser>> {
         self.map
             .iter()
             .map(|entry| {
@@ -245,18 +245,10 @@ where
 }
 
 // Struct that can select HTTP hosts from HTTP forwardings or TCP alias forwardings under port 80.
+#[derive(Builder)]
 pub(crate) struct HttpAliasingConnection {
     http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
     alias: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, AliasReactor>>,
-}
-
-impl HttpAliasingConnection {
-    pub(crate) fn new(
-        http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
-        tcp: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, AliasReactor>>,
-    ) -> Self {
-        HttpAliasingConnection { http, alias: tcp }
-    }
 }
 
 impl ConnectionGetByHttpHost<Arc<SshTunnelHandler>> for Arc<HttpAliasingConnection> {
