@@ -1,7 +1,7 @@
-use std::{convert::Infallible, net::IpAddr, sync::Arc, time::Duration};
+use std::{net::IpAddr, sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use http::{Request, Response, StatusCode};
+use http::{HeaderValue, Request, Response, StatusCode, header::CONTENT_TYPE};
 use http_body_util::Full;
 use hyper::body::Incoming;
 use hyper_util::{
@@ -59,14 +59,20 @@ pub(crate) fn get_prometheus_service(
     let service = hyper::service::service_fn(move |req: Request<Incoming>| {
         let handle_clone = handle.clone();
         async move {
-            if req.uri() == "/" {
-                Ok::<_, Infallible>(Response::new(Full::new(Bytes::copy_from_slice(
-                    handle_clone.render().as_ref(),
-                ))))
-            } else {
-                let mut response = Response::new(Full::new(Bytes::new()));
-                *response.status_mut() = StatusCode::NOT_FOUND;
+            if req.uri().path() == "/" {
+                let mut response = Response::new(Full::new(Bytes::from(
+                    tokio::task::spawn_blocking(move || handle_clone.render())
+                        .await
+                        .unwrap(),
+                )));
+                response
+                    .headers_mut()
+                    .append(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
                 Ok(response)
+            } else {
+                Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Full::default())
             }
         }
     });

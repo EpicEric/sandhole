@@ -173,7 +173,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         allowlist: config.ip_allowlist,
         blocklist: config.ip_blocklist,
     })?);
-    let telemetry = Arc::new(Telemetry::new());
+    let telemetry = Arc::new(Telemetry::new(
+        !config.disable_aliasing && !config.disable_prometheus,
+    ));
     let prometheus_handle = match metrics::set_global_recorder(Arc::clone(&telemetry)) {
         Ok(_) => {
             telemetry.register_metrics();
@@ -521,7 +523,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     });
 
     // Admin aliases
-    if let Some(handle) = prometheus_handle {
+    if let Some(Some(handle)) = prometheus_handle {
         let _ = sandhole.admin_alias.insert(
             TcpAlias("prometheus.sandhole".into(), ADMIN_ALIAS_PORT),
             SocketAddr::from(([0, 0, 0, 0], 0)),

@@ -8,10 +8,10 @@ use tokio::{
     time::{sleep, timeout},
 };
 
-/// This test ensures that only admin users are allowed to local forward for
-/// admin-only aliases.
+/// This test ensures that the Prometheus alias can be fully disabled by the
+/// `--disable-prometheus` option.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn admin_restricted_aliases() {
+async fn config_disable_prometheus() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -33,6 +33,7 @@ async fn admin_restricted_aliases() {
         "--https-port=18443",
         "--acme-use-staging",
         "--bind-hostnames=none",
+        "--disable-prometheus",
         "--idle-connection-timeout=800ms",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
@@ -49,7 +50,7 @@ async fn admin_restricted_aliases() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH admin client that will local forward the Prometheus service
+    // 2. Start SSH admin client that will fail to local forward the Prometheus service
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/admin"),
         None,
@@ -73,41 +74,12 @@ async fn admin_restricted_aliases() {
             .success(),
         "authentication didn't succeed"
     );
-    session
-        .channel_open_direct_tcpip("prometheus.sandhole", 10, "127.0.0.1", 12345)
-        .await
-        .expect("channel_open_direct_tcpip failed");
-
-    // 3. Start SSH user client that will fail to local forward the Prometheus service
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
-        None,
-    )
-    .expect("Missing file key1");
-    let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
-    assert!(
-        session
-            .authenticate_publickey(
-                "user",
-                PrivateKeyWithHashAlg::new(
-                    Arc::new(key),
-                    session.best_supported_rsa_hash().await.unwrap().flatten()
-                )
-            )
-            .await
-            .expect("SSH authentication failed")
-            .success(),
-        "authentication didn't succeed"
-    );
     assert!(
         session
             .channel_open_direct_tcpip("prometheus.sandhole", 10, "127.0.0.1", 12345)
             .await
             .is_err(),
-        "channel_open_direct_tcpip should've failed"
+        "alias should've been disabled"
     );
 }
 

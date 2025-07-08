@@ -176,6 +176,10 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           Disable all aliasing (i.e. local forwarding). By default, this is
           enabled globally
 
+      <b>--disable-prometheus</b>
+          Disable the admin-only alias for the Prometheus exporter. By default,
+          it is enabled
+
       <b>--quota-per-user</b> &lt;MAX&gt;
           How many services can be exposed for a single user at once. Doesn&#39;t
           apply to admin users.

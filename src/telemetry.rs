@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    future,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -156,41 +157,54 @@ pub(crate) struct Telemetry {
     // Connections per minute for each TCP port.
     tcp_connections_per_minute: DashMap<u16, Arc<SlidingWindowCounter>, RandomState>,
     // Recorder for Prometheus metrics export.
-    prometheus_recorder: PrometheusRecorder,
+    prometheus_recorder: Option<PrometheusRecorder>,
     // Join handle for the Prometheus upkeep task.
     _join_handle: DroppableHandle<()>,
 }
 
 impl Telemetry {
-    pub(crate) fn new() -> Self {
-        let prometheus_recorder = PrometheusBuilder::new()
-            .set_buckets_for_metric(
-                metrics_exporter_prometheus::Matcher::Full(
-                    TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME_SECONDS.to_string(),
-                ),
-                &[
-                    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0,
-                ],
-            )
-            .expect("values should not be empty")
-            .build_recorder();
-        let handle = prometheus_recorder.handle();
-        let join_handle = DroppableHandle(tokio::spawn(async move {
-            loop {
-                sleep(Duration::from_secs(60)).await;
-                handle.run_upkeep();
-            }
-        }));
+    pub(crate) fn new(enable_prometheus: bool) -> Self {
+        if enable_prometheus {
+            let prometheus_recorder = PrometheusBuilder::new()
+                .set_buckets_for_metric(
+                    metrics_exporter_prometheus::Matcher::Full(
+                        TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME_SECONDS.to_string(),
+                    ),
+                    &[
+                        0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0,
+                    ],
+                )
+                .expect("values should not be empty")
+                .build_recorder();
+            let handle = prometheus_recorder.handle();
+            let join_handle = DroppableHandle(tokio::spawn(async move {
+                loop {
+                    sleep(Duration::from_secs(60)).await;
+                    handle.run_upkeep();
+                }
+            }));
 
-        Telemetry {
-            ssh_connections_per_minute: DashMap::default(),
-            http_requests_per_minute: DashMap::default(),
-            sni_connections_per_minute: DashMap::default(),
-            alias_connections_per_minute: DashMap::default(),
-            admin_alias_connections_per_minute: DashMap::default(),
-            tcp_connections_per_minute: DashMap::default(),
-            prometheus_recorder,
-            _join_handle: join_handle,
+            Telemetry {
+                ssh_connections_per_minute: DashMap::default(),
+                http_requests_per_minute: DashMap::default(),
+                sni_connections_per_minute: DashMap::default(),
+                alias_connections_per_minute: DashMap::default(),
+                admin_alias_connections_per_minute: DashMap::default(),
+                tcp_connections_per_minute: DashMap::default(),
+                prometheus_recorder: Some(prometheus_recorder),
+                _join_handle: join_handle,
+            }
+        } else {
+            Telemetry {
+                ssh_connections_per_minute: DashMap::default(),
+                http_requests_per_minute: DashMap::default(),
+                sni_connections_per_minute: DashMap::default(),
+                alias_connections_per_minute: DashMap::default(),
+                admin_alias_connections_per_minute: DashMap::default(),
+                tcp_connections_per_minute: DashMap::default(),
+                prometheus_recorder: None,
+                _join_handle: DroppableHandle(tokio::spawn(future::pending())),
+            }
         }
     }
 
@@ -251,8 +265,10 @@ impl Telemetry {
         );
     }
 
-    pub(crate) fn prometheus_handle(&self) -> PrometheusHandle {
-        self.prometheus_recorder.handle()
+    pub(crate) fn prometheus_handle(&self) -> Option<PrometheusHandle> {
+        self.prometheus_recorder
+            .as_ref()
+            .map(|recorder| recorder.handle())
     }
 
     pub(crate) fn get_ssh_connections_per_minute(&self) -> HashMap<String, u64, RandomState> {
@@ -338,7 +354,8 @@ impl Recorder for Telemetry {
         description: metrics::SharedString,
     ) {
         self.prometheus_recorder
-            .describe_counter(key, unit, description);
+            .as_ref()
+            .inspect(|recorder| recorder.describe_counter(key, unit, description));
     }
 
     fn describe_gauge(
@@ -348,7 +365,8 @@ impl Recorder for Telemetry {
         description: metrics::SharedString,
     ) {
         self.prometheus_recorder
-            .describe_gauge(key, unit, description);
+            .as_ref()
+            .inspect(|recorder| recorder.describe_gauge(key, unit, description));
     }
 
     fn describe_histogram(
@@ -358,7 +376,8 @@ impl Recorder for Telemetry {
         description: metrics::SharedString,
     ) {
         self.prometheus_recorder
-            .describe_histogram(key, unit, description);
+            .as_ref()
+            .inspect(|recorder| recorder.describe_histogram(key, unit, description));
     }
 
     fn register_counter(
@@ -366,7 +385,11 @@ impl Recorder for Telemetry {
         key: &metrics::Key,
         metadata: &metrics::Metadata<'_>,
     ) -> metrics::Counter {
-        let prometheus_counter = self.prometheus_recorder.register_counter(key, metadata);
+        let prometheus_counter = self
+            .prometheus_recorder
+            .as_ref()
+            .map(|recorder| recorder.register_counter(key, metadata))
+            .unwrap_or(metrics::Counter::noop());
         let name = key.name();
         let labels: Vec<(&str, &str)> = key
             .labels()
@@ -493,7 +516,10 @@ impl Recorder for Telemetry {
         key: &metrics::Key,
         metadata: &metrics::Metadata<'_>,
     ) -> metrics::Gauge {
-        self.prometheus_recorder.register_gauge(key, metadata)
+        self.prometheus_recorder
+            .as_ref()
+            .map(|recorder| recorder.register_gauge(key, metadata))
+            .unwrap_or(metrics::Gauge::noop())
     }
 
     fn register_histogram(
@@ -501,7 +527,10 @@ impl Recorder for Telemetry {
         key: &metrics::Key,
         metadata: &metrics::Metadata<'_>,
     ) -> metrics::Histogram {
-        self.prometheus_recorder.register_histogram(key, metadata)
+        self.prometheus_recorder
+            .as_ref()
+            .map(|recorder| recorder.register_histogram(key, metadata))
+            .unwrap_or(metrics::Histogram::noop())
     }
 }
 

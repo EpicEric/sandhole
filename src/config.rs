@@ -244,6 +244,10 @@ pub struct ApplicationConfig {
     #[arg(long, default_value_t = false)]
     pub disable_aliasing: bool,
 
+    /// Disable the admin-only alias for the Prometheus exporter. By default, it is enabled.
+    #[arg(long, default_value_t = false)]
+    pub disable_prometheus: bool,
+
     /// How many services can be exposed for a single user at once. Doesn't apply to admin users.
     ///
     /// Each user is distinguished by their key fingerprint or, in the case of API logins, by their username.
@@ -423,6 +427,7 @@ mod application_config_tests {
                 disable_sni: false,
                 disable_tcp: false,
                 disable_aliasing: false,
+                disable_prometheus: false,
                 quota_per_user: None,
                 rate_limit_per_user: None,
                 random_subdomain_seed: None,
@@ -474,6 +479,7 @@ mod application_config_tests {
             "--disable-sni",
             "--disable-tcp",
             "--disable-aliasing",
+            "--disable-prometheus",
             "--quota-per-user=10",
             "--rate-limit-per-user=1MB",
             "--random-subdomain-seed=ip-and-user",
@@ -521,6 +527,7 @@ mod application_config_tests {
                 disable_sni: true,
                 disable_tcp: true,
                 disable_aliasing: true,
+                disable_prometheus: true,
                 quota_per_user: Some(10.try_into().unwrap()),
                 rate_limit_per_user: Some(1_000_000),
                 random_subdomain_seed: Some(RandomSubdomainSeed::IpAndUser),

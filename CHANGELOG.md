@@ -6,6 +6,7 @@
 
 - Add support for admin-only aliases.
 - Add Prometheus support via admin-only alias.
+- Add `--disable-prometheus` CLI flag.
 
 ### Changed
 
@@ -15,7 +16,7 @@
 
 ### Changed
 
-- Use tracing for HTTP logs.
+- Use `tracing` for HTTP logs.
 
 ### Fixed
 

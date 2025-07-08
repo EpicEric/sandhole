@@ -123,3 +123,4 @@ Features related to system-wide configuration options.
 - Disabling SNI proxying. (CLI: `--disable-sni`)
 - Disabling TCP port binding. (CLI: `--disable-tcp`)
 - Disabling generic aliases, along with SSH ProxyJump. (CLI: `--disable-aliasing`)
+  - Disabling Prometheus metrics collection and admin-only alias. (CLI: `--disable-prometheus`)
