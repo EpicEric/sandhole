@@ -61,9 +61,11 @@ Features related to Sandhole's remote forwarding and reverse proxy capabilities.
 - Option to use Let's Encrypt's ACME server for dynamic certificates. (CLI: `--acme-contact-email`)
 - Option for using Let's Encrypt's staging server for ACME debug mode. (CLI: `--acme-use-staging`)
 
-## Admin interface
+## Admin access
 
-Features related to the SSH-based admin interface.
+Features related to the admin permissioning system.
+
+### Admin interface
 
 - Terminal-based interface accessible via admin key authentication.
 - Real-time system metrics (CPU, memory, network usage).
@@ -72,6 +74,11 @@ Features related to the SSH-based admin interface.
 - View user details for connections.
   - Display key algorithm and comments.
   - Remove user connections and keys.
+
+### Admin-only aliases
+
+- Access to special aliases that can only be local forwarded to by users with admin credentials.
+  - Endpoint for exposing Prometheus metrics. (Alias: `prometheus.sandhole:10`)
 
 ## Configuration
 

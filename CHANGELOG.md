@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add support for admin-only aliases.
+- Add Prometheus support via admin-only alias.
+
+### Changed
+
+- **BREAKING**: Disable aliasing on port 10.
+
 ## 0.6.1 (2025-07-05)
 
 ### Changed

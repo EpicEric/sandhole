@@ -8,7 +8,7 @@ In order to do anything useful with Sandhole, connections must be authenticated.
 
 By default, this will be `./deploy/user_keys/`, but it can be configured with the `--user-keys-directory` option. Once you add a public key, Sandhole will automatically pick up on the change, and allow that user to create remote port forwardings.
 
-Similarly, there is a `./deploy/admin_keys/` directory (set by `--admin-keys-directory`), for users who should also have access to the [admin interface](./admin_interface.md) and [no quota restrictions](#restricting-resources-for-users).
+Similarly, there is a `./deploy/admin_keys/` directory (set by `--admin-keys-directory`), for users who should also have access to the [admin interface](./administration.md#admin-interface) and [no quota restrictions](#restricting-resources-for-users).
 
 ### User permissions
 

@@ -8,7 +8,7 @@
   - [Compiling from source](./compiling_from_source.md)
 - [TLS support](./tls_support.md)
 - [Configuration](./configuration.md)
-- [Admin interface](./admin_interface.md)
+- [Administration](./administration.md)
 
 # User guide
 

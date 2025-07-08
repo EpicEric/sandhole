@@ -57,4 +57,4 @@ Once Sandhole is up and running, you should:
 1. [**Customize settings**](./configuration.md) - Adjust configuration options for your deployment.
 2. [**Set up authentication**](./configuration.md#adding-users-and-admins) - Add SSH public keys for users and admins.
 3. [**Configure services**](./exposing_your_first_service.md) - Use SSH tunneling to expose your first service.
-4. [**Access admin interface**](./admin_interface.md) - Connect via SSH as an admin user for system management.
+4. [**Access admin interface**](./administration.md#admin-interface) - Connect via SSH as an admin user for system management.
