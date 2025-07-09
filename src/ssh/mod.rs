@@ -679,17 +679,12 @@ impl Handler for ServerHandler {
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         debug!(peer = %self.peer, "Received pty_request.");
-        match &mut self.auth_data {
-            AuthenticatedData::Admin { admin_data, .. } => {
-                // Change the size of the pseudo-terminal.
-                admin_data.col_width = Some(col_width);
-                admin_data.row_height = Some(row_height);
-                session.channel_success(channel)
-            }
-            AuthenticatedData::User { .. } | AuthenticatedData::None { .. } => {
-                session.channel_failure(channel)
-            }
+        if let AuthenticatedData::Admin { admin_data, .. } = &mut self.auth_data {
+            // Change the size of the pseudo-terminal.
+            admin_data.col_width = Some(col_width);
+            admin_data.row_height = Some(row_height);
         }
+        session.channel_success(channel)
     }
 
     // Handle changes to the client's window size.
@@ -713,13 +708,12 @@ impl Handler for ServerHandler {
             if let Some(ref mut admin_interface) = admin_data.admin_interface {
                 if let Err(error) = admin_interface.resize(col_width as u16, row_height as u16) {
                     warn!(peer = %self.peer, %error, "Failed to resize terminal.");
-                } else {
-                    return session.channel_success(channel);
+                    return session.channel_failure(channel);
                 }
             }
         }
 
-        session.channel_failure(channel)
+        session.channel_success(channel)
     }
 
     // Handle a remote forwarding request for the client.

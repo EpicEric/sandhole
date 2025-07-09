@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Don't show "PTY allocation request failed" messages.
+
 ## 0.7.0 (2025-07-09)
 
 ### Added
