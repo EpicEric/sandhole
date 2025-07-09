@@ -3908,7 +3908,7 @@ dependencies = [
 
 [[package]]
 name = "sandhole"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "ahash",
  "ansic",
