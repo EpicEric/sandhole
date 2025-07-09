@@ -316,31 +316,31 @@ impl Telemetry {
     }
 
     pub(crate) fn ssh_reactor(&self, aliases: Vec<String>) {
-        let aliases: HashSet<String> = aliases.into_iter().collect();
+        let aliases: HashSet<String, RandomState> = aliases.into_iter().collect();
         self.ssh_connections_per_minute
             .retain(|key, _| aliases.contains(key));
     }
 
     pub(crate) fn http_reactor(&self, hostnames: Vec<String>) {
-        let hostnames: HashSet<String> = hostnames.into_iter().collect();
+        let hostnames: HashSet<String, RandomState> = hostnames.into_iter().collect();
         self.http_requests_per_minute
             .retain(|key, _| hostnames.contains(key));
     }
 
     pub(crate) fn sni_reactor(&self, hostnames: Vec<String>) {
-        let hostnames: HashSet<String> = hostnames.into_iter().collect();
+        let hostnames: HashSet<String, RandomState> = hostnames.into_iter().collect();
         self.sni_connections_per_minute
             .retain(|key, _| hostnames.contains(key));
     }
 
     pub(crate) fn alias_reactor(&self, aliases: Vec<TcpAlias>) {
-        let aliases: HashSet<TcpAlias> = aliases.into_iter().collect();
+        let aliases: HashSet<TcpAlias, RandomState> = aliases.into_iter().collect();
         self.alias_connections_per_minute
             .retain(|key, _| aliases.contains(key));
     }
 
     pub(crate) fn tcp_reactor(&self, ports: Vec<u16>) {
-        let ports: HashSet<u16> = ports.into_iter().collect();
+        let ports: HashSet<u16, RandomState> = ports.into_iter().collect();
         self.tcp_connections_per_minute
             .retain(|key, _| ports.contains(key));
     }

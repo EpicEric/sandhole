@@ -52,6 +52,7 @@ mod fingerprints;
 mod http;
 mod ip;
 mod login;
+mod mdns;
 mod quota;
 mod reactor;
 mod ssh;

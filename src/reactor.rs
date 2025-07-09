@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     certificates::CertificateResolver,
+    mdns::MdnsResponderReactor,
     tcp::{PortHandler, TcpHandler},
     tcp_alias::TcpAlias,
     telemetry::Telemetry,
@@ -28,6 +29,7 @@ impl ConnectionMapReactor<String> for SshReactor {
 
 pub(crate) struct HttpReactor {
     pub(crate) certificates: Arc<CertificateResolver>,
+    pub(crate) mdns_responder: Option<MdnsResponderReactor>,
     pub(crate) telemetry: Arc<Telemetry>,
 }
 
@@ -38,6 +40,9 @@ impl ConnectionMapReactor<String> for HttpReactor {
     fn call(&self, identifiers: Vec<String>) {
         self.certificates
             .update_acme_domains(identifiers.as_slice());
+        self.mdns_responder
+            .as_ref()
+            .inspect(|reactor| reactor.http_reactor(identifiers.as_slice()));
         self.telemetry.http_reactor(identifiers);
     }
 }

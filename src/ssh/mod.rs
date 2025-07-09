@@ -683,6 +683,11 @@ impl Handler for ServerHandler {
             // Change the size of the pseudo-terminal.
             admin_data.col_width = Some(col_width);
             admin_data.row_height = Some(row_height);
+            if let AuthenticatedData::Admin { admin_data, .. } = &mut self.auth_data {
+                // Change the size of the pseudo-terminal.
+                admin_data.col_width = Some(col_width);
+                admin_data.row_height = Some(row_height);
+            }
         }
         session.channel_success(channel)
     }

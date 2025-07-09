@@ -135,7 +135,7 @@ impl PortHandler for Arc<TcpHandler> {
     // Handle changes to the proxy ports, creating/deleting listeners as needed.
     fn update_ports(&self, ports: Vec<u16>) {
         // Find the ports listening to the localhost address
-        let mut ports: HashSet<u16> = ports.into_iter().collect();
+        let mut ports: HashSet<u16, RandomState> = ports.into_iter().collect();
         // Remove any socket tasks not in the list of localhost port
         self.sockets.retain(|port, _| ports.contains(port));
         // Find the list of new ports

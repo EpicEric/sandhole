@@ -38,6 +38,7 @@ hyper-util = { version = "0.1.14", features = ["full"] }
 ipnet = "2.11.0"
 ipnet-trie = "0.3.0"
 itertools = "0.14.0"
+libmdns = "0.9.1"
 metrics = "0.24.2"
 metrics-exporter-prometheus = "0.17.2"
 notify = "8.0.0"

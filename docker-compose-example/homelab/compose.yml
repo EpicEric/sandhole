@@ -1,0 +1,17 @@
+services:
+  sandhole:
+    image: epiceric/sandhole:test
+    container_name: sandhole
+    restart: unless-stopped
+    volumes:
+      - ./deploy:/deploy:rw
+    command: |
+      --domain=sandhole.local
+      --user-keys-directory=/deploy/user_keys/
+      --admin-keys-directory=/deploy/admin_keys/
+      --certificates-directory=/certificates/
+      --acme-cache-directory=/deploy/acme_cache/
+      --private-key-file=/deploy/server_keys/ssh
+      --ssh-port=22
+      --http-port=80
+      --https-port=443

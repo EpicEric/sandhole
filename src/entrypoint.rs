@@ -14,6 +14,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
 };
+use libmdns::Responder;
 use metrics::{counter, gauge};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -57,6 +58,7 @@ use crate::{
     http::{DomainRedirect, Protocol, ProxyData, ProxyType, proxy_handler},
     ip::{IpFilter, IpFilterConfig},
     login::{ApiLogin, WebpkiVerifierConfigurer},
+    mdns::MdnsResponderReactor,
     quota::{DummyQuotaHandler, QuotaHandler, QuotaMap, TokenHolder},
     reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
     ssh::Server,
@@ -179,7 +181,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     let prometheus_handle = match metrics::set_global_recorder(Arc::clone(&telemetry)) {
         Ok(_) => {
             telemetry.register_metrics();
-            Some(telemetry.prometheus_handle())
+            telemetry.prometheus_handle()
         }
         Err(error) => {
             error!(%error, "Failed to install telemetry.");
@@ -190,12 +192,54 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         Some(max_quota) => Arc::new(Box::new(Arc::new(QuotaMap::new(max_quota.into())))),
         None => Arc::new(Box::new(DummyQuotaHandler)),
     };
+    let (_mdns_responder, _mdns_services) = if config.domain.ends_with(".local") {
+        match Responder::with_default_handle_and_ip_list_and_hostname(
+            vec![],
+            config.domain.to_string(),
+        ) {
+            Ok((responder, task)) => {
+                debug!("Started mDNS responder.");
+                tokio::spawn(task);
+                let mut services = vec![];
+                services.push(responder.register(
+                    "_ssh._tcp".into(),
+                    "Sandhole SSH server".into(),
+                    config.ssh_port.into(),
+                    &[],
+                ));
+                if !config.disable_http {
+                    services.push(responder.register(
+                        "_http._tcp".into(),
+                        "Sandhole HTTP server".into(),
+                        config.http_port.into(),
+                        &[],
+                    ));
+                    if !config.disable_https {
+                        services.push(responder.register(
+                            "_https._tcp".into(),
+                            "Sandhole HTTPS server".into(),
+                            config.https_port.into(),
+                            &[],
+                        ));
+                    }
+                }
+                (Some(responder), services)
+            }
+            Err(error) => {
+                error!(%error, "Unable to create mDNS responder.");
+                (None, vec![])
+            }
+        }
+    } else {
+        (None, vec![])
+    };
     let http_connections = Arc::new(
         ConnectionMap::builder()
             .load_balancing(config.load_balancing)
             .quota_handler(Arc::clone(&quota_handler))
             .reactor(HttpReactor {
                 certificates: Arc::clone(&certificates),
+                mdns_responder: _mdns_responder.map(|_| MdnsResponderReactor::default()),
                 telemetry: Arc::clone(&telemetry),
             })
             .build(),
@@ -523,7 +567,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     });
 
     // Admin aliases
-    if let Some(Some(handle)) = prometheus_handle {
+    if let Some(handle) = prometheus_handle {
         let _ = sandhole.admin_alias.insert(
             TcpAlias("prometheus.sandhole".into(), ADMIN_ALIAS_PORT),
             SocketAddr::from(([0, 0, 0, 0], 0)),
