@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use axum::{Router, routing::get};
 use clap::Parser;
-use http::{Request, StatusCode};
+use http::{Request, StatusCode, header::HOST};
 use http_body_util::BodyExt;
 use hyper::{body::Incoming, service::service_fn};
 use hyper_util::{
@@ -131,7 +131,7 @@ async fn alias_local_forward_existing_http() {
     let request = Request::builder()
         .method("GET")
         .uri("/")
-        .header("host", "localhost")
+        .header(HOST, "localhost")
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();
     let Ok(response) = timeout(Duration::from_secs(5), async {

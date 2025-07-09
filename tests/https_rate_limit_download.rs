@@ -10,6 +10,7 @@ use axum::{
     routing::post,
 };
 use clap::Parser;
+use http::header::HOST;
 use hyper::{StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
@@ -141,7 +142,7 @@ async fn https_rate_limit_download() {
     let request = Request::builder()
         .method("POST")
         .uri("/")
-        .header("host", "foobar.tld")
+        .header(HOST, "foobar.tld")
         .body(Body::from(data))
         .unwrap();
     let start = Instant::now();

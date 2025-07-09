@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use axum::{Router, routing::get};
 use clap::Parser;
-use http::{Request, StatusCode};
+use http::{Request, StatusCode, header::HOST};
 use hyper::{body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
@@ -120,7 +120,7 @@ async fn ip_blocklist_by_user() {
     let request = Request::builder()
         .method("GET")
         .uri("/")
-        .header("host", "test.foobar.tld")
+        .header(HOST, "test.foobar.tld")
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();
     let Ok(response) = timeout(Duration::from_secs(5), async move {
@@ -150,7 +150,7 @@ async fn ip_blocklist_by_user() {
     let request = Request::builder()
         .method("GET")
         .uri("/")
-        .header("host", "test.foobar.tld")
+        .header(HOST, "test.foobar.tld")
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();
     let Ok(response) = timeout(Duration::from_secs(5), async move {
@@ -237,7 +237,7 @@ async fn ip_blocklist_by_user() {
     let request = Request::builder()
         .method("GET")
         .uri("/")
-        .header("host", "localhost")
+        .header(HOST, "localhost")
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();
     let Ok(response) = timeout(Duration::from_secs(5), async {

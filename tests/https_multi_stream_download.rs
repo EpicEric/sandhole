@@ -8,7 +8,7 @@ use axum::{
     routing::get,
 };
 use clap::Parser;
-use http::header::CONTENT_LENGTH;
+use http::header::{CONTENT_LENGTH, HOST};
 use http_body_util::BodyExt;
 use hyper::{StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
@@ -158,7 +158,7 @@ async fn https_multi_stream_download() {
             let request = Request::builder()
                 .method("GET")
                 .uri(format!("/{file_size}"))
-                .header("host", "foobar.tld")
+                .header(HOST, "foobar.tld")
                 .body(Body::empty())
                 .unwrap();
             let Ok(mut response) = timeout(Duration::from_secs(60), async move {

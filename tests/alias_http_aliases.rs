@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use axum::{Router, routing::get};
 use clap::Parser;
-use http::{Request, StatusCode};
+use http::{Request, StatusCode, header::HOST};
 use hyper::{body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
@@ -281,7 +281,7 @@ async fn alias_http_aliases() {
         let request = Request::builder()
             .method("GET")
             .uri("/")
-            .header("host", "foobar.tld")
+            .header(HOST, "foobar.tld")
             .body(http_body_util::Empty::<bytes::Bytes>::new())
             .unwrap();
         let Ok(response) = timeout(Duration::from_secs(5), async {

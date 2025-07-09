@@ -658,7 +658,10 @@ mod proxy_handler_tests {
     };
     use bytes::Bytes;
     use futures_util::{SinkExt, StreamExt};
-    use http::Version;
+    use http::{
+        Version,
+        header::{HOST, LOCATION},
+    };
     use http_body_util::{BodyExt, Empty};
     use hyper::{HeaderMap, Request, StatusCode, body::Incoming, service::service_fn};
     use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -737,7 +740,7 @@ mod proxy_handler_tests {
         let request = Request::builder()
             .method("GET")
             .uri("/index.html")
-            .header("host", "no.handler")
+            .header(HOST, "no.handler")
             .body(Empty::<Bytes>::new())
             .unwrap();
         let response = proxy_handler(
@@ -780,7 +783,7 @@ mod proxy_handler_tests {
         let request = Request::builder()
             .method("GET")
             .uri("/index.html")
-            .header("host", "main.domain")
+            .header(HOST, "main.domain")
             .body(Empty::<Bytes>::new())
             .unwrap();
         let response = proxy_handler(
@@ -805,7 +808,7 @@ mod proxy_handler_tests {
         let response = response.expect("should return response when redirect");
         assert_eq!(response.status(), hyper::StatusCode::SEE_OTHER);
         assert_eq!(
-            response.headers().get("location").unwrap(),
+            response.headers().get(LOCATION).unwrap(),
             "https://example.com"
         );
     }
@@ -845,7 +848,7 @@ mod proxy_handler_tests {
         let request = Request::builder()
             .method("POST")
             .uri("/api/endpoint")
-            .header("host", "with.handler")
+            .header(HOST, "with.handler")
             .body(String::from("Hello world"))
             .unwrap();
         let response = proxy_handler(
@@ -870,7 +873,7 @@ mod proxy_handler_tests {
         let response = response.expect("should return response when HTTPS redirect");
         assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
         assert_eq!(
-            response.headers().get("location").unwrap(),
+            response.headers().get(LOCATION).unwrap(),
             "https://with.handler:443/api/endpoint"
         );
     }
@@ -910,7 +913,7 @@ mod proxy_handler_tests {
         let request = Request::builder()
             .method("POST")
             .uri("/test")
-            .header("host", "non.standard")
+            .header(HOST, "non.standard")
             .body(String::from("Hello world"))
             .unwrap();
         let response = proxy_handler(
@@ -936,7 +939,7 @@ mod proxy_handler_tests {
             response.expect("should return response whyen HTTPS redirect to non-standard port");
         assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
         assert_eq!(
-            response.headers().get("location").unwrap(),
+            response.headers().get(LOCATION).unwrap(),
             "https://non.standard:8443/test"
         );
     }
@@ -976,7 +979,7 @@ mod proxy_handler_tests {
         let request = Request::builder()
             .method("POST")
             .uri("/api/endpoint")
-            .header("host", "with.handler")
+            .header(HOST, "with.handler")
             .body(String::from("Hello world"))
             .unwrap();
         let response = proxy_handler(
@@ -1001,7 +1004,7 @@ mod proxy_handler_tests {
         let response = response.expect("should return response when HTTPS redirect");
         assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
         assert_eq!(
-            response.headers().get("location").unwrap(),
+            response.headers().get(LOCATION).unwrap(),
             "https://with.handler:443/api/endpoint"
         );
     }
@@ -1041,7 +1044,7 @@ mod proxy_handler_tests {
         let request = Request::builder()
             .method("POST")
             .uri("/test")
-            .header("host", "non.standard")
+            .header(HOST, "non.standard")
             .body(String::from("Hello world"))
             .unwrap();
         let response = proxy_handler(
@@ -1067,7 +1070,7 @@ mod proxy_handler_tests {
             response.expect("should return response when HTTPS redirect to non-standard port");
         assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
         assert_eq!(
-            response.headers().get("location").unwrap(),
+            response.headers().get(LOCATION).unwrap(),
             "https://non.standard:8443/test"
         );
     }
@@ -1114,7 +1117,7 @@ mod proxy_handler_tests {
             .version(Version::HTTP_11)
             .method("GET")
             .uri("/slow_endpoint")
-            .header("host", "slow.handler")
+            .header(HOST, "slow.handler")
             .body(Empty::<Bytes>::new())
             .unwrap();
         let router = Router::new().route(
@@ -1401,7 +1404,7 @@ mod proxy_handler_tests {
         let request = Request::builder()
             .method("POST")
             .uri("/api/endpoint")
-            .header("host", "with.handler")
+            .header(HOST, "with.handler")
             .body(String::from("Hello world"))
             .unwrap();
         let router = Router::new().route(
@@ -1497,7 +1500,7 @@ mod proxy_handler_tests {
         let request = Request::builder()
             .method("POST")
             .uri("/api/endpoint")
-            .header("host", "with.handler")
+            .header(HOST, "with.handler")
             .body(String::from("Hello world"))
             .unwrap();
         let router = Router::new().route(
@@ -1594,7 +1597,7 @@ mod proxy_handler_tests {
         let request = Request::builder()
             .method("POST")
             .uri("/test")
-            .header("host", "root.domain")
+            .header(HOST, "root.domain")
             .body(String::from("My body"))
             .unwrap();
         let router = Router::new().route(

@@ -2,6 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use axum::{Router, extract::Request, routing::get};
 use clap::Parser;
+use http::header::HOST;
 use http_body_util::BodyExt;
 use hyper::{StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
@@ -155,7 +156,7 @@ async fn http_addressing_profanities() {
         let request = Request::builder()
             .method("GET")
             .uri("/")
-            .header("host", host)
+            .header(HOST, host)
             .body(http_body_util::Empty::<bytes::Bytes>::new())
             .unwrap();
         let Ok(response) = timeout(Duration::from_secs(5), async move {

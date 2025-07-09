@@ -5,6 +5,7 @@ use std::{
 
 use axum::{Router, body::Body, extract::Request, response::IntoResponse, routing::get};
 use clap::Parser;
+use http::header::HOST;
 use hyper::{StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
@@ -134,7 +135,7 @@ async fn https_rate_limit_upload() {
     let request = Request::builder()
         .method("GET")
         .uri("/")
-        .header("host", "foobar.tld")
+        .header(HOST, "foobar.tld")
         .body(Body::from(()))
         .unwrap();
     let start = Instant::now();

@@ -2,6 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use axum::{Router, extract::Request, routing::get};
 use clap::Parser;
+use http::header::HOST;
 use http_body_util::BodyExt;
 use hyper::{StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
@@ -169,7 +170,7 @@ async fn https_force_random_subdomains() {
     let request = Request::builder()
         .method("GET")
         .uri("/")
-        .header("host", hostname)
+        .header(HOST, hostname)
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();
     let Ok(response) = timeout(Duration::from_secs(5), async move {

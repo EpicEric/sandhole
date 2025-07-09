@@ -2,6 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use axum::{Router, extract::Request, routing::get};
 use clap::Parser;
+use http::header::{HOST, LOCATION};
 use http_body_util::BodyExt;
 use hyper::{StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
@@ -149,7 +150,7 @@ async fn http_force_https_by_user() {
     let request = Request::builder()
         .method("GET")
         .uri("/")
-        .header("host", "just-http.foobar.tld")
+        .header(HOST, "just-http.foobar.tld")
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();
     let Ok(response) = timeout(Duration::from_secs(5), async move {
@@ -190,7 +191,7 @@ async fn http_force_https_by_user() {
     let request = Request::builder()
         .method("GET")
         .uri("/")
-        .header("host", "force-https.foobar.tld")
+        .header(HOST, "force-https.foobar.tld")
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();
     let Ok(response) = timeout(Duration::from_secs(5), async move {
@@ -205,7 +206,7 @@ async fn http_force_https_by_user() {
     };
     assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
     assert_eq!(
-        response.headers().get("location"),
+        response.headers().get(LOCATION),
         Some(&"https://force-https.foobar.tld:18443/".try_into().unwrap())
     );
 
@@ -249,7 +250,7 @@ async fn http_force_https_by_user() {
     let request = Request::builder()
         .method("GET")
         .uri("/")
-        .header("host", "foobar.tld")
+        .header(HOST, "foobar.tld")
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();
     let Ok(response) = timeout(Duration::from_secs(5), async {

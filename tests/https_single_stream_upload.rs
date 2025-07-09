@@ -7,6 +7,7 @@ use axum::{
     routing::post,
 };
 use clap::Parser;
+use http::header::HOST;
 use hyper::{StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
@@ -154,7 +155,7 @@ async fn https_single_stream_upload() {
     let request = Request::builder()
         .method("POST")
         .uri(format!("/{file_size}"))
-        .header("host", "foobar.tld")
+        .header(HOST, "foobar.tld")
         .body(Body::from(&data[..file_size]))
         .unwrap();
     let Ok(response) = timeout(Duration::from_secs(60), async move {

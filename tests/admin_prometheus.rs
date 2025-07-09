@@ -1,33 +1,27 @@
 use std::{sync::Arc, time::Duration};
 
-use axum::{Router, extract::Request, routing::get};
 use clap::Parser;
-use http::header::{HOST, LOCATION};
-use hyper::{StatusCode, body::Incoming, service::service_fn};
-use hyper_util::{
-    rt::{TokioExecutor, TokioIo},
-    server::conn::auto::Builder,
+use http::{
+    Request, StatusCode,
+    header::{CONTENT_LENGTH, HOST},
 };
+use http_body_util::BodyExt;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use russh::{
-    Channel,
-    client::{Msg, Session},
-};
 use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
 };
-use tower::Service;
 
-/// This test ensures that HTTPS and default domain redirects work.
+/// This test ensures that admin users can access the Prometheus admin-only
+/// alias.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn http_redirects() {
+async fn admin_prometheus() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
-        "--domain-redirect=https://sandhole.com.br",
         "--user-keys-directory",
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
         "--admin-keys-directory",
@@ -43,10 +37,9 @@ async fn http_redirects() {
         "--ssh-port=18022",
         "--http-port=18080",
         "--https-port=18443",
-        "--force-https",
         "--acme-use-staging",
-        "--bind-hostnames=all",
-        "--idle-connection-timeout=1s",
+        "--bind-hostnames=none",
+        "--idle-connection-timeout=800ms",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
     ]);
@@ -62,12 +55,12 @@ async fn http_redirects() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied
+    // 2. Start SSH admin client that will local forward the Prometheus service
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/admin"),
         None,
     )
-    .expect("Missing file key1");
+    .expect("Missing file admin");
     let ssh_client = SshClient;
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
@@ -75,7 +68,7 @@ async fn http_redirects() {
     assert!(
         session
             .authenticate_publickey(
-                "user",
+                "admin",
                 PrivateKeyWithHashAlg::new(
                     Arc::new(key),
                     session.best_supported_rsa_hash().await.unwrap().flatten()
@@ -86,18 +79,18 @@ async fn http_redirects() {
             .success(),
         "authentication didn't succeed"
     );
-    session
-        .tcpip_forward("test.foobar.tld", 80)
+    let channel = session
+        .channel_open_direct_tcpip("prometheus.sandhole", 10, "127.0.0.1", 12345)
         .await
-        .expect("tcpip_forward failed");
+        .expect("channel_open_direct_tcpip failed");
 
-    // 3. Connect to the HTTP port of our proxy and check redirect for main domain
-    let tcp_stream = TcpStream::connect("127.0.0.1:18080")
-        .await
-        .expect("TCP connection failed");
-    let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream))
-        .await
-        .expect("HTTP handshake failed");
+    // 3. Access the Prometheus service
+    let (mut sender, conn) = hyper::client::conn::http2::handshake(
+        TokioExecutor::new(),
+        TokioIo::new(channel.into_stream()),
+    )
+    .await
+    .expect("HTTP handshake failed");
     tokio::spawn(async move {
         if let Err(error) = conn.await {
             eprintln!("Connection failed: {error:?}");
@@ -106,10 +99,10 @@ async fn http_redirects() {
     let request = Request::builder()
         .method("GET")
         .uri("/")
-        .header(HOST, "foobar.tld")
+        .header(HOST, "localhost:7777")
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();
-    let Ok(response) = timeout(Duration::from_secs(5), async move {
+    let Ok(mut response) = timeout(Duration::from_secs(5), async {
         sender
             .send_request(request)
             .await
@@ -117,33 +110,36 @@ async fn http_redirects() {
     })
     .await
     else {
-        panic!("Timeout waiting for request to finish.");
+        panic!("Timeout waiting for server to reply.")
     };
-    assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    assert_eq!(
-        response.headers().get(LOCATION),
-        Some(&"https://sandhole.com.br".try_into().unwrap())
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut buf = Vec::with_capacity(
+        response
+            .headers()
+            .get(CONTENT_LENGTH)
+            .expect("missing Content-Length header")
+            .to_str()
+            .expect("invalid Content-Length header")
+            .parse()
+            .expect("non-numeric Content-Length header"),
     );
-
-    // 4. Connect to the HTTP port of our proxy and check redirect to HTTPS
-    let tcp_stream = TcpStream::connect("127.0.0.1:18080")
-        .await
-        .expect("TCP connection failed");
-    let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream))
-        .await
-        .expect("HTTP handshake failed");
-    tokio::spawn(async move {
-        if let Err(error) = conn.await {
-            eprintln!("Connection failed: {error:?}");
-        }
-    });
+    let body = response.body_mut();
+    while let Some(Ok(frame)) = body.frame().await {
+        buf.extend_from_slice(frame.data_ref().unwrap());
+    }
+    assert!(
+        String::from_utf8(buf).expect("invalid str").contains(
+            "# HELP sandhole_admin_alias_connections_total Total connections for admin aliases"
+        ),
+        "Response didn't have Prometheus metrics"
+    );
     let request = Request::builder()
         .method("GET")
-        .uri("/example")
-        .header(HOST, "test.foobar.tld")
+        .uri("/favicon.ico")
+        .header(HOST, "localhost:7777")
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .unwrap();
-    let Ok(response) = timeout(Duration::from_secs(5), async move {
+    let Ok(response) = timeout(Duration::from_secs(5), async {
         sender
             .send_request(request)
             .await
@@ -151,13 +147,9 @@ async fn http_redirects() {
     })
     .await
     else {
-        panic!("Timeout waiting for request to finish.");
+        panic!("Timeout waiting for server to reply.")
     };
-    assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
-    assert_eq!(
-        response.headers().get(LOCATION),
-        Some(&"https://test.foobar.tld:18443/example".try_into().unwrap())
-    );
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 struct SshClient;
@@ -170,25 +162,5 @@ impl russh::client::Handler for SshClient {
         _key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
-    }
-
-    async fn server_channel_open_forwarded_tcpip(
-        &mut self,
-        channel: Channel<Msg>,
-        _connected_address: &str,
-        _connected_port: u32,
-        _originator_address: &str,
-        _originator_port: u32,
-        _session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        let router = Router::new().route("/", get(async || "This is only accessible via HTTPS!"));
-        let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
-        tokio::spawn(async move {
-            Builder::new(TokioExecutor::new())
-                .serve_connection_with_upgrades(TokioIo::new(channel.into_stream()), service)
-                .await
-                .expect("Invalid request");
-        });
-        Ok(())
     }
 }
