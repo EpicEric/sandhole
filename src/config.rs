@@ -43,13 +43,25 @@ pub enum BindHostnames {
 // Strategy for load-balancing when multiple services request the same hostname/port.
 #[doc(hidden)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum LoadBalancing {
+pub enum LoadBalancingStrategy {
     /// Load-balance with all available handlers.
     Allow,
     /// Don't load-balance; When adding a new handler, replace the existing one.
     Replace,
     /// Don't load-balance; Deny the new handler if there's an existing one.
     Deny,
+}
+
+// Algorithm to use for service selection when load-balancing.
+#[doc(hidden)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum LoadBalancingAlgorithm {
+    /// Choose randomly.
+    Random,
+    /// Round robin.
+    RoundRobin,
+    /// Choose based on IP hash.
+    IpHash,
 }
 
 // CLI configuration for Sandhole.
@@ -198,10 +210,21 @@ pub struct ApplicationConfig {
     #[arg(
         long,
         value_enum,
-        default_value_t = LoadBalancing::Allow,
+        default_value_t = LoadBalancingStrategy::Allow,
         value_name = "STRATEGY"
     )]
-    pub load_balancing: LoadBalancing,
+    pub load_balancing: LoadBalancingStrategy,
+
+    /// Algorithm to use for service selection when load-balancing.
+    ///
+    /// By default, traffic will be randomly distributed between services.
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = LoadBalancingAlgorithm::Random,
+        value_name = "ALGORITHM"
+    )]
+    pub load_balancing_algorithm: LoadBalancingAlgorithm,
 
     /// Prefix for TXT DNS records containing key fingerprints, for authorization to bind under a specific domain.
     ///
@@ -390,7 +413,9 @@ mod application_config_tests {
     use clap::Parser;
     use ipnet::IpNet;
 
-    use super::{ApplicationConfig, BindHostnames, LoadBalancing, RandomSubdomainSeed};
+    use crate::config::LoadBalancingAlgorithm;
+
+    use super::{ApplicationConfig, BindHostnames, LoadBalancingStrategy, RandomSubdomainSeed};
 
     #[test_log::test]
     fn parses_minimal_args() {
@@ -418,7 +443,8 @@ mod application_config_tests {
                 acme_use_staging: false,
                 password_authentication_url: None,
                 bind_hostnames: BindHostnames::Txt,
-                load_balancing: LoadBalancing::Allow,
+                load_balancing: LoadBalancingStrategy::Allow,
+                load_balancing_algorithm: LoadBalancingAlgorithm::Random,
                 txt_record_prefix: "_sandhole".into(),
                 allow_requested_subdomains: false,
                 allow_requested_ports: false,
@@ -471,6 +497,7 @@ mod application_config_tests {
             "--password-authentication-url=https://auth.server.com/validate",
             "--bind-hostnames=cname",
             "--load-balancing=replace",
+            "--load-balancing-algorithm=ip-hash",
             "--txt-record-prefix=_prefix",
             "--allow-requested-subdomains",
             "--allow-requested-ports",
@@ -518,7 +545,8 @@ mod application_config_tests {
                 acme_use_staging: true,
                 password_authentication_url: Some("https://auth.server.com/validate".into()),
                 bind_hostnames: BindHostnames::Cname,
-                load_balancing: LoadBalancing::Replace,
+                load_balancing: LoadBalancingStrategy::Replace,
+                load_balancing_algorithm: LoadBalancingAlgorithm::IpHash,
                 txt_record_prefix: "_prefix".into(),
                 allow_requested_subdomains: true,
                 allow_requested_ports: true,

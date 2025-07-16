@@ -33,7 +33,10 @@ use crate::{
 
 #[doc(hidden)]
 pub use crate::{
-    config::{ApplicationConfig, BindHostnames, LoadBalancing, RandomSubdomainSeed},
+    config::{
+        ApplicationConfig, BindHostnames, LoadBalancingAlgorithm, LoadBalancingStrategy,
+        RandomSubdomainSeed,
+    },
     entrypoint::entrypoint,
 };
 

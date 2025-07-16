@@ -322,7 +322,8 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
         originator_port: u16,
         channel: Channel<Msg>,
     ) -> Result<bool, russh::Error> {
-        if let Some(handler) = context.server.ssh.get(address) {
+        let ip = context.peer.ip().to_canonical();
+        if let Some(handler) = context.server.ssh.get(address, ip) {
             if let Ok(mut io) = handler
                 .aliasing_channel(
                     context.peer.ip(),
@@ -737,10 +738,11 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
         _originator_port: u16,
         channel: Channel<Msg>,
     ) -> Result<bool, russh::Error> {
-        if let Some(tunnel_handler) = context.server.sni.get(address) {
+        let ip = context.peer.ip().to_canonical();
+        if let Some(tunnel_handler) = context.server.sni.get(address, ip) {
             let mut stream = channel.into_stream();
             if let Ok(mut channel) = tunnel_handler
-                .tunneling_channel(context.peer.ip(), context.peer.port())
+                .tunneling_channel(ip, context.peer.port())
                 .await
             {
                 let gauge = gauge!(TELEMETRY_GAUGE_SNI_CONNECTIONS_CURRENT, TELEMETRY_KEY_HOSTNAME => address.to_string());
@@ -781,13 +783,9 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
             .server
             .aliasing_proxy_data
             .conn_manager()
-            .get_by_http_host(address)
+            .get_by_http_host(address, ip)
         {
-            if handler.can_alias(
-                context.peer.ip(),
-                context.peer.port(),
-                context.key_fingerprint.as_ref(),
-            ) {
+            if handler.can_alias(ip, context.peer.port(), context.key_fingerprint.as_ref()) {
                 let peer = *context.peer;
                 let fingerprint = *context.key_fingerprint;
                 let proxy_data = Arc::clone(&context.server.aliasing_proxy_data);
@@ -976,18 +974,15 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
         originator_port: u16,
         channel: Channel<Msg>,
     ) -> Result<bool, russh::Error> {
+        let ip = context.peer.ip().to_canonical();
         if let Some(handler) = context
             .server
             .admin_alias
-            .get(&BorrowedTcpAlias(address, &port) as &dyn TcpAliasKey)
+            .get(&BorrowedTcpAlias(address, &port) as &dyn TcpAliasKey, ip)
         {
             if let AuthenticatedData::Admin { .. } = context.auth_data {
                 if let Ok(mut io) = handler
-                    .aliasing_channel(
-                        context.peer.ip(),
-                        context.peer.port(),
-                        context.key_fingerprint.as_ref(),
-                    )
+                    .aliasing_channel(ip, context.peer.port(), context.key_fingerprint.as_ref())
                     .await
                 {
                     let alias = TcpAlias(address.into(), port);
@@ -1048,14 +1043,10 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
         } else if let Some(handler) = context
             .server
             .alias
-            .get(&BorrowedTcpAlias(address, &port) as &dyn TcpAliasKey)
+            .get(&BorrowedTcpAlias(address, &port) as &dyn TcpAliasKey, ip)
         {
             if let Ok(mut io) = handler
-                .aliasing_channel(
-                    context.peer.ip(),
-                    context.peer.port(),
-                    context.key_fingerprint.as_ref(),
-                )
+                .aliasing_channel(ip, context.peer.port(), context.key_fingerprint.as_ref())
                 .await
             {
                 let alias = TcpAlias(address.into(), port);
@@ -1339,13 +1330,10 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
         originator_port: u16,
         channel: Channel<Msg>,
     ) -> Result<bool, russh::Error> {
-        if let Some(handler) = context.server.tcp.get(&port) {
+        let ip = context.peer.ip().to_canonical();
+        if let Some(handler) = context.server.tcp.get(&port, ip) {
             if let Ok(mut io) = handler
-                .aliasing_channel(
-                    context.peer.ip(),
-                    context.peer.port(),
-                    context.key_fingerprint.as_ref(),
-                )
+                .aliasing_channel(ip, context.peer.port(), context.key_fingerprint.as_ref())
                 .await
             {
                 let gauge = gauge!(TELEMETRY_GAUGE_TCP_CONNECTIONS_CURRENT, TELEMETRY_KEY_PORT => port.to_string());

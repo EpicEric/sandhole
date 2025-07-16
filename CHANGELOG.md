@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Add `--load-balancing-algorithm` CLI flag.
+
 ### Fixed
 
 - Don't show "PTY allocation request failed" messages.

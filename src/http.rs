@@ -312,16 +312,17 @@ where
         version => return Err(HttpError::InvalidHttpVersion(version)),
     };
     let host = host.to_owned();
-    let ip = tcp_address.ip().to_canonical().to_string();
+    let ip = tcp_address.ip().to_canonical();
+    let ip_string = ip.to_string();
     let method = request.method().to_owned();
     let uri = request.uri().to_owned();
     let http_log_builder = HttpLog::builder()
-        .ip(ip.clone())
+        .ip(ip_string.clone())
         .host(host.clone())
         .uri(uri.path().into())
         .method(method.as_str().into());
     // Find the HTTP handler for the given host
-    let Some(handler) = conn_manager.get_by_http_host(&host) else {
+    let Some(handler) = conn_manager.get_by_http_host(&host, ip) else {
         // If no handler was found, check if this is a request to the root domain
         if domain_redirect.from == host {
             // If so, redirect to the configured URL
@@ -389,7 +390,7 @@ where
     };
     // Add proxied info to the proper headers
     let headers = request.headers_mut();
-    headers.insert(X_FORWARDED_FOR, ip.parse().unwrap());
+    headers.insert(X_FORWARDED_FOR, ip_string.parse().unwrap());
     headers.insert(X_FORWARDED_HOST, host.parse().unwrap());
     headers.insert(X_FORWARDED_PROTO, proto.parse().unwrap());
     headers.insert(X_FORWARDED_PORT, port.into());
@@ -671,7 +672,7 @@ mod proxy_handler_tests {
     use tower::Service;
 
     use crate::{
-        config::LoadBalancing,
+        config::LoadBalancingStrategy,
         connection_handler::{ConnectionHttpData, MockConnectionHandler},
         connections::ConnectionMap,
         quota::{DummyQuotaHandler, TokenHolder, UserIdentification},
@@ -691,7 +692,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -733,7 +735,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -776,7 +779,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -823,7 +827,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -888,7 +893,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -954,7 +960,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -1019,7 +1026,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -1085,7 +1093,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -1177,7 +1186,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -1282,7 +1292,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -1373,7 +1384,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -1469,7 +1481,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -1566,7 +1579,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -1663,7 +1677,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );
@@ -1762,7 +1777,8 @@ mod proxy_handler_tests {
             >,
         > = Arc::new(
             ConnectionMap::builder()
-                .load_balancing(LoadBalancing::Allow)
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
                 .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
                 .build(),
         );

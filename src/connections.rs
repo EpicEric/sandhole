@@ -2,17 +2,19 @@ use std::{
     borrow::Borrow,
     collections::BTreeMap,
     hash::Hash,
-    net::SocketAddr,
-    sync::{Arc, RwLock},
+    net::{IpAddr, SocketAddr},
+    sync::{Arc, RwLock, atomic::AtomicUsize},
 };
 
 use ahash::RandomState;
 use bon::Builder;
 use dashmap::DashMap;
-use rand::{rng, seq::IndexedRandom};
+use rand::{Rng, rng, seq::IndexedRandom};
+use rand_seeder::SipHasher;
 
 use crate::{
-    config::LoadBalancing,
+    LoadBalancingAlgorithm,
+    config::LoadBalancingStrategy,
     error::ServerError,
     quota::{QuotaHandler, QuotaToken, TokenHolder, TokenHolderUser},
     reactor::{AliasReactor, ConnectionMapReactor, DummyConnectionMapReactor, HttpReactor},
@@ -36,10 +38,12 @@ struct ConnectionMapEntry<H> {
 #[derive(Builder)]
 pub(crate) struct ConnectionMap<K: Eq + Hash, H, R = DummyConnectionMapReactor> {
     // Policy on how to handle new services getting added to this map.
-    load_balancing: LoadBalancing,
+    strategy: LoadBalancingStrategy,
+    // Algorithm to use for service selection from this map.
+    algorithm: LoadBalancingAlgorithm,
     // The actual data structure storing connections, selected by key.
     #[builder(skip = DashMap::default())]
-    map: DashMap<K, Vec<ConnectionMapEntry<H>>, RandomState>,
+    map: DashMap<K, (Vec<ConnectionMapEntry<H>>, AtomicUsize), RandomState>,
     // Service to generate new QuotaTokens.
     quota_handler: Arc<Box<dyn QuotaHandler + Send + Sync>>,
     // Optional callable to send data to when the list of connection keys changes.
@@ -76,13 +80,13 @@ where
     ) -> color_eyre::Result<()> {
         let len = self.map.len();
         let user = holder.get_user();
-        match self.load_balancing {
+        match self.strategy {
             // Add this entry to the list of possible handlers returned for this key.
-            LoadBalancing::Allow => {
+            LoadBalancingStrategy::Allow => {
                 let Some(token) = self.quota_handler.get_token(holder) else {
                     return Err(ServerError::QuotaReached.into());
                 };
-                self.map.entry(key).or_default().push(ConnectionMapEntry {
+                self.map.entry(key).or_default().0.push(ConnectionMapEntry {
                     user,
                     address,
                     handler,
@@ -90,22 +94,25 @@ where
                 });
             }
             // Replace the existing handler entry if it exists.
-            LoadBalancing::Replace => {
+            LoadBalancingStrategy::Replace => {
                 let Some(token) = self.quota_handler.get_token(holder) else {
                     return Err(ServerError::QuotaReached.into());
                 };
                 self.map.insert(
                     key,
-                    vec![ConnectionMapEntry {
-                        user,
-                        address,
-                        handler,
-                        _token: token,
-                    }],
+                    (
+                        vec![ConnectionMapEntry {
+                            user,
+                            address,
+                            handler,
+                            _token: token,
+                        }],
+                        Default::default(),
+                    ),
                 );
             }
             // Reject the new handler if an entry already exists.
-            LoadBalancing::Deny => {
+            LoadBalancingStrategy::Deny => {
                 if self.map.contains_key(&key) {
                     return Err(ServerError::LoadBalancingAlreadyBound.into());
                 }
@@ -114,12 +121,15 @@ where
                 };
                 self.map.insert(
                     key,
-                    vec![ConnectionMapEntry {
-                        user,
-                        address,
-                        handler,
-                        _token: token,
-                    }],
+                    (
+                        vec![ConnectionMapEntry {
+                            user,
+                            address,
+                            handler,
+                            _token: token,
+                        }],
+                        Default::default(),
+                    ),
                 );
             }
         }
@@ -133,17 +143,31 @@ where
     }
 
     // Return a random handler for the given key.
-    pub(crate) fn get<Q>(&self, key: &Q) -> Option<H>
+    pub(crate) fn get<Q>(&self, key: &Q, ip: IpAddr) -> Option<H>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.map.get(key).and_then(|handler| {
-            handler
-                .value()
-                .as_slice()
-                .choose(&mut rng())
-                .map(|ConnectionMapEntry { handler, .. }| Clone::clone(handler))
+            let value = handler.value();
+            let slice = value.0.as_slice();
+            let entry = match self.strategy {
+                LoadBalancingStrategy::Replace | LoadBalancingStrategy::Deny => slice.first(),
+                LoadBalancingStrategy::Allow => match self.algorithm {
+                    LoadBalancingAlgorithm::IpHash => {
+                        let mut hash = SipHasher::default();
+                        ip.hash(&mut hash);
+                        let mut hasher_rng = hash.into_rng();
+                        slice.get(hasher_rng.random_range(..slice.len()))
+                    }
+                    LoadBalancingAlgorithm::RoundRobin => {
+                        let index = value.1.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                        slice.get(index % slice.len())
+                    }
+                    LoadBalancingAlgorithm::Random => slice.choose(&mut rng()),
+                },
+            };
+            entry.map(|ConnectionMapEntry { handler, .. }| Clone::clone(handler))
         })
     }
 
@@ -157,7 +181,7 @@ where
         let len = self.map.len();
         let mut element = None;
         // Find the entry and store it under the element variable if it exists.
-        self.map.remove_if_mut(key, |inner_key, value| {
+        self.map.remove_if_mut(key, |inner_key, (value, _)| {
             let mut i = 0;
             while i < value.len() {
                 if value[i].address == *address {
@@ -184,7 +208,7 @@ where
         let len = self.map.len();
         let mut elements = Vec::new();
         // Find the entries with the address and store them in the elements Vec.
-        self.map.retain(|key, value| {
+        self.map.retain(|key, (value, _)| {
             let mut i = 0;
             while i < value.len() {
                 if value[i].address == *address {
@@ -220,6 +244,7 @@ where
                     entry.key().clone(),
                     entry
                         .value()
+                        .0
                         .iter()
                         .map(|ConnectionMapEntry { address, user, .. }| (*address, user.clone()))
                         .collect(),
@@ -231,7 +256,7 @@ where
 
 // Helper trait for getting HTTP-specific entries via the hostname.
 pub(crate) trait ConnectionGetByHttpHost<H> {
-    fn get_by_http_host(&self, host: &str) -> Option<H>;
+    fn get_by_http_host(&self, host: &str, ip: IpAddr) -> Option<H>;
 }
 
 impl<H, R> ConnectionGetByHttpHost<H> for Arc<ConnectionMap<String, H, R>>
@@ -239,8 +264,8 @@ where
     H: Clone,
     R: ConnectionMapReactor<String> + Send + 'static,
 {
-    fn get_by_http_host(&self, host: &str) -> Option<H> {
-        self.get(host)
+    fn get_by_http_host(&self, host: &str, ip: IpAddr) -> Option<H> {
+        self.get(host, ip)
     }
 }
 
@@ -252,10 +277,10 @@ pub(crate) struct HttpAliasingConnection {
 }
 
 impl ConnectionGetByHttpHost<Arc<SshTunnelHandler>> for Arc<HttpAliasingConnection> {
-    fn get_by_http_host(&self, host: &str) -> Option<Arc<SshTunnelHandler>> {
-        self.http.get(host).or_else(|| {
+    fn get_by_http_host(&self, host: &str, ip: IpAddr) -> Option<Arc<SshTunnelHandler>> {
+        self.http.get(host, ip).or_else(|| {
             self.alias
-                .get(&BorrowedTcpAlias(host, &80) as &dyn TcpAliasKey)
+                .get(&BorrowedTcpAlias(host, &80) as &dyn TcpAliasKey, ip)
         })
     }
 }
@@ -268,7 +293,7 @@ mod connection_map_tests {
     use mockall::predicate::eq;
 
     use crate::{
-        config::LoadBalancing,
+        config::LoadBalancingStrategy,
         quota::{MockQuotaHandler, TokenHolder, UserIdentification, get_test_token},
         reactor::MockConnectionMapReactor,
     };
@@ -285,7 +310,8 @@ mod connection_map_tests {
             .once()
             .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::builder()
-            .load_balancing(LoadBalancing::Allow)
+            .strategy(LoadBalancingStrategy::Allow)
+            .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
             .quota_handler(Arc::new(Box::new(mock_quota)))
             .reactor(mock_reactor)
             .build();
@@ -296,14 +322,14 @@ mod connection_map_tests {
             1,
         )
         .unwrap();
-        assert_eq!(map.get("host"), Some(1));
+        assert_eq!(map.get("host", "10.0.20.3".parse().unwrap()), Some(1));
         let data = map.data();
         insta::assert_yaml_snapshot!(data, @r###"
         host:
           "127.0.0.1:1": user1
         "###);
         map.remove("host", &"127.0.0.1:1".parse().unwrap());
-        assert_eq!(map.get("host"), None);
+        assert_eq!(map.get("host", "10.0.20.3".parse().unwrap()), None);
         let data = map.data();
         assert!(data.is_empty());
     }
@@ -318,7 +344,8 @@ mod connection_map_tests {
             .times(2)
             .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::builder()
-            .load_balancing(LoadBalancing::Allow)
+            .strategy(LoadBalancingStrategy::Allow)
+            .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
             .quota_handler(Arc::new(Box::new(mock_quota)))
             .reactor(mock_reactor)
             .build();
@@ -336,8 +363,8 @@ mod connection_map_tests {
             2,
         )
         .unwrap();
-        assert_eq!(map.get("host1"), Some(1));
-        assert_eq!(map.get("host2"), Some(2));
+        assert_eq!(map.get("host1", "10.0.20.3".parse().unwrap()), Some(1));
+        assert_eq!(map.get("host2", "10.0.20.3".parse().unwrap()), Some(2));
         let data = map.data();
         insta::assert_yaml_snapshot!(data, @r###"
         host1:
@@ -346,8 +373,8 @@ mod connection_map_tests {
           "127.0.0.1:2": user2
         "###);
         map.remove_by_address(&"127.0.0.1:2".parse().unwrap());
-        assert_eq!(map.get("host1"), None);
-        assert_eq!(map.get("host2"), None);
+        assert_eq!(map.get("host1", "10.0.20.3".parse().unwrap()), None);
+        assert_eq!(map.get("host2", "10.0.20.3".parse().unwrap()), None);
         let data = map.data();
         assert!(data.is_empty());
     }
@@ -362,7 +389,8 @@ mod connection_map_tests {
             .times(4)
             .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::builder()
-            .load_balancing(LoadBalancing::Allow)
+            .strategy(LoadBalancingStrategy::Allow)
+            .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
             .quota_handler(Arc::new(Box::new(mock_quota)))
             .reactor(mock_reactor)
             .build();
@@ -395,9 +423,9 @@ mod connection_map_tests {
         )
         .unwrap();
         map.remove_by_address(&"127.0.0.1:2".parse().unwrap());
-        assert_eq!(map.get("host1"), None);
-        assert_eq!(map.get("host2"), Some(3));
-        assert_eq!(map.get("host3"), Some(4));
+        assert_eq!(map.get("host1", "10.0.20.3".parse().unwrap()), None);
+        assert_eq!(map.get("host2", "10.0.20.3".parse().unwrap()), Some(3));
+        assert_eq!(map.get("host3", "10.0.20.3".parse().unwrap()), Some(4));
         let data = map.data();
         insta::assert_yaml_snapshot!(data, @r###"
         host2:
@@ -417,7 +445,8 @@ mod connection_map_tests {
             .times(2)
             .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::builder()
-            .load_balancing(LoadBalancing::Allow)
+            .strategy(LoadBalancingStrategy::Allow)
+            .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
             .quota_handler(Arc::new(Box::new(mock_quota)))
             .reactor(mock_reactor)
             .build();
@@ -435,11 +464,11 @@ mod connection_map_tests {
             2,
         )
         .unwrap();
-        assert_eq!(map.get("unknown"), None);
+        assert_eq!(map.get("unknown", "10.0.20.3".parse().unwrap()), None);
     }
 
     #[test_log::test]
-    fn returns_one_of_several_load_balanced_handlers() {
+    fn returns_one_of_several_load_balanced_handlers_for_random() {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor
             .expect_call()
@@ -452,7 +481,8 @@ mod connection_map_tests {
             .times(3)
             .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::builder()
-            .load_balancing(LoadBalancing::Allow)
+            .strategy(LoadBalancingStrategy::Allow)
+            .algorithm(crate::LoadBalancingAlgorithm::Random)
             .quota_handler(Arc::new(Box::new(mock_quota)))
             .reactor(mock_reactor)
             .build();
@@ -479,7 +509,7 @@ mod connection_map_tests {
         .unwrap();
         let mut results: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
         for _ in 0..10_000 {
-            let map_item = map.get("host");
+            let map_item = map.get("host", "10.0.20.3".parse().unwrap());
             match map_item {
                 Some(key @ 1) | Some(key @ 2) | Some(key @ 3) => {
                     *results.entry(key).or_default() += 1;
@@ -502,7 +532,7 @@ mod connection_map_tests {
         map.remove("host", &"127.0.0.1:2".parse().unwrap());
         let mut results: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
         for _ in 0..10_000 {
-            let map_item = map.get("host");
+            let map_item = map.get("host", "10.0.20.3".parse().unwrap());
             match map_item {
                 Some(key @ 1) | Some(key @ 3) => {
                     *results.entry(key).or_default() += 1;
@@ -524,6 +554,127 @@ mod connection_map_tests {
     }
 
     #[test_log::test]
+    fn returns_each_load_balanced_handler_for_round_robin() {
+        let mut mock_reactor = MockConnectionMapReactor::new();
+        mock_reactor
+            .expect_call()
+            .times(1)
+            .with(eq(vec![String::from("host")]))
+            .returning(|_| {});
+        let mut mock_quota = MockQuotaHandler::new();
+        mock_quota
+            .expect_get_token()
+            .times(3)
+            .returning(|_| Some(get_test_token()));
+        let map = ConnectionMap::<String, usize, _>::builder()
+            .strategy(LoadBalancingStrategy::Allow)
+            .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
+            .quota_handler(Arc::new(Box::new(mock_quota)))
+            .reactor(mock_reactor)
+            .build();
+        map.insert(
+            "host".into(),
+            "127.0.0.1:1".parse().unwrap(),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
+            1,
+        )
+        .unwrap();
+        map.insert(
+            "host".into(),
+            "127.0.0.1:2".parse().unwrap(),
+            TokenHolder::User(UserIdentification::Username("user2".into())),
+            2,
+        )
+        .unwrap();
+        map.insert(
+            "host".into(),
+            "127.0.0.1:3".parse().unwrap(),
+            TokenHolder::User(UserIdentification::Username("user3".into())),
+            3,
+        )
+        .unwrap();
+        for i in 0..10_000 {
+            let map_item = map.get("host", "10.0.20.3".parse().unwrap());
+            assert_eq!(Some(i % 3 + 1), map_item, "Unexpected value");
+        }
+        let data = map.data();
+        insta::assert_yaml_snapshot!(data, @r###"
+        host:
+          "127.0.0.1:1": user1
+          "127.0.0.1:2": user2
+          "127.0.0.1:3": user3
+        "###);
+        map.remove("host", &"127.0.0.1:3".parse().unwrap());
+        for i in 0..10_000 {
+            let map_item = map.get("host", "10.0.20.3".parse().unwrap());
+            assert_eq!(Some(i % 2 + 1), map_item, "Unexpected value");
+        }
+        let data = map.data();
+        insta::assert_yaml_snapshot!(data, @r###"
+        host:
+          "127.0.0.1:1": user1
+          "127.0.0.1:2": user2
+        "###);
+    }
+
+    #[test_log::test]
+    fn returns_fixed_handler_for_ip_hash() {
+        let mut mock_reactor = MockConnectionMapReactor::new();
+        mock_reactor
+            .expect_call()
+            .times(1)
+            .with(eq(vec![String::from("host")]))
+            .returning(|_| {});
+        let mut mock_quota = MockQuotaHandler::new();
+        mock_quota
+            .expect_get_token()
+            .times(3)
+            .returning(|_| Some(get_test_token()));
+        let map = ConnectionMap::<String, usize, _>::builder()
+            .strategy(LoadBalancingStrategy::Allow)
+            .algorithm(crate::LoadBalancingAlgorithm::IpHash)
+            .quota_handler(Arc::new(Box::new(mock_quota)))
+            .reactor(mock_reactor)
+            .build();
+        map.insert(
+            "host".into(),
+            "127.0.0.1:1".parse().unwrap(),
+            TokenHolder::User(UserIdentification::Username("user1".into())),
+            1,
+        )
+        .unwrap();
+        map.insert(
+            "host".into(),
+            "127.0.0.1:2".parse().unwrap(),
+            TokenHolder::User(UserIdentification::Username("user2".into())),
+            2,
+        )
+        .unwrap();
+        map.insert(
+            "host".into(),
+            "127.0.0.1:3".parse().unwrap(),
+            TokenHolder::User(UserIdentification::Username("user3".into())),
+            3,
+        )
+        .unwrap();
+        let first_map_item = map.get("host", "10.0.20.3".parse().unwrap());
+        for _ in 0..10_000 {
+            assert_eq!(
+                first_map_item,
+                map.get("host", "10.0.20.3".parse().unwrap()),
+                "Unexpected value"
+            );
+        }
+        let data = map.data();
+        insta::assert_yaml_snapshot!(data, @r###"
+        host:
+          "127.0.0.1:1": user1
+          "127.0.0.1:2": user2
+          "127.0.0.1:3": user3
+        "###);
+    }
+
+    #[test_log::test]
     fn returns_single_host_when_replacing() {
         let mut mock_reactor = MockConnectionMapReactor::new();
         mock_reactor.expect_call().times(1).returning(|_| {});
@@ -533,7 +684,8 @@ mod connection_map_tests {
             .times(2)
             .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::builder()
-            .load_balancing(LoadBalancing::Replace)
+            .strategy(LoadBalancingStrategy::Replace)
+            .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
             .quota_handler(Arc::new(Box::new(mock_quota)))
             .reactor(mock_reactor)
             .build();
@@ -552,7 +704,7 @@ mod connection_map_tests {
         )
         .unwrap();
         for _ in 0..1_000 {
-            assert_eq!(map.get("host"), Some(2));
+            assert_eq!(map.get("host", "10.0.20.3".parse().unwrap()), Some(2));
         }
         let data = map.data();
         insta::assert_yaml_snapshot!(data, @r###"
@@ -571,7 +723,8 @@ mod connection_map_tests {
             .once()
             .returning(|_| Some(get_test_token()));
         let map = ConnectionMap::<String, usize, _>::builder()
-            .load_balancing(LoadBalancing::Deny)
+            .strategy(LoadBalancingStrategy::Deny)
+            .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
             .quota_handler(Arc::new(Box::new(mock_quota)))
             .reactor(mock_reactor)
             .build();
@@ -593,7 +746,7 @@ mod connection_map_tests {
             "shouldn't be allowed to add connection with deny policy"
         );
         for _ in 0..1_000 {
-            assert_eq!(map.get("host"), Some(1));
+            assert_eq!(map.get("host", "10.0.20.3".parse().unwrap()), Some(1));
         }
         let data = map.data();
         insta::assert_yaml_snapshot!(data, @r###"
@@ -628,7 +781,8 @@ mod connection_map_tests {
                 }
             });
         let map = ConnectionMap::<String, usize, _>::builder()
-            .load_balancing(LoadBalancing::Allow)
+            .strategy(LoadBalancingStrategy::Allow)
+            .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
             .quota_handler(Arc::new(Box::new(mock_quota)))
             .reactor(mock_reactor)
             .build();
@@ -661,7 +815,7 @@ mod connection_map_tests {
         );
         let mut results: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
         for _ in 0..10_000 {
-            let map_item = map.get("host");
+            let map_item = map.get("host", "10.0.20.3".parse().unwrap());
             match map_item {
                 Some(key @ 1) | Some(key @ 2) => {
                     *results.entry(key).or_default() += 1;
@@ -704,7 +858,8 @@ mod connection_map_tests {
                 }
             });
         let map = ConnectionMap::<String, usize, _>::builder()
-            .load_balancing(LoadBalancing::Replace)
+            .strategy(LoadBalancingStrategy::Replace)
+            .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
             .quota_handler(Arc::new(Box::new(mock_quota)))
             .reactor(mock_reactor)
             .build();
@@ -728,7 +883,7 @@ mod connection_map_tests {
             "shouldn't be allowed to add connection denied by quota"
         );
         for _ in 0..1_000 {
-            assert_eq!(map.get("host"), Some(1));
+            assert_eq!(map.get("host", "10.0.20.3".parse().unwrap()), Some(1));
         }
         let data = map.data();
         insta::assert_yaml_snapshot!(data, @r###"
@@ -759,7 +914,8 @@ mod connection_map_tests {
                 }
             });
         let map = ConnectionMap::<String, usize, _>::builder()
-            .load_balancing(LoadBalancing::Deny)
+            .strategy(LoadBalancingStrategy::Deny)
+            .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
             .quota_handler(Arc::new(Box::new(mock_quota)))
             .reactor(mock_reactor)
             .build();
@@ -794,7 +950,7 @@ mod connection_map_tests {
             "shouldn't be allowed to add connection with deny policy"
         );
         for _ in 0..1_000 {
-            assert_eq!(map.get("host"), Some(2));
+            assert_eq!(map.get("host", "10.0.20.3".parse().unwrap()), Some(2));
         }
         let data = map.data();
         insta::assert_yaml_snapshot!(data, @r###"

@@ -192,7 +192,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     };
     let http_connections = Arc::new(
         ConnectionMap::builder()
-            .load_balancing(config.load_balancing)
+            .strategy(config.load_balancing)
+            .algorithm(config.load_balancing_algorithm)
             .quota_handler(Arc::clone(&quota_handler))
             .reactor(HttpReactor {
                 certificates: Arc::clone(&certificates),
@@ -202,33 +203,38 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     );
     let sni_connections = Arc::new(
         ConnectionMap::builder()
-            .load_balancing(config.load_balancing)
+            .strategy(config.load_balancing)
+            .algorithm(config.load_balancing_algorithm)
             .quota_handler(Arc::clone(&quota_handler))
             .reactor(SniReactor(Arc::clone(&telemetry)))
             .build(),
     );
     let ssh_connections = Arc::new(
         ConnectionMap::builder()
-            .load_balancing(config.load_balancing)
+            .strategy(config.load_balancing)
+            .algorithm(config.load_balancing_algorithm)
             .quota_handler(Arc::clone(&quota_handler))
             .reactor(SshReactor(Arc::clone(&telemetry)))
             .build(),
     );
     let tcp_connections = Arc::new(
         ConnectionMap::builder()
-            .load_balancing(config.load_balancing)
+            .strategy(config.load_balancing)
+            .algorithm(config.load_balancing_algorithm)
             .quota_handler(Arc::clone(&quota_handler))
             .build(),
     );
     let admin_alias_connections = Arc::new(
         ConnectionMap::builder()
-            .load_balancing(crate::LoadBalancing::Deny)
+            .strategy(crate::LoadBalancingStrategy::Deny)
+            .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
             .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
             .build(),
     );
     let alias_connections = Arc::new(
         ConnectionMap::builder()
-            .load_balancing(config.load_balancing)
+            .strategy(config.load_balancing)
+            .algorithm(config.load_balancing_algorithm)
             .quota_handler(Arc::clone(&quota_handler))
             .reactor(AliasReactor(Arc::clone(&telemetry)))
             .build(),
@@ -790,11 +796,9 @@ fn handle_https_connection(
             }
             return;
         }
-        if let Some(tunnel_handler) = sandhole.sni.get(&sni) {
-            let Ok(mut channel) = tunnel_handler
-                .tunneling_channel(address.ip(), address.port())
-                .await
-            else {
+        let ip = address.ip().to_canonical();
+        if let Some(tunnel_handler) = sandhole.sni.get(&sni, ip) {
+            let Ok(mut channel) = tunnel_handler.tunneling_channel(ip, address.port()).await else {
                 let io = TokioIo::new(stream);
                 let service = service_fn(async move |_: Request<Incoming>| {
                     Ok::<_, Infallible>((StatusCode::NOT_FOUND, "").into_response())
@@ -830,7 +834,7 @@ fn handle_https_connection(
             }
             return;
         };
-        let tunnel_handler = sandhole.http.get(&sni);
+        let tunnel_handler = sandhole.http.get(&sni, ip);
         let is_http2 = match tunnel_handler.as_ref() {
             Some(conn) => conn.http_data().map(|data| data.http2).unwrap_or_default(),
             None => false,

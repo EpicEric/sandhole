@@ -67,10 +67,10 @@ impl PortHandler for Arc<TcpHandler> {
                             warn!(%address, %error, "Error setting nodelay.");
                         }
                         // Get the handler for this port
-                        if let Some(handler) = clone.conn_manager.get(&port) {
-                            if let Ok(mut channel) = handler
-                                .tunneling_channel(address.ip(), address.port())
-                                .await
+                        let ip = address.ip().to_canonical();
+                        if let Some(handler) = clone.conn_manager.get(&port, ip) {
+                            if let Ok(mut channel) =
+                                handler.tunneling_channel(ip, address.port()).await
                             {
                                 counter!(TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL, TELEMETRY_KEY_PORT => port.to_string())
                                     .increment(1);

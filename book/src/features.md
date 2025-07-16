@@ -50,7 +50,7 @@ Features related to Sandhole's remote forwarding and reverse proxy capabilities.
 ### Reverse proxy
 
 - Access logs for HTTP, TCP, and aliases.
-- Control over how services are load-balanced. (CLI: `--load-balancing`)
+- Control over if and how services are load-balanced. (CLI: `--load-balancing`, `--load-balancing-algorithm`)
 - Control over allowed incoming connections by IP address CIDRs. (SSH exec: `ip-allowlist`, CLI: `--ip-allowlist`)
 - Control over blocked incoming connections by IP address CIDRs. (SSH exec: `ip-blocklist`, CLI: `--ip-blocklist`)
 - Option to restrict maximum services exposed by users. (CLI: `--quota-per-user`)

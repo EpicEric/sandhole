@@ -142,6 +142,18 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           - <b>deny</b>:    Don&#39;t load-balance; Deny the new handler if
                      there&#39;s an existing one
 
+      <b>--load-balancing-algorithm</b> &lt;ALGORITHM&gt;
+          Algorithm to use for service selection when load-balancing.
+
+          By default, traffic will be randomly distributed between services.
+
+          [default: random]
+
+          Possible values:
+          - <b>random</b>:      Choose randomly
+          - <b>round-robin</b>: Round robin
+          - <b>ip-hash</b>:     Choose based on IP hash
+
       <b>--txt-record-prefix</b> &lt;PREFIX&gt;
           Prefix for TXT DNS records containing key fingerprints, for
           authorization to bind under a specific domain.
