@@ -62,6 +62,7 @@ impl Drop for ProxyAutoCancellation {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum UserSessionRestriction {
     // No restriction on the session.
     None,

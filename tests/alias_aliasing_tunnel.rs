@@ -145,6 +145,13 @@ async fn alias_aliasing_tunnel() {
         .await
         .expect("cancel_tcpip_forward failed");
     assert!(
+        proxy_session
+            .cancel_tcpip_forward("my.tunnel", 42)
+            .await
+            .is_err(),
+        "cancel_tcpip_forward should've failed for closed tunnel"
+    );
+    assert!(
         client_session
             .channel_open_direct_tcpip("my.tunnel", 42, "::1", 23456)
             .await

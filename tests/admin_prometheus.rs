@@ -91,7 +91,7 @@ async fn admin_prometheus() {
     )
     .await
     .expect("HTTP handshake failed");
-    tokio::spawn(async move {
+    let jh = tokio::spawn(async move {
         if let Err(error) = conn.await {
             eprintln!("Connection failed: {error:?}");
         }
@@ -150,6 +150,8 @@ async fn admin_prometheus() {
         panic!("Timeout waiting for server to reply.")
     };
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    jh.abort();
 }
 
 struct SshClient;

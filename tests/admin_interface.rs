@@ -98,10 +98,6 @@ async fn admin_interface() {
         .await
         .expect("tcpip_forward failed");
     session_one
-        .tcpip_forward("proxy.ccc", 12345)
-        .await
-        .expect("tcpip_forward failed");
-    session_one
         .tcpip_forward("", 23456)
         .await
         .expect("tcpip_forward failed");
@@ -203,7 +199,7 @@ async fn admin_interface() {
         }
         let _ = hide_cursor_tx.send(parser.screen().hide_cursor());
     });
-    if timeout(Duration::from_secs(3), async move {
+    if timeout(Duration::from_secs(5), async move {
         // 4a. Validate header, system information, and HTTP tab data
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",
@@ -226,7 +222,40 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4b. Switch tabs and validate SNI tab data
+        // 4b. View HTTP user details
+        writer
+            .write_all(&b"\x1b[A"[..])
+            .await
+            .expect("channel write failed");
+        sleep(Duration::from_millis(200)).await;
+        writer
+            .write_all(&b"\r"[..])
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"User details",
+            r"SHA256:GehKyA\S*",
+            r"Type: User",
+            r"Key comment: key1",
+            r"Algorithm: ssh-ed25519",
+            r" <Esc> Close  <Delete> Remove ",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 4c. Close user details, switch tabs, and validate SNI tab data
+        writer
+            .write_all(&b"\x1b"[..])
+            .await
+            .expect("channel write failed");
+        sleep(Duration::from_millis(200)).await;
         writer
             .write_all(&b"\t"[..])
             .await
@@ -252,7 +281,7 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4c. Switch tabs and validate SSH tab data
+        // 4d. Switch tabs and validate SSH tab data
         writer
             .write_all(&b"\t"[..])
             .await
@@ -278,90 +307,11 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4d. Switch tabs again and validate TCP tab data
+        // 4e. View SSH user details
         writer
-            .write_all(&b"\t"[..])
+            .write_all(&b"\x1b[B"[..])
             .await
             .expect("channel write failed");
-        let search_strings: Vec<Regex> = [
-            r"Sandhole admin v\d+\.\d+\.\d+",
-            r"System information",
-            r"  CPU%  ",
-            r" Memory ",
-            r"   TX   ",
-            r"   RX   ",
-            r"TCP services",
-            r"23456",
-            r"SHA256:GehKyA\S*",
-            r"127\.0\.0\.1:\d{4,5}",
-        ]
-        .into_iter()
-        .map(|re| Regex::new(re).expect("Invalid regex"))
-        .collect();
-        loop {
-            let screen = rx.recv().await.unwrap();
-            if search_strings.iter().all(|re| re.is_match(&screen)) {
-                break;
-            }
-        }
-        // 4e. Switch tabs again and validate alias tab data
-        writer
-            .write_all(&b"\t"[..])
-            .await
-            .expect("channel write failed");
-        let search_strings: Vec<Regex> = [
-            r"Sandhole admin v\d+\.\d+\.\d+",
-            r"System information",
-            r"  CPU%  ",
-            r" Memory ",
-            r"   TX   ",
-            r"   RX   ",
-            r"Alias services",
-            r"proxy\.ccc:12345",
-            r"SHA256:GehKyA\S*",
-            r"127\.0\.0\.1:\d{4,5}",
-        ]
-        .into_iter()
-        .map(|re| Regex::new(re).expect("Invalid regex"))
-        .collect();
-        loop {
-            let screen = rx.recv().await.unwrap();
-            if search_strings.iter().all(|re| re.is_match(&screen)) {
-                break;
-            }
-        }
-        // 4f. Go back one tab
-        writer
-            .write_all(&b"\x1b[Z"[..])
-            .await
-            .expect("channel write failed");
-        let search_strings: Vec<Regex> = [
-            r"Sandhole admin v\d+\.\d+\.\d+",
-            r"System information",
-            r"  CPU%  ",
-            r" Memory ",
-            r"   TX   ",
-            r"   RX   ",
-            r"TCP services",
-            r"23456",
-            r"SHA256:GehKyA\S*",
-            r"127\.0\.0\.1:\d{4,5}",
-        ]
-        .into_iter()
-        .map(|re| Regex::new(re).expect("Invalid regex"))
-        .collect();
-        loop {
-            let screen = rx.recv().await.unwrap();
-            if search_strings.iter().all(|re| re.is_match(&screen)) {
-                break;
-            }
-        }
-        // 4g. View user details
-        writer
-            .write_all(&b"\x1b[A"[..])
-            .await
-            .expect("channel write failed");
-        // Wait for table state to update via render
         sleep(Duration::from_millis(200)).await;
         writer
             .write_all(&b"\r"[..])
@@ -385,9 +335,131 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4h. Close user details
+        // 4f. Close user details, switch tabs, and validate TCP tab data
         writer
             .write_all(&b"\x1b"[..])
+            .await
+            .expect("channel write failed");
+        sleep(Duration::from_millis(200)).await;
+        writer
+            .write_all(&b"\t"[..])
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"System information",
+            r"  CPU%  ",
+            r" Memory ",
+            r"   TX   ",
+            r"   RX   ",
+            r"TCP services",
+            r"23456",
+            r"SHA256:GehKyA\S*",
+            r"127\.0\.0\.1:\d{4,5}",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 4g. View TCP user details
+        writer
+            .write_all(&b"\x1b[A"[..])
+            .await
+            .expect("channel write failed");
+        sleep(Duration::from_millis(200)).await;
+        writer
+            .write_all(&b"\r"[..])
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"User details",
+            r"SHA256:GehKyA\S*",
+            r"Type: User",
+            r"Key comment: key1",
+            r"Algorithm: ssh-ed25519",
+            r" <Esc> Close  <Delete> Remove ",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 4h. Close user details, switch tabs, and validate alias tab data
+        writer
+            .write_all(&b"\x1b"[..])
+            .await
+            .expect("channel write failed");
+        sleep(Duration::from_millis(200)).await;
+        writer
+            .write_all(&b"\t"[..])
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"System information",
+            r"  CPU%  ",
+            r" Memory ",
+            r"   TX   ",
+            r"   RX   ",
+            r"Alias services",
+            r"prometheus\.sandhole:10",
+            r"System",
+            r"0\.0\.0\.0:0",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 4i. View TCP user details
+        writer
+            .write_all(&b"\x1b[A"[..])
+            .await
+            .expect("channel write failed");
+        sleep(Duration::from_millis(200)).await;
+        writer
+            .write_all(&b"\r"[..])
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"User details",
+            r"  System  ",
+            r"Type: System",
+            r"(not a real user)",
+            r" <Esc> Close ",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 4j. Close user details and go back one tab
+        writer
+            .write_all(&b"\x1b"[..])
+            .await
+            .expect("channel write failed");
+        sleep(Duration::from_millis(200)).await;
+        writer
+            .write_all(&b"\x1b[Z"[..])
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [

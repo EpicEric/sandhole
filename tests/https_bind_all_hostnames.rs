@@ -158,6 +158,13 @@ async fn https_bind_all_hostnames() {
         .cancel_tcpip_forward("foobar.tld", 80)
         .await
         .expect("cancel_tcpip_forward failed");
+    assert!(
+        session
+            .cancel_tcpip_forward("foobar.tld", 80)
+            .await
+            .is_err(),
+        "cancel_tcpip_forward should've failed for closed tunnel"
+    );
 }
 
 struct SshClient;
