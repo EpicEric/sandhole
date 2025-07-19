@@ -105,27 +105,31 @@ async fn tcp_multi_stream_upload() {
         .expect("tcpip_forward failed");
 
     // 3. Connect to the TCP port of our proxy with out multiple streams
-    let mut jh_vec = vec![];
-    for file_size in [7_500_000usize, 10_000_000, 15_000_000, 20_000_000] {
-        let tcp_stream = TcpStream::connect("127.0.0.1:12345")
-            .await
-            .expect("TCP connection failed");
-        let (mut read_half, mut write_half) = tcp_stream.into_split();
-        tokio::spawn(async move {
-            write_half
-                .write_all(&file_size.to_le_bytes()[..])
+    timeout(Duration::from_secs(30), async move {
+        let mut jh_vec = vec![];
+        for file_size in [7_500_000usize, 10_000_000, 15_000_000, 20_000_000] {
+            let tcp_stream = TcpStream::connect("127.0.0.1:12345")
                 .await
-                .unwrap();
-        });
-        let jh = tokio::spawn(async move {
-            let mut buf = vec![0u8; file_size];
-            read_half.read_exact(&mut buf).await.unwrap();
-        });
-        jh_vec.push(jh);
-    }
-    for jh in jh_vec.into_iter() {
-        jh.await.expect("Join handle panicked");
-    }
+                .expect("TCP connection failed");
+            let (mut read_half, mut write_half) = tcp_stream.into_split();
+            tokio::spawn(async move {
+                write_half
+                    .write_all(&file_size.to_le_bytes()[..])
+                    .await
+                    .unwrap();
+            });
+            let jh = tokio::spawn(async move {
+                let mut buf = vec![0u8; file_size];
+                read_half.read_exact(&mut buf).await.unwrap();
+            });
+            jh_vec.push(jh);
+        }
+        for jh in jh_vec.into_iter() {
+            jh.await.expect("Join handle panicked");
+        }
+    })
+    .await
+    .expect("Timeout waiting for test to finish.");
 }
 
 struct SshClient(Bytes);

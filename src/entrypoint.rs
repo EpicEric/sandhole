@@ -299,12 +299,21 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             loop {
                 sleep(Duration::from_millis(3_000)).await;
                 let data = connections_clone.data();
-                let telemetry = telemetry_clone.get_ssh_connections_per_minute();
+                let telemetry_per_minute = telemetry_clone.get_ssh_connections_per_minute();
+                let telemetry_current = telemetry_clone.get_current_ssh_connections();
                 let data = data
                     .into_iter()
                     .map(|(alias, addresses)| {
-                        let connections_per_minute = *telemetry.get(&alias).unwrap_or(&0u64);
-                        (alias, (addresses, connections_per_minute))
+                        let connections_per_minute = telemetry_per_minute
+                            .get(&alias)
+                            .copied()
+                            .unwrap_or_default();
+                        let current_connections =
+                            telemetry_current.get(&alias).copied().unwrap_or_default();
+                        (
+                            alias,
+                            (addresses, connections_per_minute, current_connections),
+                        )
                     })
                     .collect();
                 *data_clone.lock().unwrap() = data;
@@ -326,7 +335,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 let data = data
                     .into_iter()
                     .map(|(hostname, addresses)| {
-                        let requests_per_minute = *telemetry.get(&hostname).unwrap_or(&0u64);
+                        let requests_per_minute =
+                            telemetry.get(&hostname).copied().unwrap_or_default();
                         (hostname, (addresses, requests_per_minute))
                     })
                     .collect();
@@ -342,12 +352,23 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 loop {
                     sleep(Duration::from_millis(3_000)).await;
                     let data = connections_clone.data();
-                    let telemetry = telemetry_clone.get_sni_connections_per_minute();
+                    let telemetry_per_minute = telemetry_clone.get_sni_connections_per_minute();
+                    let telemetry_current = telemetry_clone.get_current_sni_connections();
                     let data = data
                         .into_iter()
                         .map(|(hostname, addresses)| {
-                            let connections_per_minute = *telemetry.get(&hostname).unwrap_or(&0u64);
-                            (hostname, (addresses, connections_per_minute))
+                            let connections_per_minute = telemetry_per_minute
+                                .get(&hostname)
+                                .copied()
+                                .unwrap_or_default();
+                            let current_connections = telemetry_current
+                                .get(&hostname)
+                                .copied()
+                                .unwrap_or_default();
+                            (
+                                hostname,
+                                (addresses, connections_per_minute, current_connections),
+                            )
                         })
                         .collect();
                     *data_clone.lock().unwrap() = data;
@@ -365,12 +386,19 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             loop {
                 sleep(Duration::from_millis(3_000)).await;
                 let data = connections_clone.data();
-                let telemetry = telemetry_clone.get_tcp_connections_per_minute();
+                let telemetry_per_minute = telemetry_clone.get_tcp_connections_per_minute();
+                let telemetry_current = telemetry_clone.get_current_tcp_connections();
                 let data = data
                     .into_iter()
                     .map(|(port, addresses)| {
-                        let connections_per_minute = *telemetry.get(&port).unwrap_or(&0u64);
-                        (port, (addresses, connections_per_minute))
+                        let connections_per_minute =
+                            telemetry_per_minute.get(&port).copied().unwrap_or_default();
+                        let current_connections =
+                            telemetry_current.get(&port).copied().unwrap_or_default();
+                        (
+                            port,
+                            (addresses, connections_per_minute, current_connections),
+                        )
                     })
                     .collect();
                 *data_clone.lock().unwrap() = data;
@@ -389,19 +417,41 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 sleep(Duration::from_millis(3_000)).await;
                 let alias_data = alias_connections_clone.data();
                 let admin_data = admin_connections_clone.data();
-                let telemetry_alias = telemetry_clone.get_alias_connections_per_minute();
-                let telemetry_admin_alias =
+                let telemetry_alias_per_minute = telemetry_clone.get_alias_connections_per_minute();
+                let telemetry_alias_current = telemetry_clone.get_current_alias_connections();
+                let telemetry_admin_alias_per_minute =
                     telemetry_clone.get_admin_alias_connections_per_minute();
+                let telemetry_admin_alias_current =
+                    telemetry_clone.get_current_admin_alias_connections();
                 let data = alias_data
                     .into_iter()
                     .map(|(alias, addresses)| {
-                        let connections_per_minute = *telemetry_alias.get(&alias).unwrap_or(&0u64);
-                        (alias, (addresses, connections_per_minute))
+                        let connections_per_minute = telemetry_alias_per_minute
+                            .get(&alias)
+                            .copied()
+                            .unwrap_or_default();
+                        let current_connections = telemetry_alias_current
+                            .get(&alias)
+                            .copied()
+                            .unwrap_or_default();
+                        (
+                            alias,
+                            (addresses, connections_per_minute, current_connections),
+                        )
                     })
                     .chain(admin_data.into_iter().map(|(alias, addresses)| {
-                        let connections_per_minute =
-                            *telemetry_admin_alias.get(&alias).unwrap_or(&0u64);
-                        (alias, (addresses, connections_per_minute))
+                        let connections_per_minute = telemetry_admin_alias_per_minute
+                            .get(&alias)
+                            .copied()
+                            .unwrap_or_default();
+                        let current_connections = telemetry_admin_alias_current
+                            .get(&alias)
+                            .copied()
+                            .unwrap_or_default();
+                        (
+                            alias,
+                            (addresses, connections_per_minute, current_connections),
+                        )
                     }))
                     .collect();
                 *data_clone.lock().unwrap() = data;

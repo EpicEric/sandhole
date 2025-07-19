@@ -159,33 +159,37 @@ async fn https_single_stream_download() {
         .header(HOST, "foobar.tld")
         .body(Body::empty())
         .unwrap();
-    let Ok(mut response) = timeout(Duration::from_secs(60), async move {
-        sender
-            .send_request(request)
-            .await
-            .expect("Error sending HTTP request")
+    timeout(Duration::from_secs(30), async move {
+        let Ok(mut response) = timeout(Duration::from_secs(60), async move {
+            sender
+                .send_request(request)
+                .await
+                .expect("Error sending HTTP request")
+        })
+        .await
+        else {
+            panic!("Timeout waiting for request to finish.");
+        };
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(CONTENT_LENGTH)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            file_size.to_string(),
+            "Content-Length didn't match file size"
+        );
+        let body = response.body_mut();
+        let mut size = 0usize;
+        while let Some(Ok(frame)) = body.frame().await {
+            size += frame.data_ref().unwrap().len();
+        }
+        assert_eq!(size, file_size, "Response size didn't match file size");
     })
     .await
-    else {
-        panic!("Timeout waiting for request to finish.");
-    };
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        response
-            .headers()
-            .get(CONTENT_LENGTH)
-            .unwrap()
-            .to_str()
-            .unwrap(),
-        file_size.to_string(),
-        "Content-Length didn't match file size"
-    );
-    let body = response.body_mut();
-    let mut size = 0usize;
-    while let Some(Ok(frame)) = body.frame().await {
-        size += frame.data_ref().unwrap().len();
-    }
-    assert_eq!(size, file_size, "Response size didn't match file size");
+    .expect("Timeout waiting for test to finish.");
 }
 
 struct SshClient(Bytes);

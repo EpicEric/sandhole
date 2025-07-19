@@ -152,23 +152,27 @@ async fn https_single_stream_upload() {
             eprintln!("Connection failed: {error:?}");
         }
     });
-    let request = Request::builder()
-        .method("POST")
-        .uri(format!("/{file_size}"))
-        .header(HOST, "foobar.tld")
-        .body(Body::from(&data[..file_size]))
-        .unwrap();
-    let Ok(response) = timeout(Duration::from_secs(60), async move {
-        sender
-            .send_request(request)
-            .await
-            .expect("Error sending HTTP request")
+    timeout(Duration::from_secs(30), async move {
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/{file_size}"))
+            .header(HOST, "foobar.tld")
+            .body(Body::from(&data[..file_size]))
+            .unwrap();
+        let Ok(response) = timeout(Duration::from_secs(60), async move {
+            sender
+                .send_request(request)
+                .await
+                .expect("Error sending HTTP request")
+        })
+        .await
+        else {
+            panic!("Timeout waiting for request to finish.");
+        };
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
     })
     .await
-    else {
-        panic!("Timeout waiting for request to finish.");
-    };
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    .expect("Timeout waiting for test to finish.");
 }
 
 struct SshClient(usize);

@@ -173,7 +173,7 @@ async fn admin_window_change() {
             r"   RX   ",
             r"HTTP services",
             r"http\.aaa",
-            r"SHA256:F7r4labRQQM1G0pbnxFNDZwd1BB5N/NlHHRca3jM0fo",
+            r"SHA256:F7r4la\S*",
             r"127\.0\.0\.1:\d{4,5}",
         ]
         .into_iter()

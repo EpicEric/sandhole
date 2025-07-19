@@ -5,6 +5,7 @@
 ### Added
 
 - Add `--load-balancing-algorithm` CLI flag.
+- Add current connection count to admin interface for SSH/SNI/TCP/alias.
 
 ### Fixed
 
@@ -15,7 +16,7 @@
 ### Added
 
 - Add support for admin-only aliases.
-- Add Prometheus support via admin-only alias.
+- Add Prometheus support via admin-only alias `prometheus.sandhole:10`.
 - Add `--disable-prometheus` CLI flag.
 
 ### Changed

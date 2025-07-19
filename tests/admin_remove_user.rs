@@ -189,7 +189,7 @@ async fn admin_remove_user() {
             r"Sandhole admin v\d+\.\d+\.\d+",
             r"HTTP services",
             r"aaa\.foobar\.tld",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"SHA256:GehKyA\S*",
             r"\[::1\]:\d{4,5}",
             r"custom_user",
             r"127\.0\.0\.1:\d{4,5}",
@@ -323,7 +323,7 @@ async fn admin_remove_user() {
             r"Sandhole admin v\d+\.\d+\.\d+",
             r"TCP services",
             r"38080",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"SHA256:GehKyA\S*",
             r"\[::1\]:\d{4,5}",
         ]
         .into_iter()

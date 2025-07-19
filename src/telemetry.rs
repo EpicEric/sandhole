@@ -12,7 +12,8 @@ use ahash::RandomState;
 use dashmap::DashMap;
 use itertools::Itertools;
 use metrics::{
-    Counter, CounterFn, Recorder, Unit, describe_counter, describe_gauge, describe_histogram,
+    Counter, CounterFn, Gauge, GaugeFn, Recorder, Unit, describe_counter, describe_gauge,
+    describe_histogram,
 };
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle, PrometheusRecorder};
 use tokio::time::sleep;
@@ -113,6 +114,45 @@ impl SlidingWindowCounter {
     }
 }
 
+// A value that goes up and down with time.
+struct TelemetryGauge {
+    // Inner gauge for metrics with a different exporter.
+    inner: Gauge,
+    // The current value.
+    value: Mutex<f64>,
+}
+
+impl GaugeFn for TelemetryGauge {
+    fn increment(&self, value: f64) {
+        self.inner.increment(value);
+        *self.value.lock().unwrap() += value;
+    }
+
+    fn decrement(&self, value: f64) {
+        self.inner.decrement(value);
+        *self.value.lock().unwrap() -= value;
+    }
+
+    fn set(&self, value: f64) {
+        self.inner.set(value);
+        *self.value.lock().unwrap() = value;
+    }
+}
+
+impl TelemetryGauge {
+    fn new(gauge: Gauge) -> Self {
+        TelemetryGauge {
+            inner: gauge,
+            value: Mutex::default(),
+        }
+    }
+
+    // Measure the counter, taking the period and window into account.
+    fn measure(&self) -> f64 {
+        *self.value.lock().unwrap()
+    }
+}
+
 pub(crate) const TELEMETRY_KEY_HOSTNAME: &str = "hostname";
 pub(crate) const TELEMETRY_KEY_PORT: &str = "port";
 pub(crate) const TELEMETRY_KEY_ALIAS: &str = "alias";
@@ -156,6 +196,16 @@ pub(crate) struct Telemetry {
     admin_alias_connections_per_minute: DashMap<TcpAlias, Arc<SlidingWindowCounter>, RandomState>,
     // Connections per minute for each TCP port.
     tcp_connections_per_minute: DashMap<u16, Arc<SlidingWindowCounter>, RandomState>,
+    // Current connections for each SSH alias.
+    ssh_connections_current: DashMap<String, Arc<TelemetryGauge>, RandomState>,
+    // Current connections for each SNI host.
+    sni_connections_current: DashMap<String, Arc<TelemetryGauge>, RandomState>,
+    // Current connections for each local-forwarded alias.
+    alias_connections_current: DashMap<TcpAlias, Arc<TelemetryGauge>, RandomState>,
+    // Current connections for each admin alias.
+    admin_alias_connections_current: DashMap<TcpAlias, Arc<TelemetryGauge>, RandomState>,
+    // Current connections for each TCP port.
+    tcp_connections_current: DashMap<u16, Arc<TelemetryGauge>, RandomState>,
     // Recorder for Prometheus metrics export.
     prometheus_recorder: Option<PrometheusRecorder>,
     // Join handle for the Prometheus upkeep task.
@@ -164,7 +214,7 @@ pub(crate) struct Telemetry {
 
 impl Telemetry {
     pub(crate) fn new(enable_prometheus: bool) -> Self {
-        if enable_prometheus {
+        let (prometheus_recorder, join_handle) = if enable_prometheus {
             let prometheus_recorder = PrometheusBuilder::new()
                 .set_buckets_for_metric(
                     metrics_exporter_prometheus::Matcher::Full(
@@ -183,28 +233,25 @@ impl Telemetry {
                     handle.run_upkeep();
                 }
             }));
-
-            Telemetry {
-                ssh_connections_per_minute: DashMap::default(),
-                http_requests_per_minute: DashMap::default(),
-                sni_connections_per_minute: DashMap::default(),
-                alias_connections_per_minute: DashMap::default(),
-                admin_alias_connections_per_minute: DashMap::default(),
-                tcp_connections_per_minute: DashMap::default(),
-                prometheus_recorder: Some(prometheus_recorder),
-                _join_handle: join_handle,
-            }
+            (Some(prometheus_recorder), join_handle)
         } else {
-            Telemetry {
-                ssh_connections_per_minute: DashMap::default(),
-                http_requests_per_minute: DashMap::default(),
-                sni_connections_per_minute: DashMap::default(),
-                alias_connections_per_minute: DashMap::default(),
-                admin_alias_connections_per_minute: DashMap::default(),
-                tcp_connections_per_minute: DashMap::default(),
-                prometheus_recorder: None,
-                _join_handle: DroppableHandle(tokio::spawn(future::pending())),
-            }
+            (None, DroppableHandle(tokio::spawn(future::pending())))
+        };
+
+        Telemetry {
+            ssh_connections_per_minute: DashMap::default(),
+            http_requests_per_minute: DashMap::default(),
+            sni_connections_per_minute: DashMap::default(),
+            alias_connections_per_minute: DashMap::default(),
+            admin_alias_connections_per_minute: DashMap::default(),
+            tcp_connections_per_minute: DashMap::default(),
+            ssh_connections_current: DashMap::default(),
+            sni_connections_current: DashMap::default(),
+            alias_connections_current: DashMap::default(),
+            admin_alias_connections_current: DashMap::default(),
+            tcp_connections_current: DashMap::default(),
+            prometheus_recorder,
+            _join_handle: join_handle,
         }
     }
 
@@ -315,9 +362,48 @@ impl Telemetry {
             .collect()
     }
 
+    pub(crate) fn get_current_ssh_connections(&self) -> HashMap<String, f64, RandomState> {
+        self.ssh_connections_current
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().measure()))
+            .collect()
+    }
+
+    pub(crate) fn get_current_sni_connections(&self) -> HashMap<String, f64, RandomState> {
+        self.sni_connections_current
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().measure()))
+            .collect()
+    }
+
+    pub(crate) fn get_current_alias_connections(&self) -> HashMap<TcpAlias, f64, RandomState> {
+        self.alias_connections_current
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().measure()))
+            .collect()
+    }
+
+    pub(crate) fn get_current_admin_alias_connections(
+        &self,
+    ) -> HashMap<TcpAlias, f64, RandomState> {
+        self.admin_alias_connections_current
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().measure()))
+            .collect()
+    }
+
+    pub(crate) fn get_current_tcp_connections(&self) -> HashMap<u16, f64, RandomState> {
+        self.tcp_connections_current
+            .iter()
+            .map(|entry| (*entry.key(), entry.value().measure()))
+            .collect()
+    }
+
     pub(crate) fn ssh_reactor(&self, aliases: Vec<String>) {
         let aliases: HashSet<String> = aliases.into_iter().collect();
         self.ssh_connections_per_minute
+            .retain(|key, _| aliases.contains(key));
+        self.ssh_connections_current
             .retain(|key, _| aliases.contains(key));
     }
 
@@ -331,17 +417,23 @@ impl Telemetry {
         let hostnames: HashSet<String> = hostnames.into_iter().collect();
         self.sni_connections_per_minute
             .retain(|key, _| hostnames.contains(key));
+        self.sni_connections_current
+            .retain(|key, _| hostnames.contains(key));
     }
 
     pub(crate) fn alias_reactor(&self, aliases: Vec<TcpAlias>) {
         let aliases: HashSet<TcpAlias> = aliases.into_iter().collect();
         self.alias_connections_per_minute
             .retain(|key, _| aliases.contains(key));
+        self.alias_connections_current
+            .retain(|key, _| aliases.contains(key));
     }
 
     pub(crate) fn tcp_reactor(&self, ports: Vec<u16>) {
         let ports: HashSet<u16> = ports.into_iter().collect();
         self.tcp_connections_per_minute
+            .retain(|key, _| ports.contains(key));
+        self.tcp_connections_current
             .retain(|key, _| ports.contains(key));
     }
 }
@@ -446,10 +538,10 @@ impl Recorder for Telemetry {
                 for (key, value) in labels {
                     if key == TELEMETRY_KEY_ALIAS {
                         match value.parse::<TcpAlias>() {
-                            Ok(port) => {
+                            Ok(alias) => {
                                 return metrics::Counter::from_arc(Arc::clone(
                                     self.alias_connections_per_minute
-                                        .entry(port)
+                                        .entry(alias)
                                         .or_insert(Arc::new(SlidingWindowCounter::new(
                                             prometheus_counter,
                                             Duration::from_secs(60),
@@ -468,10 +560,10 @@ impl Recorder for Telemetry {
                 for (key, value) in labels {
                     if key == TELEMETRY_KEY_ALIAS {
                         match value.parse::<TcpAlias>() {
-                            Ok(port) => {
+                            Ok(alias) => {
                                 return metrics::Counter::from_arc(Arc::clone(
                                     self.admin_alias_connections_per_minute
-                                        .entry(port)
+                                        .entry(alias)
                                         .or_insert(Arc::new(SlidingWindowCounter::new(
                                             prometheus_counter,
                                             Duration::from_secs(60),
@@ -516,10 +608,100 @@ impl Recorder for Telemetry {
         key: &metrics::Key,
         metadata: &metrics::Metadata<'_>,
     ) -> metrics::Gauge {
-        self.prometheus_recorder
+        let prometheus_gauge = self
+            .prometheus_recorder
             .as_ref()
             .map(|recorder| recorder.register_gauge(key, metadata))
-            .unwrap_or(metrics::Gauge::noop())
+            .unwrap_or(metrics::Gauge::noop());
+        let name = key.name();
+        let labels: Vec<(&str, &str)> = key
+            .labels()
+            .map(|label| (label.key(), label.value()))
+            .sorted()
+            .collect();
+        match name {
+            TELEMETRY_GAUGE_SSH_CONNECTIONS_CURRENT => {
+                for (key, value) in labels {
+                    if key == TELEMETRY_KEY_ALIAS {
+                        return metrics::Gauge::from_arc(Arc::clone(
+                            self.ssh_connections_current
+                                .entry(value.to_string())
+                                .or_insert(Arc::new(TelemetryGauge::new(prometheus_gauge)))
+                                .value(),
+                        ));
+                    }
+                }
+            }
+            TELEMETRY_GAUGE_SNI_CONNECTIONS_CURRENT => {
+                for (key, value) in labels {
+                    if key == TELEMETRY_KEY_HOSTNAME {
+                        return metrics::Gauge::from_arc(Arc::clone(
+                            self.sni_connections_current
+                                .entry(value.to_string())
+                                .or_insert(Arc::new(TelemetryGauge::new(prometheus_gauge)))
+                                .value(),
+                        ));
+                    }
+                }
+            }
+            TELEMETRY_GAUGE_ALIAS_CONNECTIONS_CURRENT => {
+                for (key, value) in labels {
+                    if key == TELEMETRY_KEY_ALIAS {
+                        match value.parse::<TcpAlias>() {
+                            Ok(alias) => {
+                                return metrics::Gauge::from_arc(Arc::clone(
+                                    self.alias_connections_current
+                                        .entry(alias)
+                                        .or_insert(Arc::new(TelemetryGauge::new(prometheus_gauge)))
+                                        .value(),
+                                ));
+                            }
+                            Err(error) => {
+                                warn!(alias = value, %error, "Invalid admin alias in telemetry.")
+                            }
+                        }
+                    }
+                }
+            }
+            TELEMETRY_GAUGE_ADMIN_ALIAS_CONNECTIONS_CURRENT => {
+                for (key, value) in labels {
+                    if key == TELEMETRY_KEY_ALIAS {
+                        match value.parse::<TcpAlias>() {
+                            Ok(alias) => {
+                                return metrics::Gauge::from_arc(Arc::clone(
+                                    self.admin_alias_connections_current
+                                        .entry(alias)
+                                        .or_insert(Arc::new(TelemetryGauge::new(prometheus_gauge)))
+                                        .value(),
+                                ));
+                            }
+                            Err(error) => {
+                                warn!(alias = value, %error, "Invalid admin alias in telemetry.")
+                            }
+                        }
+                    }
+                }
+            }
+            TELEMETRY_GAUGE_TCP_CONNECTIONS_CURRENT => {
+                for (key, value) in labels {
+                    if key == TELEMETRY_KEY_PORT {
+                        match value.parse::<u16>() {
+                            Ok(port) => {
+                                return metrics::Gauge::from_arc(Arc::clone(
+                                    self.tcp_connections_current
+                                        .entry(port)
+                                        .or_insert(Arc::new(TelemetryGauge::new(prometheus_gauge)))
+                                        .value(),
+                                ));
+                            }
+                            Err(error) => warn!(port = value, %error, "Invalid port in telemetry."),
+                        }
+                    }
+                }
+            }
+            _ => (),
+        }
+        prometheus_gauge
     }
 
     fn register_histogram(

@@ -105,29 +105,33 @@ async fn tcp_multi_stream_download() {
     let mut data = vec![0u8; 20_000_000];
     rand::rng().fill_bytes(&mut data);
     let data: &'static [u8] = data.leak();
-    let mut jh_vec = vec![];
-    for file_size in [7_500_000, 10_000_000, 15_000_000, 20_000_000] {
-        let tcp_stream = TcpStream::connect("127.0.0.1:12345")
-            .await
-            .expect("TCP connection failed");
-        let (mut read_half, mut write_half) = tcp_stream.into_split();
-        tokio::spawn(async move {
-            write_half.write_all(&data[..file_size]).await.unwrap();
-        });
-        let jh = tokio::spawn(async move {
-            let mut buf = [0u8; 8];
-            loop {
-                let len = read_half.read(&mut buf).await.unwrap();
-                if len == size_of::<usize>() && usize::from_le_bytes(buf) == file_size {
-                    break;
+    timeout(Duration::from_secs(30), async move {
+        let mut jh_vec = vec![];
+        for file_size in [7_500_000, 10_000_000, 15_000_000, 20_000_000] {
+            let tcp_stream = TcpStream::connect("127.0.0.1:12345")
+                .await
+                .expect("TCP connection failed");
+            let (mut read_half, mut write_half) = tcp_stream.into_split();
+            tokio::spawn(async move {
+                write_half.write_all(&data[..file_size]).await.unwrap();
+            });
+            let jh = tokio::spawn(async move {
+                let mut buf = [0u8; 8];
+                loop {
+                    let len = read_half.read(&mut buf).await.unwrap();
+                    if len == size_of::<usize>() && usize::from_le_bytes(buf) == file_size {
+                        break;
+                    }
                 }
-            }
-        });
-        jh_vec.push(jh);
-    }
-    for jh in jh_vec.into_iter() {
-        jh.await.expect("Join handle panicked");
-    }
+            });
+            jh_vec.push(jh);
+        }
+        for jh in jh_vec.into_iter() {
+            jh.await.expect("Join handle panicked");
+        }
+    })
+    .await
+    .expect("Timeout waiting for test to finish.");
 }
 
 struct SshClient;

@@ -136,64 +136,69 @@ async fn https_multi_stream_download() {
             .with_root_certificates(root_store)
             .with_no_client_auth(),
     );
-    let mut jh_vec = vec![];
-    for file_size in [7_500_000, 10_000_000, 15_000_000, 20_000_000] {
-        let connector = TlsConnector::from(Arc::clone(&tls_config));
-        let tcp_stream = TcpStream::connect("127.0.0.1:18443")
-            .await
-            .expect("TCP connection failed");
-        let tls_stream = connector
-            .connect("foobar.tld".try_into().unwrap(), tcp_stream)
-            .await
-            .expect("TLS stream failed");
-        let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls_stream))
-            .await
-            .expect("HTTP handshake failed");
-        tokio::spawn(async move {
-            if let Err(error) = conn.await {
-                eprintln!("Connection failed: {error:?}");
-            }
-        });
-        let jh = tokio::spawn(async move {
-            let request = Request::builder()
-                .method("GET")
-                .uri(format!("/{file_size}"))
-                .header(HOST, "foobar.tld")
-                .body(Body::empty())
-                .unwrap();
-            let Ok(mut response) = timeout(Duration::from_secs(60), async move {
-                sender
-                    .send_request(request)
+    timeout(Duration::from_secs(30), async move {
+        let mut jh_vec = vec![];
+        for file_size in [7_500_000, 10_000_000, 15_000_000, 20_000_000] {
+            let connector = TlsConnector::from(Arc::clone(&tls_config));
+            let tcp_stream = TcpStream::connect("127.0.0.1:18443")
+                .await
+                .expect("TCP connection failed");
+            let tls_stream = connector
+                .connect("foobar.tld".try_into().unwrap(), tcp_stream)
+                .await
+                .expect("TLS stream failed");
+            let (mut sender, conn) =
+                hyper::client::conn::http1::handshake(TokioIo::new(tls_stream))
                     .await
-                    .expect("Error sending HTTP request")
-            })
-            .await
-            else {
-                panic!("Timeout waiting for request to finish.");
-            };
-            assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(
-                response
-                    .headers()
-                    .get(CONTENT_LENGTH)
-                    .unwrap()
-                    .to_str()
-                    .unwrap(),
-                file_size.to_string(),
-                "Content-Length didn't match file size"
-            );
-            let body = response.body_mut();
-            let mut size = 0usize;
-            while let Some(Ok(frame)) = body.frame().await {
-                size += frame.data_ref().unwrap().len();
-            }
-            assert_eq!(size, file_size, "Response size didn't match file size");
-        });
-        jh_vec.push(jh);
-    }
-    for jh in jh_vec.into_iter() {
-        jh.await.expect("Join handle panicked");
-    }
+                    .expect("HTTP handshake failed");
+            tokio::spawn(async move {
+                if let Err(error) = conn.await {
+                    eprintln!("Connection failed: {error:?}");
+                }
+            });
+            let jh = tokio::spawn(async move {
+                let request = Request::builder()
+                    .method("GET")
+                    .uri(format!("/{file_size}"))
+                    .header(HOST, "foobar.tld")
+                    .body(Body::empty())
+                    .unwrap();
+                let Ok(mut response) = timeout(Duration::from_secs(60), async move {
+                    sender
+                        .send_request(request)
+                        .await
+                        .expect("Error sending HTTP request")
+                })
+                .await
+                else {
+                    panic!("Timeout waiting for request to finish.");
+                };
+                assert_eq!(response.status(), StatusCode::OK);
+                assert_eq!(
+                    response
+                        .headers()
+                        .get(CONTENT_LENGTH)
+                        .unwrap()
+                        .to_str()
+                        .unwrap(),
+                    file_size.to_string(),
+                    "Content-Length didn't match file size"
+                );
+                let body = response.body_mut();
+                let mut size = 0usize;
+                while let Some(Ok(frame)) = body.frame().await {
+                    size += frame.data_ref().unwrap().len();
+                }
+                assert_eq!(size, file_size, "Response size didn't match file size");
+            });
+            jh_vec.push(jh);
+        }
+        for jh in jh_vec.into_iter() {
+            jh.await.expect("Join handle panicked");
+        }
+    })
+    .await
+    .expect("Timeout waiting for test to finish.");
 }
 
 struct SshClient(Bytes);

@@ -358,7 +358,7 @@ impl AdminState {
                 let constraints = [
                     Constraint::Min(25),
                     Constraint::Length(7),
-                    Constraint::Length(50),
+                    Constraint::Min(7),
                     Constraint::Length(47),
                 ];
                 let header = Row::new(["Host", "Req/min", "User(s)", "Peer(s)"])
@@ -378,12 +378,13 @@ impl AdminState {
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
                     .iter()
-                    .map(|(host, (connections, conns_per_min))| {
+                    .map(|(host, (connections, conns_per_min, current_conns))| {
                         let len = connections.len() as u16;
                         let (peers, users): (Vec<_>, Vec<_>) = connections.iter().unzip();
                         Row::new(vec![
                             host.clone(),
                             conns_per_min.to_string(),
+                            current_conns.to_string(),
                             users.iter().join("\n"),
                             peers.iter().map(to_socket_addr_string).join("\n"),
                         ])
@@ -393,10 +394,11 @@ impl AdminState {
                 let constraints = [
                     Constraint::Min(25),
                     Constraint::Length(7),
-                    Constraint::Length(50),
+                    Constraint::Length(6),
+                    Constraint::Min(7),
                     Constraint::Length(47),
                 ];
-                let header = Row::new(["Alias", "Con/min", "User(s)", "Peer(s)"])
+                let header = Row::new(["Alias", "Con/min", "#Conns", "User(s)", "Peer(s)"])
                     .add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("SNI proxies".fg(color).bold()).centered());
@@ -413,12 +415,13 @@ impl AdminState {
                 // Create rows for each alias
                 let rows: Vec<Row<'_>> = data
                     .iter()
-                    .map(|(host, (connections, conns_per_min))| {
+                    .map(|(host, (connections, conns_per_min, current_conns))| {
                         let len = connections.len() as u16;
                         let (peers, users): (Vec<_>, Vec<_>) = connections.iter().unzip();
                         Row::new(vec![
                             host.clone(),
                             conns_per_min.to_string(),
+                            current_conns.to_string(),
                             users.iter().join("\n"),
                             peers.iter().map(to_socket_addr_string).join("\n"),
                         ])
@@ -428,10 +431,11 @@ impl AdminState {
                 let constraints = [
                     Constraint::Min(25),
                     Constraint::Length(7),
-                    Constraint::Length(50),
+                    Constraint::Length(6),
+                    Constraint::Min(7),
                     Constraint::Length(47),
                 ];
-                let header = Row::new(["Alias", "Con/min", "User(s)", "Peer(s)"])
+                let header = Row::new(["Alias", "Con/min", "#Conns", "User(s)", "Peer(s)"])
                     .add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("SSH services".fg(color).bold()).centered());
@@ -448,12 +452,13 @@ impl AdminState {
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
                     .iter()
-                    .map(|(port, (connections, conns_per_min))| {
+                    .map(|(port, (connections, conns_per_min, current_conns))| {
                         let len = connections.len() as u16;
                         let (peers, users): (Vec<_>, Vec<_>) = connections.iter().unzip();
                         Row::new(vec![
                             port.to_string(),
                             conns_per_min.to_string(),
+                            current_conns.to_string(),
                             users.iter().join("\n"),
                             peers.iter().map(to_socket_addr_string).join("\n"),
                         ])
@@ -463,10 +468,11 @@ impl AdminState {
                 let constraints = [
                     Constraint::Length(5),
                     Constraint::Length(7),
-                    Constraint::Length(50),
+                    Constraint::Length(6),
+                    Constraint::Min(7),
                     Constraint::Length(47),
                 ];
-                let header = Row::new(["Port", "Con/min", "User(s)", "Peer(s)"])
+                let header = Row::new(["Port", "Con/min", "#Conns", "User(s)", "Peer(s)"])
                     .add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("TCP services".fg(color).bold()).centered());
@@ -483,25 +489,29 @@ impl AdminState {
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
                     .iter()
-                    .map(|(TcpAlias(alias, port), (connections, conns_per_min))| {
-                        let len = connections.len() as u16;
-                        let (peers, users): (Vec<_>, Vec<_>) = connections.iter().unzip();
-                        Row::new(vec![
-                            format!("{}:{}", alias, port),
-                            conns_per_min.to_string(),
-                            users.iter().join("\n"),
-                            peers.iter().map(to_socket_addr_string).join("\n"),
-                        ])
-                        .height(len)
-                    })
+                    .map(
+                        |(TcpAlias(alias, port), (connections, conns_per_min, current_conns))| {
+                            let len = connections.len() as u16;
+                            let (peers, users): (Vec<_>, Vec<_>) = connections.iter().unzip();
+                            Row::new(vec![
+                                format!("{}:{}", alias, port),
+                                conns_per_min.to_string(),
+                                current_conns.to_string(),
+                                users.iter().join("\n"),
+                                peers.iter().map(to_socket_addr_string).join("\n"),
+                            ])
+                            .height(len)
+                        },
+                    )
                     .collect();
                 let constraints = [
                     Constraint::Min(25),
                     Constraint::Length(7),
-                    Constraint::Length(50),
+                    Constraint::Length(6),
+                    Constraint::Min(7),
                     Constraint::Length(47),
                 ];
-                let header = Row::new(["Alias", "Con/min", "User(s)", "Peer(s)"])
+                let header = Row::new(["Alias", "Con/min", "#Conns", "User(s)", "Peer(s)"])
                     .add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("Alias services".fg(color).bold()).centered());

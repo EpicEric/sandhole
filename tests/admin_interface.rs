@@ -58,23 +58,30 @@ async fn admin_interface() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied
-    let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
-        None,
-    )
-    .expect("Missing file key1");
-    let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-        .await
-        .expect("Failed to connect to SSH server");
+    // 2. Start SSH clients that will be proxied
+    let key = Arc::new(
+        load_secret_key(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+            None,
+        )
+        .expect("Missing file key1"),
+    );
+    let ssh_client_one = SshClient;
+    let mut session_one =
+        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client_one)
+            .await
+            .expect("Failed to connect to SSH server");
     assert!(
-        session
+        session_one
             .authenticate_publickey(
-                "user",
+                "user-one",
                 PrivateKeyWithHashAlg::new(
-                    Arc::new(key),
-                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                    Arc::clone(&key),
+                    session_one
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
                 )
             )
             .await
@@ -82,20 +89,55 @@ async fn admin_interface() {
             .success(),
         "authentication didn't succeed"
     );
-    session
+    session_one
         .tcpip_forward("http.aaa", 443)
         .await
         .expect("tcpip_forward failed");
-    session
+    session_one
         .tcpip_forward("ssh.bbb", 22)
         .await
         .expect("tcpip_forward failed");
-    session
+    session_one
         .tcpip_forward("proxy.ccc", 12345)
         .await
         .expect("tcpip_forward failed");
-    session
+    session_one
         .tcpip_forward("", 23456)
+        .await
+        .expect("tcpip_forward failed");
+    let ssh_client_two = SshClient;
+    let mut session_two =
+        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client_two)
+            .await
+            .expect("Failed to connect to SSH server");
+    assert!(
+        session_two
+            .authenticate_publickey(
+                "user-two",
+                PrivateKeyWithHashAlg::new(
+                    key,
+                    session_two
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
+            )
+            .await
+            .expect("SSH authentication failed")
+            .success(),
+        "authentication didn't succeed"
+    );
+    let channel_two = session_two
+        .channel_open_session()
+        .await
+        .expect("channel_open_session failed");
+    channel_two
+        .exec(false, "sni-proxy")
+        .await
+        .expect("exec failed");
+    session_two
+        .tcpip_forward("sni.eee", 443)
         .await
         .expect("tcpip_forward failed");
     // Required for updating the admin interface data
@@ -114,7 +156,7 @@ async fn admin_interface() {
     assert!(
         session
             .authenticate_publickey(
-                "user",
+                "admin",
                 PrivateKeyWithHashAlg::new(
                     Arc::new(key),
                     session.best_supported_rsa_hash().await.unwrap().flatten()
@@ -172,7 +214,7 @@ async fn admin_interface() {
             r"   RX   ",
             r"HTTP services",
             r"http\.aaa",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"SHA256:GehKyA\S*",
             r"127\.0\.0\.1:\d{4,5}",
         ]
         .into_iter()
@@ -197,6 +239,9 @@ async fn admin_interface() {
             r"   TX   ",
             r"   RX   ",
             r"SNI proxies",
+            r"sni\.eee",
+            r"SHA256:GehKyA\S*",
+            r"127\.0\.0\.1:\d{4,5}",
         ]
         .into_iter()
         .map(|re| Regex::new(re).expect("Invalid regex"))
@@ -221,7 +266,7 @@ async fn admin_interface() {
             r"   RX   ",
             r"SSH services",
             r"ssh\.bbb",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"SHA256:GehKyA\S*",
             r"127\.0\.0\.1:\d{4,5}",
         ]
         .into_iter()
@@ -247,7 +292,7 @@ async fn admin_interface() {
             r"   RX   ",
             r"TCP services",
             r"23456",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"SHA256:GehKyA\S*",
             r"127\.0\.0\.1:\d{4,5}",
         ]
         .into_iter()
@@ -273,7 +318,7 @@ async fn admin_interface() {
             r"   RX   ",
             r"Alias services",
             r"proxy\.ccc:12345",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"SHA256:GehKyA\S*",
             r"127\.0\.0\.1:\d{4,5}",
         ]
         .into_iter()
@@ -299,7 +344,7 @@ async fn admin_interface() {
             r"   RX   ",
             r"TCP services",
             r"23456",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"SHA256:GehKyA\S*",
             r"127\.0\.0\.1:\d{4,5}",
         ]
         .into_iter()
@@ -325,7 +370,7 @@ async fn admin_interface() {
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",
             r"User details",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"SHA256:GehKyA\S*",
             r"Type: User",
             r"Key comment: key1",
             r"Algorithm: ssh-ed25519",
@@ -354,7 +399,7 @@ async fn admin_interface() {
             r"   RX   ",
             r"TCP services",
             r"23456",
-            r"SHA256:GehKyA21BBK6eJCouziacUmqYDNl8BPMGG0CTtLSrbQ",
+            r"SHA256:GehKyA\S*",
             r"127\.0\.0\.1:\d{4,5}",
         ]
         .into_iter()

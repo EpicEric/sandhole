@@ -70,7 +70,7 @@ Features related to the admin permissioning system.
 - Terminal-based interface accessible via admin key authentication.
 - Real-time system metrics (CPU, memory, network usage).
 - View all active connections (SSH, HTTP, SNI, TCP, and alias).
-  - Real-time connection statistics.
+  - Real-time connection statistics (requests/connections per minute, current connection count)
 - View user details for connections.
   - Display key algorithm and comments.
   - Remove user connections and keys.
