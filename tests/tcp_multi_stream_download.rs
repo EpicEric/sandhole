@@ -116,11 +116,16 @@ async fn tcp_multi_stream_download() {
                 write_half.write_all(&data[..file_size]).await.unwrap();
             });
             let jh = tokio::spawn(async move {
-                let mut buf = [0u8; 8];
+                let mut buf = [0u8; size_of::<usize>()];
+                let mut curr_len = 0;
                 loop {
-                    let len = read_half.read(&mut buf).await.unwrap();
-                    if len == size_of::<usize>() && usize::from_le_bytes(buf) == file_size {
-                        break;
+                    curr_len = read_half.read(&mut buf[curr_len..]).await.unwrap();
+                    if curr_len == size_of::<usize>() {
+                        let curr_size = usize::from_le_bytes(*&buf);
+                        if curr_size == file_size {
+                            break;
+                        }
+                        curr_len = 0;
                     }
                 }
             });

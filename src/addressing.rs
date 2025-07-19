@@ -127,7 +127,7 @@ pub(crate) struct AddressDelegator<R> {
     // Trie to optionally verify for profanities in requested domains/subdomains.
     requested_domain_filter: Option<&'static rustrict::Trie>,
     // Random seed for generating consistent yet secure random values.
-    #[builder(skip = rand::rng().random())]
+    #[builder(default = rand::rng().random())]
     seed: u64,
     // Counter to generate random IDs with the block ID.
     #[builder(skip = Mutex::new(0))]
@@ -320,15 +320,14 @@ impl<R: Resolver> AddressDelegator<R> {
             }
         } else {
             // Hash hasn't been initialized, use block ID to generate a random string
-            let mut block_rng = self.block_rng.lock().unwrap();
             let mut result = loop {
+                let mut block_rng = self.block_rng.lock().unwrap();
                 let result = self.block_id.encode_string(*block_rng).unwrap();
                 *block_rng = block_rng.wrapping_add(1);
                 if !self.random_subdomain_filter_profanities || !result.is_inappropriate() {
                     break result;
                 }
             };
-            drop(block_rng);
             result.drain(self.random_subdomain_length..);
             result
         }
@@ -1272,6 +1271,122 @@ mod address_delegator_tests {
         assert!(
             DnsName::try_from(address4_s1_a2.clone()).is_ok(),
             "non DNS-compatible address {address4_s1_a2}"
+        );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn returns_fixed_subdomains_for_ip_and_user_if_set_seed() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::builder()
+            .resolver(mock)
+            .txt_record_prefix("_some_prefix".into())
+            .root_domain("root.tld".into())
+            .bind_hostnames(BindHostnames::None)
+            .force_random_subdomains(true)
+            .random_subdomain_seed(RandomSubdomainSeed::IpAndUser)
+            .random_subdomain_length(6)
+            .random_subdomain_filter_profanities(false)
+            .seed(42)
+            .build();
+        assert_eq!(
+            delegator
+                .get_http_address(
+                    "address".into(),
+                    &Some("user".into()),
+                    &None,
+                    &"127.0.0.1:12345".parse().unwrap()
+                )
+                .await,
+            "2z4fd6.root.tld"
+        );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn returns_fixed_subdomains_for_user_if_set_seed() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::builder()
+            .resolver(mock)
+            .txt_record_prefix("_some_prefix".into())
+            .root_domain("root.tld".into())
+            .bind_hostnames(BindHostnames::None)
+            .force_random_subdomains(true)
+            .random_subdomain_seed(RandomSubdomainSeed::User)
+            .random_subdomain_length(6)
+            .random_subdomain_filter_profanities(false)
+            .seed(42)
+            .build();
+        assert_eq!(
+            delegator
+                .get_http_address(
+                    "address".into(),
+                    &Some("user".into()),
+                    &None,
+                    &"127.0.0.1:12345".parse().unwrap()
+                )
+                .await,
+            "aec4bv.root.tld"
+        );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn returns_fixed_subdomains_for_address_if_set_seed() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::builder()
+            .resolver(mock)
+            .txt_record_prefix("_some_prefix".into())
+            .root_domain("root.tld".into())
+            .bind_hostnames(BindHostnames::None)
+            .force_random_subdomains(true)
+            .random_subdomain_seed(RandomSubdomainSeed::Address)
+            .random_subdomain_length(6)
+            .random_subdomain_filter_profanities(false)
+            .seed(42)
+            .build();
+        assert_eq!(
+            delegator
+                .get_http_address(
+                    "address".into(),
+                    &None,
+                    &None,
+                    &"127.0.0.1:12345".parse().unwrap()
+                )
+                .await,
+            "c95czw.root.tld"
+        );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn returns_fixed_subdomains_for_fingerprint_if_set_seed() {
+        let fingerprint: russh::keys::ssh_key::Fingerprint = russh::keys::PrivateKey::from(
+            Ed25519Keypair::from_seed(&(0..32).collect::<Vec<_>>().try_into().unwrap()),
+        )
+        .fingerprint(HashAlg::Sha256);
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::builder()
+            .resolver(mock)
+            .txt_record_prefix("_some_prefix".into())
+            .root_domain("root.tld".into())
+            .bind_hostnames(BindHostnames::None)
+            .force_random_subdomains(true)
+            .random_subdomain_seed(RandomSubdomainSeed::Fingerprint)
+            .random_subdomain_length(6)
+            .random_subdomain_filter_profanities(false)
+            .seed(42)
+            .build();
+        assert_eq!(
+            delegator
+                .get_http_address(
+                    "address".into(),
+                    &None,
+                    &Some(fingerprint),
+                    &"127.0.0.1:12345".parse().unwrap()
+                )
+                .await,
+            "3g68u5.root.tld"
         );
     }
 }

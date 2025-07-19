@@ -269,8 +269,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         } else {
             None
         };
-    let addressing = Arc::new(
-        AddressDelegator::builder()
+    let addressing = Arc::new({
+        let builder = AddressDelegator::builder()
             .resolver(DnsResolver::new())
             .txt_record_prefix(config.txt_record_prefix)
             .root_domain(config.domain.clone())
@@ -279,9 +279,13 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .maybe_random_subdomain_seed(config.random_subdomain_seed)
             .random_subdomain_length(config.random_subdomain_length)
             .random_subdomain_filter_profanities(config.random_subdomain_filter_profanities)
-            .maybe_requested_domain_filter(requested_domain_filter)
-            .build(),
-    );
+            .maybe_requested_domain_filter(requested_domain_filter);
+        if let Some(seed) = config.random_subdomain_value {
+            builder.seed(seed).build()
+        } else {
+            builder.build()
+        }
+    });
     // Configure the default domain redirect for Sandhole.
     let domain_redirect = Arc::new(DomainRedirect {
         from: config.domain.clone(),

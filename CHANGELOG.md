@@ -5,6 +5,7 @@
 ### Added
 
 - Add `--load-balancing-algorithm` CLI flag.
+- Add `--random-subdomain-value` CLI flag.
 - Add current connection count to admin interface for SSH/SNI/TCP/alias.
 
 ### Fixed

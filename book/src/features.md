@@ -16,7 +16,7 @@ Features related to Sandhole's remote forwarding and reverse proxy capabilities.
   - Support for HTTP/2 proxying. (SSH exec: `http2`)
 - Support for automatic `X-Forwarded` headers.
 - Random subdomain generation by default.
-  - Option to set the seed for random subdomain generation. (CLI: `--random-subdomain-seed`)
+  - Option to set the seed for random subdomain generation. (CLI: `--random-subdomain-seed`, `--random-subdomain-value`)
   - Option to set the length for random subdomains. (CLI: `--random-subdomain-length`)
   - Option to skip subdomains containing profanities. (CLI: `--random-subdomain-filter-profanities`)
 - Option to allow requested subdomains instead of random generation by default. (CLI: `--allow-requested-subdomains`)

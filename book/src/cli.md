@@ -211,6 +211,15 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           By default, no rate limit is set. For better results, this should be a
           multiple of `--buffer-size`.
 
+      <b>--random-subdomain-value</b> &lt;VALUE&gt;
+          Set a value for random subdomains for use in conjunction with
+          `--random-subdomain-seed` to allow binding to the same random address
+          between Sandhole restarts.
+
+          Beware that this can lead to collisions if misused!
+
+          If unset, defaults to a random value.
+
       <b>--random-subdomain-seed</b> &lt;SEED&gt;
           Which value to seed with when generating random subdomains, for
           determinism. This allows binding to the same random address until
