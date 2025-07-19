@@ -121,7 +121,7 @@ async fn tcp_multi_stream_download() {
                 loop {
                     curr_len = read_half.read(&mut buf[curr_len..]).await.unwrap();
                     if curr_len == size_of::<usize>() {
-                        let curr_size = usize::from_le_bytes(*&buf);
+                        let curr_size = usize::from_le_bytes(buf);
                         if curr_size == file_size {
                             break;
                         }

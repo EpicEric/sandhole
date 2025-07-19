@@ -1292,7 +1292,7 @@ mod address_delegator_tests {
         assert_eq!(
             delegator
                 .get_http_address(
-                    "address".into(),
+                    "address",
                     &Some("user".into()),
                     &None,
                     &"127.0.0.1:12345".parse().unwrap()
@@ -1320,7 +1320,7 @@ mod address_delegator_tests {
         assert_eq!(
             delegator
                 .get_http_address(
-                    "address".into(),
+                    "address",
                     &Some("user".into()),
                     &None,
                     &"127.0.0.1:12345".parse().unwrap()
@@ -1347,12 +1347,7 @@ mod address_delegator_tests {
             .build();
         assert_eq!(
             delegator
-                .get_http_address(
-                    "address".into(),
-                    &None,
-                    &None,
-                    &"127.0.0.1:12345".parse().unwrap()
-                )
+                .get_http_address("address", &None, &None, &"127.0.0.1:12345".parse().unwrap())
                 .await,
             "c95czw.root.tld"
         );
@@ -1380,7 +1375,7 @@ mod address_delegator_tests {
         assert_eq!(
             delegator
                 .get_http_address(
-                    "address".into(),
+                    "address",
                     &None,
                     &Some(fingerprint),
                     &"127.0.0.1:12345".parse().unwrap()
