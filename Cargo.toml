@@ -17,14 +17,14 @@ exclude = [".github", "book", "docker-compose-example", "tests/data"]
 ahash = "0.8.12"
 ansic = "0.1.7"
 async-speed-limit = { version = "0.4.2", features = ["tokio"] }
-aws-lc-rs = "1.13.1"
+aws-lc-rs = "1.13.2"
 axum = { version = "0.8.4", default-features = false }
 block-id = "0.2.1"
-bon = "3.6.4"
+bon = "3.6.5"
 bytes = "1.10.1"
 bytesize = "2.0.1"
 chrono = "0.4.41"
-clap = { version = "4.5.40", features = ["derive", "string"] }
+clap = { version = "4.5.41", features = ["derive", "string"] }
 color-eyre = "0.6.5"
 crossterm = { version = "0.29.0", default-features = false }
 dashmap = "6.1.0"
@@ -34,13 +34,13 @@ http = "1.3.1"
 http-body-util = "0.1.3"
 humantime = "2.2.0"
 hyper = { version = "1.6.0", features = ["full"] }
-hyper-util = { version = "0.1.14", features = ["full"] }
+hyper-util = { version = "0.1.15", features = ["full"] }
 ipnet = "2.11.0"
 ipnet-trie = "0.3.0"
 itertools = "0.14.0"
 metrics = "0.24.2"
 metrics-exporter-prometheus = "0.17.2"
-notify = "8.0.0"
+notify = "8.1.0"
 openssl = { version = "0.10.73", features = ["vendored"] }
 pretty-duration = "0.1.1"
 rand = { version = "0.9.1", default-features = false, features = [
@@ -54,7 +54,7 @@ rand_seeder = "0.4.0"
 ratatui = { version = "0.29.0", default-features = false, features = [
   "crossterm",
 ] }
-reqwest = { version = "0.12.20", default-features = false, features = [
+reqwest = { version = "0.12.22", default-features = false, features = [
   "charset",
   "http2",
   "hickory-dns",
@@ -62,7 +62,7 @@ reqwest = { version = "0.12.20", default-features = false, features = [
   "rustls-tls-manual-roots",
 ] }
 russh = "0.53.0"
-rustls = "0.23.28"
+rustls = "0.23.29"
 rustls-acme = { version = "0.14.0", default-features = false, features = [
   "tokio",
   "aws-lc-rs",
@@ -70,13 +70,13 @@ rustls-acme = { version = "0.14.0", default-features = false, features = [
   "webpki-roots",
 ] }
 rustls-pki-types = "1.12.0"
-rustls-webpki = "0.103.3"
+rustls-webpki = "0.103.4"
 rustrict = { version = "0.7.35", features = ["customize"] }
 serde = "1.0.219"
-serde_json = "1.0.140"
-sysinfo = "0.35.2"
+serde_json = "1.0.141"
+sysinfo = "0.36.1"
 thiserror = "2.0.12"
-tokio = { version = "1.45.1", features = ["full"] }
+tokio = { version = "1.46.1", features = ["full"] }
 tokio-rustls = "0.26.2"
 tokio-stream = "0.1.17"
 tokio-util = "0.7.15"
@@ -99,7 +99,7 @@ insta = { version = "1.43.1", features = ["yaml"] }
 mockall = "0.13.1"
 nix = "0.30.1"
 regex = "1.11.1"
-test-log = { version = "0.2.17", features = ["trace", "color"] }
+test-log = { version = "0.2.18", features = ["trace", "color"] }
 tokio-tungstenite = "0.27.0"
 tower = "0.5.2"
 vt100-ctt = { version = "0.16.0", default-features = false }

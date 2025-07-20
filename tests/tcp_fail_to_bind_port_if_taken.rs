@@ -2,20 +2,23 @@ use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use russh::{
-    Channel,
-    client::{Msg, Session},
-};
 use sandhole::{ApplicationConfig, entrypoint};
+use tokio::net::TcpListener;
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
 };
 
-/// This test ensures that remote forwarding is not allowed for low TCP ports.
+/// This test ensures that TCP fails if the port is already bound by another
+/// service.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn tcp_reject_low_ports() {
-    // 1. Initialize Sandhole
+async fn tcp_fail_to_bind_port_if_taken() {
+    // 1. Bind to our desired forwarding port externally
+    let _listener = TcpListener::bind("127.0.0.1:12345")
+        .await
+        .expect("Failed to bind to port 12345");
+
+    // 2. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
@@ -53,23 +56,27 @@ async fn tcp_reject_low_ports() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will fail to bind
+    // 3. Start SSH client that will fail to bind to taken port
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+    let mut session_one = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(
-        session
+        session_one
             .authenticate_publickey(
                 "user",
                 PrivateKeyWithHashAlg::new(
                     Arc::new(key),
-                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                    session_one
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
                 )
             )
             .await
@@ -78,16 +85,8 @@ async fn tcp_reject_low_ports() {
         "authentication didn't succeed"
     );
     assert!(
-        session.tcpip_forward("localhost", 42000).await.is_ok(),
-        "should allow binding on high port"
-    );
-    assert!(
-        session.tcpip_forward("localhost", 1024).await.is_ok(),
-        "should allow binding ports greater than or equal to 1024"
-    );
-    assert!(
-        session.tcpip_forward("localhost", 1023).await.is_err(),
-        "shouldn't allow binding ports under 1024"
+        session_one.tcpip_forward("localhost", 12345).await.is_err(),
+        "tcpip_forward should've failed"
     );
 }
 
@@ -101,21 +100,5 @@ impl russh::client::Handler for SshClient {
         _key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
-    }
-
-    async fn server_channel_open_forwarded_tcpip(
-        &mut self,
-        channel: Channel<Msg>,
-        _connected_address: &str,
-        _connected_port: u32,
-        _originator_address: &str,
-        _originator_port: u32,
-        _session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        tokio::spawn(async move {
-            channel.data(&b"Hello, world!"[..]).await.unwrap();
-            channel.eof().await.unwrap();
-        });
-        Ok(())
     }
 }

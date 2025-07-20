@@ -17,6 +17,7 @@ use metrics::{
 };
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle, PrometheusRecorder};
 use tokio::time::sleep;
+#[cfg(not(coverage_nightly))]
 use tracing::warn;
 
 use crate::{droppable_handle::DroppableHandle, tcp_alias::TcpAlias};
@@ -550,6 +551,7 @@ impl Recorder for Telemetry {
                                 ));
                             }
                             Err(error) => {
+                                #[cfg(not(coverage_nightly))]
                                 warn!(alias = value, %error, "Invalid TCP alias in telemetry.")
                             }
                         }
@@ -572,6 +574,7 @@ impl Recorder for Telemetry {
                                 ));
                             }
                             Err(error) => {
+                                #[cfg(not(coverage_nightly))]
                                 warn!(alias = value, %error, "Invalid admin alias in telemetry.")
                             }
                         }
@@ -593,7 +596,10 @@ impl Recorder for Telemetry {
                                         .value(),
                                 ));
                             }
-                            Err(error) => warn!(port = value, %error, "Invalid port in telemetry."),
+                            Err(error) => {
+                                #[cfg(not(coverage_nightly))]
+                                warn!(port = value, %error, "Invalid port in telemetry.");
+                            }
                         }
                     }
                 }
@@ -657,6 +663,7 @@ impl Recorder for Telemetry {
                                 ));
                             }
                             Err(error) => {
+                                #[cfg(not(coverage_nightly))]
                                 warn!(alias = value, %error, "Invalid admin alias in telemetry.")
                             }
                         }
@@ -676,6 +683,7 @@ impl Recorder for Telemetry {
                                 ));
                             }
                             Err(error) => {
+                                #[cfg(not(coverage_nightly))]
                                 warn!(alias = value, %error, "Invalid admin alias in telemetry.")
                             }
                         }
@@ -694,7 +702,10 @@ impl Recorder for Telemetry {
                                         .value(),
                                 ));
                             }
-                            Err(error) => warn!(port = value, %error, "Invalid port in telemetry."),
+                            Err(error) => {
+                                #[cfg(not(coverage_nightly))]
+                                warn!(port = value, %error, "Invalid port in telemetry.");
+                            }
                         }
                     }
                 }
@@ -747,8 +758,10 @@ mod counter_tests {
         let measure_1 = counter.measure();
         assert_eq!(measure_1, 10);
         sleep(Duration::from_millis(500));
-        counter.increment(10);
         let measure_2 = counter.measure();
-        assert_eq!(measure_2, 10);
+        assert_eq!(measure_2, 0);
+        counter.increment(10);
+        let measure_3 = counter.measure();
+        assert_eq!(measure_3, 10);
     }
 }

@@ -10,6 +10,7 @@ use rand_seeder::SipHasher;
 use russh::keys::ssh_key::Fingerprint;
 use rustls_pki_types::DnsName;
 use rustrict::CensorStr;
+#[cfg(not(coverage_nightly))]
 use tracing::{debug, warn};
 
 use crate::config::{BindHostnames, RandomSubdomainSeed};
@@ -91,6 +92,7 @@ impl Resolver for DnsResolver {
                             .iter()
                             .map(|data| String::from_utf8_lossy(data))
                             .join(".");
+                        #[cfg(not(coverage_nightly))]
                         debug!(%cname, "Checking CNAME.");
                         // Check if the domain name matches
                         cname == domain
@@ -180,6 +182,7 @@ impl<R: Resolver> AddressDelegator<R> {
                     && self.requested_domain_filter_profanities
                     && requested_address.is_inappropriate())
             {
+                #[cfg(not(coverage_nightly))]
                 warn!(%requested_address, "Profane address requested, defaulting to random.");
             } else {
                 // If we bind all hostnames, return the provided address
@@ -221,6 +224,7 @@ impl<R: Resolver> AddressDelegator<R> {
                         // Assign specified subdomain under the root domain
                         return format!("{}.{}", subdomain, self.root_domain);
                     } else {
+                        #[cfg(not(coverage_nightly))]
                         warn!(
                             %requested_address, "Invalid address requested, defaulting to random."
                         );
@@ -228,6 +232,7 @@ impl<R: Resolver> AddressDelegator<R> {
                 }
             }
         } else {
+            #[cfg(not(coverage_nightly))]
             warn!(%requested_address, "Invalid address requested, defaulting to random.");
         }
         // Assign random subdomain under the root domain
@@ -262,6 +267,7 @@ impl<R: Resolver> AddressDelegator<R> {
                         user.hash(&mut hasher);
                         hash_initialized = true;
                     } else {
+                        #[cfg(not(coverage_nightly))]
                         warn!("No SSH user when assigning subdomain. Defaulting to random.")
                     }
                 }
@@ -279,6 +285,7 @@ impl<R: Resolver> AddressDelegator<R> {
                         fingerprint.as_bytes().hash(&mut hasher);
                         hash_initialized = true;
                     } else {
+                        #[cfg(not(coverage_nightly))]
                         warn!(
                             "No SSH user or key fingerprint when assigning subdomain. Defaulting to random."
                         )
@@ -1471,5 +1478,82 @@ mod address_delegator_tests {
                 .await,
             "3g68u5.root.tld"
         );
+        assert_eq!(
+            delegator
+                .get_http_address(
+                    "address",
+                    &Some("user".into()),
+                    &Some(fingerprint),
+                    &"127.0.0.1:12345".parse().unwrap()
+                )
+                .await,
+            "zsgmqb.root.tld"
+        );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn returns_random_subdomains_for_user_if_missing_data() {
+        let fingerprint: russh::keys::ssh_key::Fingerprint = russh::keys::PrivateKey::from(
+            Ed25519Keypair::from_seed(&(0..32).collect::<Vec<_>>().try_into().unwrap()),
+        )
+        .fingerprint(HashAlg::Sha256);
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::builder()
+            .resolver(mock)
+            .txt_record_prefix("_some_prefix".into())
+            .root_domain("root.tld".into())
+            .bind_hostnames(BindHostnames::None)
+            .force_random_subdomains(true)
+            .random_subdomain_seed(RandomSubdomainSeed::User)
+            .random_subdomain_length(6)
+            .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
+            .seed(42)
+            .build();
+        let first_address = delegator
+            .get_http_address(
+                "address",
+                &None,
+                &Some(fingerprint),
+                &"127.0.0.1:12345".parse().unwrap(),
+            )
+            .await;
+        let second_address = delegator
+            .get_http_address(
+                "address",
+                &None,
+                &Some(fingerprint),
+                &"127.0.0.1:12345".parse().unwrap(),
+            )
+            .await;
+        assert_ne!(first_address, second_address);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn returns_random_subdomains_for_fingerprint_if_missing_data() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::builder()
+            .resolver(mock)
+            .txt_record_prefix("_some_prefix".into())
+            .root_domain("root.tld".into())
+            .bind_hostnames(BindHostnames::None)
+            .force_random_subdomains(true)
+            .random_subdomain_seed(RandomSubdomainSeed::Fingerprint)
+            .random_subdomain_length(6)
+            .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
+            .seed(42)
+            .build();
+        let first_address = delegator
+            .get_http_address("address", &None, &None, &"127.0.0.1:12345".parse().unwrap())
+            .await;
+        let second_address = delegator
+            .get_http_address("address", &None, &None, &"127.0.0.1:12345".parse().unwrap())
+            .await;
+        assert_ne!(first_address, second_address);
     }
 }

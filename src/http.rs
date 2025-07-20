@@ -38,6 +38,7 @@ use tokio::{
     io::{AsyncRead, AsyncWrite, copy_bidirectional_with_sizes},
     time::timeout,
 };
+#[cfg(not(coverage_nightly))]
 use tracing::{debug, info, warn};
 
 const X_FORWARDED_FOR: &str = "X-Forwarded-For";
@@ -149,6 +150,7 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
     let line = format!(
         "{status_style}[{status}] {method_style} {method} {reset_style} {host} => {uri} {dimmed_style}({ip}) {duration}{reset_style}"
     );
+    #[cfg(not(coverage_nightly))]
     info!("{line}");
     if !disable_http_logs {
         let _ = tx.map(|tx| {
@@ -200,6 +202,7 @@ pub(crate) enum HttpError {
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> axum::response::Response {
+        #[cfg(not(coverage_nightly))]
         debug!(error = %self, "HTTP proxy error.");
         match self {
             HttpError::HeaderToStrError(_)
@@ -276,7 +279,10 @@ where
     }
 }
 
-#[tracing::instrument(skip(proxy_data), level = "debug")]
+#[cfg_attr(
+    not(coverage_nightly),
+    tracing::instrument(skip(proxy_data), level = "debug")
+)]
 async fn proxy_handler_inner<B, M, H, T>(
     mut request: Request<B>,
     tcp_address: SocketAddr,
@@ -429,6 +435,7 @@ where
                     .await?;
             tokio::spawn(Box::pin(async move {
                 if let Err(error) = conn.await {
+                    #[cfg(not(coverage_nightly))]
                     warn!(%error, "HTTP/2 connection failed.");
                 }
             }));
@@ -503,6 +510,7 @@ where
                 // If there is an Upgrade header, make sure that it's a valid Websocket upgrade.
                 tokio::spawn(async move {
                     if let Err(error) = conn.with_upgrades().await {
+                        #[cfg(not(coverage_nightly))]
                         warn!(%error, "HTTP/1.1 connection with upgrades failed.");
                     }
                 });
@@ -607,6 +615,7 @@ where
                 // If Upgrade header is not present, simply handle the request
                 tokio::spawn(async move {
                     if let Err(error) = conn.await {
+                        #[cfg(not(coverage_nightly))]
                         warn!(%error, "HTTP/1.1 connection failed.");
                     }
                 });
@@ -655,7 +664,7 @@ mod proxy_handler_tests {
     use axum::{
         Router,
         extract::{WebSocketUpgrade, ws},
-        routing::{any, get, post, put},
+        routing::{any, delete, get, post, put},
     };
     use bytes::Bytes;
     use futures_util::{SinkExt, StreamExt};
@@ -811,10 +820,7 @@ mod proxy_handler_tests {
         .await;
         let response = response.expect("should return response when redirect");
         assert_eq!(response.status(), hyper::StatusCode::SEE_OTHER);
-        assert_eq!(
-            response.headers().get(LOCATION).unwrap(),
-            "https://example.com"
-        );
+        assert_eq!(response.headers()[LOCATION], "https://example.com");
     }
 
     #[test_log::test(tokio::test)]
@@ -878,7 +884,7 @@ mod proxy_handler_tests {
         let response = response.expect("should return response when HTTPS redirect");
         assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
         assert_eq!(
-            response.headers().get(LOCATION).unwrap(),
+            response.headers()[LOCATION],
             "https://with.handler:443/api/endpoint"
         );
     }
@@ -945,7 +951,7 @@ mod proxy_handler_tests {
             response.expect("should return response whyen HTTPS redirect to non-standard port");
         assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
         assert_eq!(
-            response.headers().get(LOCATION).unwrap(),
+            response.headers()[LOCATION],
             "https://non.standard:8443/test"
         );
     }
@@ -1011,7 +1017,7 @@ mod proxy_handler_tests {
         let response = response.expect("should return response when HTTPS redirect");
         assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
         assert_eq!(
-            response.headers().get(LOCATION).unwrap(),
+            response.headers()[LOCATION],
             "https://with.handler:443/api/endpoint"
         );
     }
@@ -1078,7 +1084,7 @@ mod proxy_handler_tests {
             response.expect("should return response when HTTPS redirect to non-standard port");
         assert_eq!(response.status(), hyper::StatusCode::PERMANENT_REDIRECT);
         assert_eq!(
-            response.headers().get(LOCATION).unwrap(),
+            response.headers()[LOCATION],
             "https://non.standard:8443/test"
         );
     }
@@ -1668,6 +1674,128 @@ mod proxy_handler_tests {
     }
 
     #[test_log::test(tokio::test)]
+    async fn returns_http11_response_for_existing_handler() {
+        let conn_manager: Arc<
+            ConnectionMap<
+                String,
+                Arc<MockConnectionHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
+        > = Arc::new(
+            ConnectionMap::builder()
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
+                .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
+                .build(),
+        );
+        let (server, handler) = tokio::io::duplex(1024);
+        let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let mut mock = MockConnectionHandler::new();
+        mock.expect_log_channel()
+            .once()
+            .return_once(move || ServerHandlerSender(Some(logging_tx)));
+        mock.expect_tunneling_channel()
+            .once()
+            .return_once(move |_, _| Ok(handler));
+        mock.expect_http_data().once().return_once(move || {
+            Some(ConnectionHttpData {
+                redirect_http_to_https_port: None,
+                is_aliasing: false,
+                http2: false,
+            })
+        });
+        conn_manager
+            .insert(
+                "http11.handler".into(),
+                "127.0.0.1:12345".parse().unwrap(),
+                TokenHolder::User(UserIdentification::Username("a".into())),
+                Arc::new(mock),
+            )
+            .unwrap();
+        let (socket, stream) = tokio::io::duplex(1024);
+        let router = Router::new().route(
+            "/http11",
+            delete(|headers: HeaderMap| async move {
+                if headers.get("X-Forwarded-For").unwrap() == "127.0.0.1"
+                    && headers.get("X-Forwarded-Host").unwrap() == "http11.handler"
+                {
+                    (StatusCode::FORBIDDEN, "Can't get rid of good ol' HTTP1...")
+                } else {
+                    (StatusCode::BAD_REQUEST, "Failure.")
+                }
+            }),
+        );
+        let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
+        let jh = tokio::spawn(async move {
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection(TokioIo::new(server), router_service)
+                .await
+                .expect("Invalid request");
+        });
+        assert!(
+            logging_rx.is_empty(),
+            "shouldn't log before handling request"
+        );
+        let proxy_service = service_fn(move |request| {
+            proxy_handler(
+                request,
+                "127.0.0.1:12345".parse().unwrap(),
+                None,
+                Arc::new(
+                    ProxyData::builder()
+                        .conn_manager(Arc::clone(&conn_manager))
+                        .domain_redirect(Arc::new(DomainRedirect {
+                            from: "main.domain".into(),
+                            to: "https://example.com".into(),
+                        }))
+                        .protocol(Protocol::Https { port: 443 })
+                        .proxy_type(ProxyType::Tunneling)
+                        .buffer_size(8_000)
+                        .disable_http_logs(false)
+                        .build(),
+                ),
+            )
+        });
+        let jh2 = tokio::spawn(async move {
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection_with_upgrades(TokioIo::new(socket), proxy_service)
+                .await
+                .expect("Invalid request");
+        });
+        let (mut sender, conn) =
+            hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(stream))
+                .await
+                .unwrap();
+        let jh3 = tokio::spawn(conn);
+        let request = Request::builder()
+            .method("DELETE")
+            .uri("https://http11.handler/http11")
+            .body(Empty::<Bytes>::new())
+            .unwrap();
+        let response = sender
+            .send_request(request)
+            .await
+            .expect("should return response after proxy");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = String::from_utf8(
+            response
+                .into_body()
+                .collect()
+                .await
+                .expect("Error collecting response")
+                .to_bytes()
+                .into(),
+        )
+        .unwrap();
+        assert_eq!(body, "Can't get rid of good ol' HTTP1...");
+        drop(body);
+        assert!(!logging_rx.is_empty(), "should log after proxying request");
+        jh.abort();
+        jh2.abort();
+        jh3.abort();
+    }
+
+    #[test_log::test(tokio::test)]
     async fn returns_websocket_upgrade_for_existing_handler() {
         let conn_manager: Arc<
             ConnectionMap<
@@ -1888,5 +2016,66 @@ mod proxy_handler_tests {
         jh.abort();
         jh2.abort();
         jh3.abort();
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn fails_for_http2_with_missing_host_in_uri() {
+        let conn_manager: Arc<
+            ConnectionMap<
+                String,
+                Arc<MockConnectionHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
+        > = Arc::new(
+            ConnectionMap::builder()
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
+                .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
+                .build(),
+        );
+        let (socket, stream) = tokio::io::duplex(1024);
+        let proxy_service = service_fn(move |request| {
+            proxy_handler(
+                request,
+                "127.0.0.1:12345".parse().unwrap(),
+                None,
+                Arc::new(
+                    ProxyData::builder()
+                        .conn_manager(Arc::clone(&conn_manager))
+                        .domain_redirect(Arc::new(DomainRedirect {
+                            from: "main.domain".into(),
+                            to: "https://example.com".into(),
+                        }))
+                        .protocol(Protocol::Https { port: 443 })
+                        .proxy_type(ProxyType::Tunneling)
+                        .buffer_size(8_000)
+                        .disable_http_logs(false)
+                        .build(),
+                ),
+            )
+        });
+        let jh = tokio::spawn(async move {
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection_with_upgrades(TokioIo::new(socket), proxy_service)
+                .await
+                .expect("Invalid request");
+        });
+        let (mut sender, conn) =
+            hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(stream))
+                .await
+                .unwrap();
+        let jh2 = tokio::spawn(conn);
+        let request = Request::builder()
+            .method("GET")
+            .uri("/no_host")
+            .body(Empty::<Bytes>::new())
+            .unwrap();
+        let response = sender
+            .send_request(request)
+            .await
+            .expect("should return response after proxy");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        jh.abort();
+        jh2.abort();
     }
 }

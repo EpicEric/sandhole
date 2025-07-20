@@ -1,5 +1,6 @@
 use clap::Parser;
 use sandhole::{ApplicationConfig, entrypoint};
+#[cfg(not(coverage_nightly))]
 use tracing::error;
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -24,6 +25,7 @@ async fn main() -> color_eyre::Result<()> {
         .try_init()?;
 
     if let Err(error) = entrypoint(config).await {
+        #[cfg(not(coverage_nightly))]
         error!(%error, "Unable to start Sandhole.");
         Err(error)
     } else {

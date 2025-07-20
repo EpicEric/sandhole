@@ -2,19 +2,15 @@ use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use russh::{
-    Channel,
-    client::{Msg, Session},
-};
 use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
     time::{sleep, timeout},
 };
 
-/// This test ensures that remote forwarding is not allowed for low TCP ports.
+/// This test ensures that random user actions have no effect on Sandhole.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn tcp_reject_low_ports() {
+async fn auth_ignore_user_actions() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -35,9 +31,10 @@ async fn tcp_reject_low_ports() {
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
-        "--bind-hostnames=none",
+        "--bind-hostnames=all",
         "--allow-requested-ports",
-        "--idle-connection-timeout=1s",
+        "--idle-connection-timeout=800ms",
+        "--unproxied-connection-timeout=700ms",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
     ]);
@@ -53,7 +50,7 @@ async fn tcp_reject_low_ports() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will fail to bind
+    // 2. Start SSH client that will be proxied via alias
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
@@ -77,17 +74,24 @@ async fn tcp_reject_low_ports() {
             .success(),
         "authentication didn't succeed"
     );
+    let channel = session
+        .channel_open_session()
+        .await
+        .expect("user should be able to open session");
     assert!(
-        session.tcpip_forward("localhost", 42000).await.is_ok(),
-        "should allow binding on high port"
+        channel
+            .request_pty(false, "kitty", 80, 30, 1920, 1080, &[])
+            .await
+            .is_ok(),
+        "shouldn't error on pty request"
     );
     assert!(
-        session.tcpip_forward("localhost", 1024).await.is_ok(),
-        "should allow binding ports greater than or equal to 1024"
+        channel.window_change(70, 25, 1280, 720).await.is_ok(),
+        "shouldn't error on window change"
     );
     assert!(
-        session.tcpip_forward("localhost", 1023).await.is_err(),
-        "shouldn't allow binding ports under 1024"
+        channel.data(&b"This gets ignored..."[..]).await.is_ok(),
+        "shouldn't error when sending data to session"
     );
 }
 
@@ -101,21 +105,5 @@ impl russh::client::Handler for SshClient {
         _key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
-    }
-
-    async fn server_channel_open_forwarded_tcpip(
-        &mut self,
-        channel: Channel<Msg>,
-        _connected_address: &str,
-        _connected_port: u32,
-        _originator_address: &str,
-        _originator_port: u32,
-        _session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        tokio::spawn(async move {
-            channel.data(&b"Hello, world!"[..]).await.unwrap();
-            channel.eof().await.unwrap();
-        });
-        Ok(())
     }
 }

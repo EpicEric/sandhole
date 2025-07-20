@@ -80,7 +80,7 @@ jobs:
           rustup override set nightly-x86_64-unknown-linux-gnu
       - name: Test
         env:
-          RUST_LOG: sandhole=debug
+          RUSTFLAGS: -A dead_code -A unused_variables
         run: |
           cargo llvm-cov --verbose --codecov --locked --output-path codecov.json
       - name: Upload coverage reports to Codecov

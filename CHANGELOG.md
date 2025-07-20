@@ -12,10 +12,12 @@
 ### Changed
 
 - **BREAKING**: `--requested-domain-filter-profanities` no longer filters subdomains (use `--requested-subdomain-filter-profanities` instead).
+- Update dependencies.
 
 ### Fixed
 
 - Don't show "PTY allocation request failed" messages.
+- Return error to forwarding service if Sandhole fails to bind a TCP port.
 
 ## 0.7.0 (2025-07-09)
 

@@ -13,6 +13,7 @@ use tokio::{
     fs::{read_dir, read_to_string},
     sync::oneshot,
 };
+#[cfg(not(coverage_nightly))]
 use tracing::{error, warn};
 
 // Authentication identified for a given fingerprint.
@@ -84,6 +85,7 @@ async fn load_fingerprints_data(
                                 .flat_map(|line| match PublicKey::from_openssh(line) {
                                     Ok(key) => Some(key),
                                     Err(error) => {
+                                        #[cfg(not(coverage_nightly))]
                                         warn!(path=?entry, %error, "Unable to parse key.");
                                         None
                                     }
@@ -103,6 +105,7 @@ async fn load_fingerprints_data(
                         );
                     }
                     Err(error) => {
+                        #[cfg(not(coverage_nightly))]
                         warn!(path = ?entry.file_name(),%error, "Unable to load key.");
                     }
                 }
@@ -110,6 +113,7 @@ async fn load_fingerprints_data(
             *fingerprints_data.write().unwrap() = fingerprints_map;
         }
         Err(error) => {
+            #[cfg(not(coverage_nightly))]
             error!(?directory, %error, "Unable to read keys directory.");
         }
     }

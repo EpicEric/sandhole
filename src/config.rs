@@ -284,7 +284,7 @@ pub struct ApplicationConfig {
     /// Each user is distinguished by their key fingerprint or, in the case of API logins, by their username.
     ///
     /// By default, no rate limit is set. For better results, this should be a multiple of `--buffer-size`.
-    #[arg(long, value_name = "RATE", value_parser = validate_byte_size)]
+    #[arg(long, value_name = "RATE", value_parser = validate_byte_size_usize)]
     pub rate_limit_per_user: Option<usize>,
 
     /// Set a value for random subdomains for use in conjunction with `--random-subdomain-seed` to allow binding to
@@ -345,10 +345,10 @@ pub struct ApplicationConfig {
     #[arg(
         long,
         default_value = "32KB",
-        value_parser = validate_byte_size,
+        value_parser = validate_byte_size_u32,
         value_name = "SIZE"
     )]
-    pub buffer_size: usize,
+    pub buffer_size: u32,
 
     /// Grace period for dangling/unauthenticated connections before they are forcefully disconnected.
     ///
@@ -412,12 +412,20 @@ fn validate_duration(value: &str) -> color_eyre::Result<Duration> {
         .into())
 }
 
-fn validate_byte_size(value: &str) -> color_eyre::Result<usize> {
+fn validate_byte_size_usize(value: &str) -> color_eyre::Result<usize> {
     bytesize::ByteSize::from_str(value)
         .map_err(|s| eyre!("invalid byte size {s}"))?
         .as_u64()
         .try_into()
         .with_context(|| "cannot convert to usize")
+}
+
+fn validate_byte_size_u32(value: &str) -> color_eyre::Result<u32> {
+    bytesize::ByteSize::from_str(value)
+        .map_err(|s| eyre!("invalid byte size {s}"))?
+        .as_u64()
+        .try_into()
+        .with_context(|| "cannot convert to u32")
 }
 
 #[cfg(test)]

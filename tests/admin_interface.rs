@@ -483,7 +483,12 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4i. Quit the admin interface with Ctrl-C (ETX)
+        // 4i. Send unknown command that gets ignored
+        writer
+            .write_all(&b"s"[..])
+            .await
+            .expect("channel write failed");
+        // 4j. Quit the admin interface with Ctrl-C (ETX)
         writer
             .write_all(&b"\x03"[..])
             .await

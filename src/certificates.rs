@@ -17,6 +17,7 @@ use rustls::{
 };
 use rustls_pki_types::CertificateDer;
 use tokio::{fs::read_dir, sync::oneshot};
+#[cfg(not(coverage_nightly))]
 use tracing::{error, warn};
 use trie_rs::map::{Trie, TrieBuilder};
 use webpki::EndEntityCert;
@@ -92,6 +93,7 @@ impl CertificateResolver {
                                 {
                                     Ok(cert) => cert,
                                     Err(error) => {
+                                        #[cfg(not(coverage_nightly))]
                                         warn!(
                                             path = ?certificate_path,
                                             %error,
@@ -105,6 +107,7 @@ impl CertificateResolver {
                                 let key = match PrivateKeyDer::from_pem_file(&key_path) {
                                     Ok(key) => key,
                                     Err(error) => {
+                                        #[cfg(not(coverage_nightly))]
                                         warn!(
                                             path = ?key_path,
                                             %error,
@@ -116,6 +119,7 @@ impl CertificateResolver {
                                 let key = match any_supported_type(&key) {
                                     Ok(key) => key,
                                     Err(error) => {
+                                        #[cfg(not(coverage_nightly))]
                                         warn!(
                                             path = ?key_path,
                                             %error,
@@ -148,6 +152,7 @@ impl CertificateResolver {
                         *certs_clone.write().unwrap() = trie;
                     }
                     Err(error) => {
+                        #[cfg(not(coverage_nightly))]
                         error!(
                             ?directory, %error,
                             "Unable to read certificates directory.",

@@ -13,6 +13,7 @@ use rustls::{
 };
 use rustls_acme::{AcmeConfig, AcmeState, UseChallenge, caches::DirCache};
 use tokio_stream::StreamExt;
+#[cfg(not(coverage_nightly))]
 use tracing::{info, warn};
 
 use crate::{certificates::AlpnChallengeResolver, droppable_handle::DroppableHandle};
@@ -86,6 +87,7 @@ impl ResolverState for AlpnAcmeResolverState {
         DroppableHandle(tokio::spawn(async move {
             while let Some(msg) = self.0.next().await {
                 if let Err(error) = msg {
+                    #[cfg(not(coverage_nightly))]
                     warn!(%error, "ACME listener error.");
                 }
             }
@@ -141,6 +143,7 @@ where
             self.join_handle = None;
             return;
         }
+        #[cfg(not(coverage_nightly))]
         info!(?domains, "Generating ACME certificates.",);
         // Create a new ACME config state.
         let new_state =

@@ -209,9 +209,18 @@ async fn auth_prevent_unauthorized_actions() {
             .success(),
         "authentication didn't succeed"
     );
+    let session_channel = session.channel_open_session().await;
     assert!(
-        session.channel_open_session().await.is_ok(),
+        session_channel.is_ok(),
         "should allow one open session for unauthed user"
+    );
+    assert!(
+        session_channel
+            .unwrap()
+            .data(&b"Hello, world!"[..])
+            .await
+            .is_ok(),
+        "should allow (and ignore) data for unauthed user"
     );
     assert!(!session.is_closed(), "shouldn't disconnect unauthed user");
     assert!(
@@ -220,7 +229,46 @@ async fn auth_prevent_unauthorized_actions() {
     );
     assert!(session.is_closed(), "didn't disconnect unauthed user");
 
-    // 3e. Local-forward with HTTP proxy, then try to port forward
+    // 3e. Try to execute commands without credentials
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::from_os_rng().random(),
+    ));
+    let ssh_client = SshClient;
+    let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
+    assert!(
+        session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                )
+            )
+            .await
+            .expect("SSH authentication failed")
+            .success(),
+        "authentication didn't succeed"
+    );
+    let session_channel = session.channel_open_session().await;
+    assert!(
+        session_channel.is_ok(),
+        "should allow one open session for unauthed user"
+    );
+    assert!(!session.is_closed(), "shouldn't disconnect unauthed user");
+    assert!(
+        session_channel
+            .unwrap()
+            .exec(false, "tcp-alias")
+            .await
+            .is_ok(),
+        "shouldn't immediately return error for exec"
+    );
+    sleep(Duration::from_millis(200)).await;
+    assert!(session.is_closed(), "didn't disconnect unauthed user");
+
+    // 3f. Local-forward with HTTP proxy, then try to port forward
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
         &ChaCha20Rng::from_os_rng().random(),
     ));
@@ -259,7 +307,7 @@ async fn auth_prevent_unauthorized_actions() {
     );
     assert!(session.is_closed(), "didn't disconnect unauthed user");
 
-    // 3f. Local-forward with TCP proxy, then try to port forward
+    // 3g. Local-forward with TCP proxy, then try to port forward
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
         &ChaCha20Rng::from_os_rng().random(),
     ));
@@ -301,7 +349,7 @@ async fn auth_prevent_unauthorized_actions() {
     );
     assert!(session.is_closed(), "didn't disconnect unauthed user");
 
-    // 3g. Try to idle longer than the idle_connection_timeout configuration
+    // 3h. Try to idle longer than the idle_connection_timeout configuration
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
         &ChaCha20Rng::from_os_rng().random(),
     ));
@@ -333,7 +381,7 @@ async fn auth_prevent_unauthorized_actions() {
         "didn't disconnect lingering unauthed user"
     );
 
-    // 3h. Local-forward, then idle
+    // 3i. Local-forward, then idle
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
         &ChaCha20Rng::from_os_rng().random(),
     ));

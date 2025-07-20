@@ -1,5 +1,4 @@
 use std::{
-    convert::Infallible,
     future,
     net::SocketAddr,
     num::NonZero,
@@ -7,9 +6,8 @@ use std::{
     time::Duration,
 };
 
-use axum::response::IntoResponse;
 use color_eyre::eyre::Context;
-use hyper::{Request, StatusCode, body::Incoming, service::service_fn};
+use hyper::{Request, body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
@@ -36,6 +34,7 @@ use tokio::{
 };
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
+#[cfg(not(coverage_nightly))]
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -73,6 +72,7 @@ use crate::{
 #[doc(hidden)]
 // Main entrypoint of the application.
 pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
+    #[cfg(not(coverage_nightly))]
     info!("Starting Sandhole...");
     // Check configuration flags for issues or other operations
     if config.disable_http && config.disable_tcp && config.disable_aliasing {
@@ -83,12 +83,17 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     }
     let http_request_timeout = config.http_request_timeout;
     let tcp_connection_timeout = config.tcp_connection_timeout;
+    let buffer_size = config
+        .buffer_size
+        .try_into()
+        .with_context(|| "Cannot convert buffer size to usize")?;
     // Initialize crypto and credentials
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // Find the private SSH key for Sandhole or create a new one.
     let key = match fs::read_to_string(config.private_key_file.as_path()).await {
         Ok(key) => decode_secret_key(&key, None).with_context(|| "Error decoding secret key")?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            #[cfg(not(coverage_nightly))]
             info!("Key file not found. Creating...");
             let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
                 &ChaCha20Rng::from_os_rng().random(),
@@ -148,6 +153,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             ))
         }
         Some(_) => {
+            #[cfg(not(coverage_nightly))]
             warn!(
                 "ACME challenges are only supported on HTTPS port 443 (currently {}). Disabling.",
                 config.https_port
@@ -181,6 +187,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             Some(telemetry.prometheus_handle())
         }
         Err(error) => {
+            #[cfg(not(coverage_nightly))]
             error!(%error, "Failed to install telemetry.");
             None
         }
@@ -243,7 +250,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .listen_address(config.listen_address)
             .conn_manager(Arc::clone(&tcp_connections))
             .ip_filter(Arc::clone(&ip_filter))
-            .buffer_size(config.buffer_size)
+            .buffer_size(buffer_size)
             .disable_tcp_logs(config.disable_tcp_logs)
             .maybe_tcp_connection_timeout(tcp_connection_timeout)
             .build(),
@@ -496,10 +503,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         keepalive_interval: Some(Duration::from_secs(15)),
         keepalive_max: 4,
         keys: vec![key],
-        maximum_packet_size: config
-            .buffer_size
-            .try_into()
-            .with_context(|| "buffer_size must fit in 32 bits")?,
+        maximum_packet_size: config.buffer_size,
         ..Default::default()
     });
     // Create the local forwarding-specific HTTP proxy data.
@@ -518,7 +522,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             })
             // Always use aliasing channels instead of tunneling channels.
             .proxy_type(ProxyType::Aliasing)
-            .buffer_size(config.buffer_size)
+            .buffer_size(buffer_size)
             .maybe_http_request_timeout(http_request_timeout)
             .maybe_websocket_timeout(tcp_connection_timeout)
             .disable_http_logs(config.disable_http_logs)
@@ -555,7 +559,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         disable_sni: config.disable_http || config.disable_https || config.disable_sni,
         disable_tcp: config.disable_tcp,
         disable_aliasing: config.disable_aliasing,
-        buffer_size: config.buffer_size,
+        buffer_size,
         rate_limit: config
             .rate_limit_per_user
             .map(|rate| rate as f64)
@@ -576,11 +580,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             TokenHolder::System,
             Arc::new(AdminAliasHandler {
                 handler: Arc::new(move || {
-                    get_prometheus_service(
-                        handle.clone(),
-                        tcp_connection_timeout,
-                        config.buffer_size,
-                    )
+                    get_prometheus_service(handle.clone(), tcp_connection_timeout, buffer_size)
                 }),
             }),
         );
@@ -593,6 +593,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let http_listener = TcpListener::bind((config.listen_address, config.http_port.into()))
             .await
             .with_context(|| "Error listening to HTTP port")?;
+        #[cfg(not(coverage_nightly))]
         info!(
             "Listening for HTTP connections on port {}.",
             config.http_port
@@ -615,7 +616,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 })
                 // Always use tunneling channels.
                 .proxy_type(ProxyType::Tunneling)
-                .buffer_size(config.buffer_size)
+                .buffer_size(buffer_size)
                 .maybe_http_request_timeout(http_request_timeout)
                 .maybe_websocket_timeout(tcp_connection_timeout)
                 .disable_http_logs(config.disable_http_logs)
@@ -627,15 +628,18 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 let (stream, address) = match http_listener.accept().await {
                     Ok((stream, address)) => (stream, address),
                     Err(error) => {
+                        #[cfg(not(coverage_nightly))]
                         error!(%error, "Unable to accept HTTP connection.");
                         break;
                     }
                 };
                 if !ip_filter_clone.is_allowed(address.ip()) {
+                    #[cfg(not(coverage_nightly))]
                     info!(%address, "Rejecting HTTP connection: IP not allowed.");
                     continue;
                 }
                 if let Err(error) = stream.set_nodelay(true) {
+                    #[cfg(not(coverage_nightly))]
                     warn!(%error, %address, "Error setting nodelay.");
                 }
                 // Create a Hyper service and serve over the accepted TCP connection.
@@ -666,6 +670,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let https_listener = TcpListener::bind((config.listen_address, config.https_port.into()))
             .await
             .with_context(|| "Error listening to HTTPS port")?;
+        #[cfg(not(coverage_nightly))]
         info!(
             "Listening for HTTPS connections on port {}.",
             config.https_port
@@ -693,7 +698,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 })
                 // Always use tunneling channels.
                 .proxy_type(ProxyType::Tunneling)
-                .buffer_size(config.buffer_size)
+                .buffer_size(buffer_size)
                 .maybe_http_request_timeout(http_request_timeout)
                 .maybe_websocket_timeout(tcp_connection_timeout)
                 .disable_http_logs(config.disable_http_logs)
@@ -706,15 +711,18 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 let (stream, address) = match https_listener.accept().await {
                     Ok((stream, address)) => (stream, address),
                     Err(error) => {
+                        #[cfg(not(coverage_nightly))]
                         error!(%error, "Unable to accept HTTPS connection.");
                         break;
                     }
                 };
                 if !ip_filter_clone.is_allowed(address.ip()) {
+                    #[cfg(not(coverage_nightly))]
                     info!(%address, "Rejecting HTTPS connection: IP not allowed.");
                     continue;
                 }
                 if let Err(error) = stream.set_nodelay(true) {
+                    #[cfg(not(coverage_nightly))]
                     warn!(%error, %address, "Error setting nodelay.");
                 }
                 let config = HandleHttpsConnectionConfig {
@@ -737,7 +745,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     let ssh_listener = TcpListener::bind((config.listen_address, config.ssh_port.into()))
         .await
         .with_context(|| "Error listening to SSH port")?;
+    #[cfg(not(coverage_nightly))]
     info!("Listening for SSH connections on port {}.", config.ssh_port);
+    #[cfg(not(coverage_nightly))]
     info!("Sandhole is now running.");
     // Add OS signal handlers for termination.
     let signal_handler = wait_for_signal();
@@ -748,15 +758,18 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 let (stream, address) = match conn {
                     Ok((stream, address)) => (stream, address),
                     Err(error) => {
+                        #[cfg(not(coverage_nightly))]
                         error!(%error, "Unable to accept SSH connection.");
                         break;
                     },
                 };
                 if !ip_filter.is_allowed(address.ip()) {
+                    #[cfg(not(coverage_nightly))]
                     info!(%address, "Rejecting SSH connection: IP not allowed.");
                     continue;
                 }
                 if let Err(error) = stream.set_nodelay(true) {
+                    #[cfg(not(coverage_nightly))]
                     warn!(%error, %address, "Error setting nodelay.");
                 }
                 handle_ssh_connection(HandleSshConnectionConfig {
@@ -777,6 +790,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             }
         }
     }
+    #[cfg(not(coverage_nightly))]
     info!("Sandhole is shutting down.");
     Ok(())
 }
@@ -831,6 +845,7 @@ async fn handle_https_connection(
                 .unwrap();
             tls.shutdown().await.unwrap();
         } else {
+            #[cfg(not(coverage_nightly))]
             warn!("Unable to get ACME challenge TLS config.");
         }
         return;
@@ -838,12 +853,8 @@ async fn handle_https_connection(
     let ip = address.ip().to_canonical();
     if let Some(tunnel_handler) = sandhole.sni.get(&sni, ip) {
         let Ok(mut channel) = tunnel_handler.tunneling_channel(ip, address.port()).await else {
-            let io = TokioIo::new(stream);
-            let service = service_fn(async move |_: Request<Incoming>| {
-                Ok::<_, Infallible>((StatusCode::NOT_FOUND, "").into_response())
-            });
-            let server = auto::Builder::new(TokioExecutor::new());
-            let _ = server.serve_connection(io, service).await;
+            #[cfg(not(coverage_nightly))]
+            warn!(%sni, "Unable to get tunneling channel for SNI proxy.");
             return;
         };
         counter!(TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL, TELEMETRY_KEY_HOSTNAME => sni.clone())
@@ -902,6 +913,7 @@ async fn handle_https_connection(
             }
         }
         Err(error) => {
+            #[cfg(not(coverage_nightly))]
             warn!(%error, %address, "Error establishing TLS connection.");
         }
     };
@@ -929,6 +941,7 @@ fn handle_ssh_connection(
         let mut session = match russh::server::run_stream(config, stream, handler).await {
             Ok(session) => session,
             Err(error) => {
+                #[cfg(not(coverage_nightly))]
                 warn!(%error, "Connection setup failed.");
                 return;
             }
@@ -936,11 +949,11 @@ fn handle_ssh_connection(
         tokio::select! {
             result = &mut session => {
                 if let Err(error) = result {
-                    warn!(%error, %address, "Connection closed.");
+                    #[cfg(not(coverage_nightly))] warn!(%error, %address, "Connection closed.");
                 }
             }
             _ = cancellation_token.cancelled() => {
-                info!(%address, "Disconnecting client...");
+                #[cfg(not(coverage_nightly))] info!(%address, "Disconnecting client...");
                 let _ = session.handle().disconnect(russh::Disconnect::ByApplication, "".into(), "English".into()).await;
             },
         }
@@ -955,8 +968,14 @@ async fn wait_for_signal() {
     let mut signal_interrupt = signal(SignalKind::interrupt()).unwrap();
 
     tokio::select! {
-        _ = signal_terminate.recv() => debug!("Received SIGTERM."),
-        _ = signal_interrupt.recv() => debug!("Received SIGINT."),
+        _ = signal_terminate.recv() => {
+            #[cfg(not(coverage_nightly))]
+            debug!("Received SIGTERM.");
+        },
+        _ = signal_interrupt.recv() => {
+            #[cfg(not(coverage_nightly))]
+            debug!("Received SIGINT.");
+        },
     };
 }
 
@@ -970,9 +989,9 @@ async fn wait_for_signal() {
     let mut signal_shutdown = windows::ctrl_shutdown().unwrap();
 
     tokio::select! {
-        _ = signal_c.recv() => debug!("Received CTRL_C."),
-        _ = signal_break.recv() => debug!("Received CTRL_BREAK."),
-        _ = signal_close.recv() => debug!("Received CTRL_CLOSE."),
-        _ = signal_shutdown.recv() => debug!("Received CTRL_SHUTDOWN."),
+        _ = signal_c.recv() => #[cfg(not(coverage_nightly))] debug!("Received CTRL_C."),
+        _ = signal_break.recv() => #[cfg(not(coverage_nightly))] debug!("Received CTRL_BREAK."),
+        _ = signal_close.recv() => #[cfg(not(coverage_nightly))] debug!("Received CTRL_CLOSE."),
+        _ = signal_shutdown.recv() => #[cfg(not(coverage_nightly))] debug!("Received CTRL_SHUTDOWN."),
     };
 }

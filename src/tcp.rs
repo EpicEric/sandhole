@@ -15,6 +15,7 @@ use color_eyre::eyre::Context;
 use dashmap::DashMap;
 use metrics::counter;
 use tokio::{io::copy_bidirectional_with_sizes, net::TcpListener, time::timeout};
+#[cfg(not(coverage_nightly))]
 use tracing::{error, info, warn};
 
 // Service that handles creating TCP sockets for reverse forwarding connections.
@@ -46,6 +47,9 @@ pub(crate) trait PortHandler {
 impl PortHandler for Arc<TcpHandler> {
     // Create a TCP listener on the given port.
     async fn create_port_listener(&self, port: u16) -> color_eyre::Result<u16> {
+        if self.sockets.contains_key(&port) {
+            return Ok(port);
+        }
         // Check if we're able to bind to the given address and port.
         let listener = TcpListener::bind((self.listen_address, port)).await?;
         let port = listener
@@ -60,10 +64,12 @@ impl PortHandler for Arc<TcpHandler> {
                     Ok((mut stream, address)) => {
                         let ip = address.ip();
                         if !clone.ip_filter.is_allowed(ip) {
+                            #[cfg(not(coverage_nightly))]
                             info!(%address, "Rejecting TCP connection: IP not allowed.");
                             continue;
                         }
                         if let Err(error) = stream.set_nodelay(true) {
+                            #[cfg(not(coverage_nightly))]
                             warn!(%address, %error, "Error setting nodelay.");
                         }
                         // Get the handler for this port
@@ -118,7 +124,10 @@ impl PortHandler for Arc<TcpHandler> {
                             }
                         }
                     }
-                    Err(error) => error!(%port, %error, "Error listening on TCP port."),
+                    Err(error) => {
+                        #[cfg(not(coverage_nightly))]
+                        error!(%port, %error, "Error listening on TCP port.")
+                    }
                 }
             }
         }));
@@ -146,6 +155,7 @@ impl PortHandler for Arc<TcpHandler> {
             tokio::spawn(async move {
                 for port in ports.into_iter() {
                     if let Err(error) = clone.create_port_listener(port).await {
+                        #[cfg(not(coverage_nightly))]
                         error!(%port, %error, "Failed to create listener for TCP port.");
                     }
                 }
