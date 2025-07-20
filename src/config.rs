@@ -317,11 +317,17 @@ pub struct ApplicationConfig {
     #[arg(long, default_value_t = false)]
     pub random_subdomain_filter_profanities: bool,
 
-    /// Prevents user-requested domains/subdomains from containing profanities.
+    /// Prevents user-requested domains from containing profanities.
     ///
     /// Beware that this can lead to false positives being blocked!
     #[arg(long, default_value_t = false)]
     pub requested_domain_filter_profanities: bool,
+
+    /// Prevents user-requested subdomains from containing profanities.
+    ///
+    /// Beware that this can lead to false positives being blocked!
+    #[arg(long, default_value_t = false)]
+    pub requested_subdomain_filter_profanities: bool,
 
     /// Comma-separated list of IP networks to allow.
     /// Setting this will block unknown IPs from connecting.
@@ -470,6 +476,7 @@ mod application_config_tests {
                 random_subdomain_length: 6.try_into().unwrap(),
                 random_subdomain_filter_profanities: false,
                 requested_domain_filter_profanities: false,
+                requested_subdomain_filter_profanities: false,
                 ip_allowlist: None,
                 ip_blocklist: None,
                 buffer_size: 32_000,
@@ -524,6 +531,7 @@ mod application_config_tests {
             "--random-subdomain-length=8",
             "--random-subdomain-filter-profanities",
             "--requested-domain-filter-profanities",
+            "--requested-subdomain-filter-profanities",
             "--ip-allowlist=10.0.0.0/8",
             "--ip-blocklist=10.1.0.0/16,10.2.0.0/16",
             "--buffer-size=4KB",
@@ -574,6 +582,7 @@ mod application_config_tests {
                 random_subdomain_length: 8.try_into().unwrap(),
                 random_subdomain_filter_profanities: true,
                 requested_domain_filter_profanities: true,
+                requested_subdomain_filter_profanities: true,
                 ip_allowlist: Some(vec![IpNet::from_str("10.0.0.0/8").unwrap()]),
                 ip_blocklist: Some(vec![
                     IpNet::from_str("10.1.0.0/16").unwrap(),

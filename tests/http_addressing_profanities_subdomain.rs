@@ -22,10 +22,10 @@ use tokio::{
 use tower::Service;
 
 /// This test ensures that profanities are not allowed when using the
-/// `--requested-domain-filter-profanities` option, except if the profanity
+/// `--requested-subdomain-filter-profanities` options, except if the profanity
 /// happens to be part of the root domain.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn http_addressing_profanities() {
+async fn http_addressing_profanities_subdomain() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -47,7 +47,7 @@ async fn http_addressing_profanities() {
         "--https-port=18443",
         "--acme-use-staging",
         "--bind-hostnames=all",
-        "--requested-domain-filter-profanities",
+        "--requested-subdomain-filter-profanities",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
@@ -64,7 +64,7 @@ async fn http_addressing_profanities() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied with a profanity and a non-profanity name
+    // 2. Start SSH client that will be proxied with a profane and a non-profane name
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,

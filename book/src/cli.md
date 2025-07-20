@@ -246,7 +246,12 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           Prevents random subdomains from containing profanities
 
       <b>--requested-domain-filter-profanities</b>
-          Prevents user-requested domains/subdomains from containing profanities.
+          Prevents user-requested domains from containing profanities.
+
+          Beware that this can lead to false positives being blocked!
+
+      <b>--requested-subdomain-filter-profanities</b>
+          Prevents user-requested subdomains from containing profanities.
 
           Beware that this can lead to false positives being blocked!
 

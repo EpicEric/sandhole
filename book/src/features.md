@@ -45,7 +45,8 @@ Features related to Sandhole's remote forwarding and reverse proxy capabilities.
 
 - Control over how external hostnames are allowed to be bound. (CLI: `--bind-hostnames`)
 - Control over the prefix for TXT external hostname authorization for binding. (CLI: `--txt-record-prefix`)
-- Option to disable domains containing profanities from binding. (CLI: `--requested-domain-filter-profanities`)
+- Option to disable custom domains containing profanities from binding. (CLI: `--requested-domain-filter-profanities`)
+- Option to disable subdomains containing profanities from binding. (CLI: `--requested-subdomain-filter-profanities`)
 
 ### Reverse proxy
 

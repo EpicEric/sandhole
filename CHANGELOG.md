@@ -6,7 +6,12 @@
 
 - Add `--load-balancing-algorithm` CLI flag.
 - Add `--random-subdomain-value` CLI flag.
+- Add `--requested-subdomain-filter-profanities` CLI flag.
 - Add current connection count to admin interface for SSH/SNI/TCP/alias.
+
+### Changed
+
+- **BREAKING**: `--requested-domain-filter-profanities` no longer filters subdomains (use `--requested-subdomain-filter-profanities` instead).
 
 ### Fixed
 

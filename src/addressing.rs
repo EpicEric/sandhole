@@ -9,7 +9,7 @@ use rand_chacha::ChaCha20Rng;
 use rand_seeder::SipHasher;
 use russh::keys::ssh_key::Fingerprint;
 use rustls_pki_types::DnsName;
-use rustrict::{Censor, CensorStr, Type};
+use rustrict::CensorStr;
 use tracing::{debug, warn};
 
 use crate::config::{BindHostnames, RandomSubdomainSeed};
@@ -124,8 +124,10 @@ pub(crate) struct AddressDelegator<R> {
     random_subdomain_seed: Option<RandomSubdomainSeed>,
     // Whether profanities should be filtered out from random subdomain addressing.
     random_subdomain_filter_profanities: bool,
-    // Trie to optionally verify for profanities in requested domains/subdomains.
-    requested_domain_filter: Option<&'static rustrict::Trie>,
+    // Trie to optionally verify for profanities in requested domains.
+    requested_domain_filter_profanities: bool,
+    // Trie to optionally verify for profanities in requested subdomains.
+    requested_subdomain_filter_profanities: bool,
     // Random seed for generating consistent yet secure random values.
     #[builder(default = rand::rng().random())]
     seed: u64,
@@ -168,12 +170,16 @@ impl<R: Resolver> AddressDelegator<R> {
     ) -> String {
         // Only consider valid DNS addresses
         if DnsName::try_from(requested_address).is_ok() {
-            if self.requested_domain_filter.as_ref().is_some_and(|trie| {
-                Censor::from_str(requested_address)
-                    .with_trie(trie)
-                    .analyze()
-                    .is(Type::INAPPROPRIATE)
-            }) {
+            let subdomain = requested_address.trim_end_matches(&format!(".{}", self.root_domain));
+            let is_subdomain = !subdomain.is_empty() && !subdomain.contains('.');
+            // Ensure that the domain/subdomain passes the profanity filter(s) if set
+            if (is_subdomain
+                && self.requested_subdomain_filter_profanities
+                && subdomain.is_inappropriate())
+                || (!is_subdomain
+                    && self.requested_domain_filter_profanities
+                    && requested_address.is_inappropriate())
+            {
                 warn!(%requested_address, "Profane address requested, defaulting to random.");
             } else {
                 // If we bind all hostnames, return the provided address
@@ -190,7 +196,7 @@ impl<R: Resolver> AddressDelegator<R> {
                 {
                     return requested_address.to_string();
                 }
-                // If we bind by TXT or CNAME records, check that the public key's fingerprint is among the TXT records.
+                // If we bind by TXT or CNAME records, check that the public key's fingerprint is among the TXT records
                 if matches!(
                     self.bind_hostnames,
                     BindHostnames::Cname | BindHostnames::Txt
@@ -211,11 +217,9 @@ impl<R: Resolver> AddressDelegator<R> {
                 }
                 // If subdomains aren't random, check if user provided a valid one
                 if !self.force_random_subdomains {
-                    // Assign specified subdomain under the root domain
-                    let address =
-                        requested_address.trim_end_matches(&format!(".{}", self.root_domain));
-                    if !address.is_empty() && !address.contains('.') {
-                        return format!("{}.{}", address, self.root_domain);
+                    if is_subdomain {
+                        // Assign specified subdomain under the root domain
+                        return format!("{}.{}", subdomain, self.root_domain);
                     } else {
                         warn!(
                             %requested_address, "Invalid address requested, defaulting to random."
@@ -362,6 +366,8 @@ mod address_delegator_tests {
             .force_random_subdomains(false)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address = delegator
             .get_http_address(
@@ -390,6 +396,8 @@ mod address_delegator_tests {
             .force_random_subdomains(false)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address = delegator
             .get_http_address(
@@ -421,6 +429,8 @@ mod address_delegator_tests {
             .force_random_subdomains(false)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address = delegator
             .get_http_address(
@@ -458,6 +468,8 @@ mod address_delegator_tests {
             .force_random_subdomains(false)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address = delegator
             .get_http_address(
@@ -492,6 +504,8 @@ mod address_delegator_tests {
             .force_random_subdomains(false)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address = delegator
             .get_http_address(
@@ -522,6 +536,8 @@ mod address_delegator_tests {
             .force_random_subdomains(false)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address = delegator
             .get_http_address(
@@ -556,6 +572,8 @@ mod address_delegator_tests {
             .force_random_subdomains(false)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address = delegator
             .get_http_address(
@@ -584,6 +602,8 @@ mod address_delegator_tests {
             .force_random_subdomains(false)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address = delegator
             .get_http_address(
@@ -618,6 +638,8 @@ mod address_delegator_tests {
             .force_random_subdomains(false)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address = delegator
             .get_http_address(
@@ -652,6 +674,8 @@ mod address_delegator_tests {
             .force_random_subdomains(false)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address = delegator
             .get_http_address(
@@ -691,6 +715,8 @@ mod address_delegator_tests {
             .force_random_subdomains(false)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address = delegator
             .get_http_address(
@@ -728,6 +754,8 @@ mod address_delegator_tests {
             .force_random_subdomains(false)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address = delegator
             .get_http_address(
@@ -765,6 +793,8 @@ mod address_delegator_tests {
             .force_random_subdomains(true)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         // 99.99% chance of collision with naïve implementation
         static SIZE: usize = 200_000;
@@ -811,6 +841,8 @@ mod address_delegator_tests {
             .force_random_subdomains(true)
             .random_subdomain_length(4)
             .random_subdomain_filter_profanities(true)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         // 99.99999...% chance of collision with naïve implementation
         static SIZE: usize = 10_000;
@@ -856,11 +888,51 @@ mod address_delegator_tests {
             .force_random_subdomains(false)
             .random_subdomain_length(8)
             .random_subdomain_filter_profanities(false)
-            .requested_domain_filter(Box::leak(Box::new(rustrict::Trie::default())))
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(true)
             .build();
         let address = delegator
             .get_http_address(
                 "fuck.root.tld",
+                &None,
+                &None,
+                &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            )
+            .await;
+        assert!(
+            Regex::new(r"^[0-9a-z]{8}\.root\.tld$")
+                .unwrap()
+                .is_match(&address),
+            "invalid address {address}"
+        );
+        assert!(
+            !address.contains("fuck"),
+            "address contains user-provided profanity"
+        );
+        assert!(
+            DnsName::try_from(address.clone()).is_ok(),
+            "non DNS-compatible address {address}"
+        );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn returns_random_subdomain_if_requested_domain_contains_profanity() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::builder()
+            .resolver(mock)
+            .txt_record_prefix("_some_prefix".into())
+            .root_domain("root.tld".into())
+            .bind_hostnames(BindHostnames::All)
+            .force_random_subdomains(false)
+            .random_subdomain_length(8)
+            .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(true)
+            .requested_subdomain_filter_profanities(false)
+            .build();
+        let address = delegator
+            .get_http_address(
+                "fuck.another.tld",
                 &None,
                 &None,
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
@@ -895,6 +967,8 @@ mod address_delegator_tests {
             .random_subdomain_seed(RandomSubdomainSeed::User)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address1_u1_a1 = delegator
             .get_http_address(
@@ -971,6 +1045,8 @@ mod address_delegator_tests {
             .random_subdomain_seed(RandomSubdomainSeed::Fingerprint)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address1_f1_a1_u0 = delegator
             .get_http_address(
@@ -1151,6 +1227,8 @@ mod address_delegator_tests {
             .random_subdomain_seed(RandomSubdomainSeed::IpAndUser)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address1_u1_i1 = delegator
             .get_http_address(
@@ -1219,6 +1297,8 @@ mod address_delegator_tests {
             .random_subdomain_seed(RandomSubdomainSeed::Address)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .build();
         let address1_s1_a1 = delegator
             .get_http_address(
@@ -1287,6 +1367,8 @@ mod address_delegator_tests {
             .random_subdomain_seed(RandomSubdomainSeed::IpAndUser)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .seed(42)
             .build();
         assert_eq!(
@@ -1315,6 +1397,8 @@ mod address_delegator_tests {
             .random_subdomain_seed(RandomSubdomainSeed::User)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .seed(42)
             .build();
         assert_eq!(
@@ -1343,6 +1427,8 @@ mod address_delegator_tests {
             .random_subdomain_seed(RandomSubdomainSeed::Address)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .seed(42)
             .build();
         assert_eq!(
@@ -1370,6 +1456,8 @@ mod address_delegator_tests {
             .random_subdomain_seed(RandomSubdomainSeed::Fingerprint)
             .random_subdomain_length(6)
             .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
             .seed(42)
             .build();
         assert_eq!(

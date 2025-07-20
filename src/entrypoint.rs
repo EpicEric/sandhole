@@ -26,7 +26,6 @@ use russh::{
 };
 use rustls::ServerConfig;
 use rustls_acme::acme::ACME_TLS_ALPN_NAME;
-use rustrict::CensorStr;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
 use tokio::{
     fs,
@@ -255,20 +254,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         telemetry: Arc::clone(&telemetry),
     }));
     // Add addressing service with optional profanity filtering
-    let requested_domain_filter: Option<&'static rustrict::Trie> =
-        if config.requested_domain_filter_profanities {
-            let mut trie = rustrict::Trie::default();
-            if config.domain.is_inappropriate() {
-                warn!(
-                    domain = %config.domain,
-                    "Domain is considered a profanity; adding to safe word list.",
-                );
-                trie.set(&config.domain, rustrict::Type::SAFE);
-            }
-            Some(Box::leak(Box::new(trie)))
-        } else {
-            None
-        };
     let addressing = Arc::new({
         let builder = AddressDelegator::builder()
             .resolver(DnsResolver::new())
@@ -279,7 +264,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .maybe_random_subdomain_seed(config.random_subdomain_seed)
             .random_subdomain_length(config.random_subdomain_length)
             .random_subdomain_filter_profanities(config.random_subdomain_filter_profanities)
-            .maybe_requested_domain_filter(requested_domain_filter);
+            .requested_domain_filter_profanities(config.requested_domain_filter_profanities)
+            .requested_subdomain_filter_profanities(config.requested_subdomain_filter_profanities);
         if let Some(seed) = config.random_subdomain_value {
             builder.seed(seed).build()
         } else {
@@ -731,7 +717,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 if let Err(error) = stream.set_nodelay(true) {
                     warn!(%error, %address, "Error setting nodelay.");
                 }
-                handle_https_connection(HandleHttpsConnectionConfig {
+                let config = HandleHttpsConnectionConfig {
                     stream,
                     address,
                     connect_ssh_on_https_port: config.connect_ssh_on_https_port,
@@ -741,7 +727,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                     certificates: Arc::clone(&certificates_clone),
                     http2_server_config: Arc::clone(&http2_server_config),
                     http11_server_config: Arc::clone(&http11_server_config),
-                });
+                };
+                tokio::spawn(handle_https_connection(config));
             }
         }))
     };
@@ -806,7 +793,7 @@ struct HandleHttpsConnectionConfig {
     http11_server_config: Arc<ServerConfig>,
 }
 
-fn handle_https_connection(
+async fn handle_https_connection(
     HandleHttpsConnectionConfig {
         mut stream,
         address,
@@ -819,64 +806,51 @@ fn handle_https_connection(
         http11_server_config,
     }: HandleHttpsConnectionConfig,
 ) {
-    tokio::spawn(async move {
-        let mut buf = [0u8; 4096];
-        let Ok(Ok(n)) = timeout(sandhole.idle_connection_timeout, stream.peek(&mut buf)).await
-        else {
-            return;
-        };
-        if connect_ssh_on_https_port && buf[..n].starts_with(b"SSH-2.0-") {
-            // Handle as an SSH connection instead of HTTPS.
-            handle_ssh_connection(HandleSshConnectionConfig {
-                stream,
-                address,
-                config: Arc::clone(&ssh_config),
-                server: &mut sandhole,
+    let mut buf = [0u8; 4096];
+    let Ok(Ok(n)) = timeout(sandhole.idle_connection_timeout, stream.peek(&mut buf)).await else {
+        return;
+    };
+    if connect_ssh_on_https_port && buf[..n].starts_with(b"SSH-2.0-") {
+        // Handle as an SSH connection instead of HTTPS.
+        handle_ssh_connection(HandleSshConnectionConfig {
+            stream,
+            address,
+            config: Arc::clone(&ssh_config),
+            server: &mut sandhole,
+        });
+        return;
+    }
+    let Some(TlsPeekData { sni, alpn }) = peek_sni_and_alpn(&buf[..n]).await else {
+        return;
+    };
+    if alpn == [ACME_TLS_ALPN_NAME] {
+        if let Some(challenge_config) = certificates.challenge_rustls_config() {
+            let mut tls = TlsAcceptor::from(challenge_config)
+                .accept(stream)
+                .await
+                .unwrap();
+            tls.shutdown().await.unwrap();
+        } else {
+            warn!("Unable to get ACME challenge TLS config.");
+        }
+        return;
+    }
+    let ip = address.ip().to_canonical();
+    if let Some(tunnel_handler) = sandhole.sni.get(&sni, ip) {
+        let Ok(mut channel) = tunnel_handler.tunneling_channel(ip, address.port()).await else {
+            let io = TokioIo::new(stream);
+            let service = service_fn(async move |_: Request<Incoming>| {
+                Ok::<_, Infallible>((StatusCode::NOT_FOUND, "").into_response())
             });
-            return;
-        }
-        let Some(TlsPeekData { sni, alpn }) = peek_sni_and_alpn(&buf[..n]).await else {
+            let server = auto::Builder::new(TokioExecutor::new());
+            let _ = server.serve_connection(io, service).await;
             return;
         };
-        if alpn == [ACME_TLS_ALPN_NAME] {
-            if let Some(challenge_config) = certificates.challenge_rustls_config() {
-                let mut tls = TlsAcceptor::from(challenge_config)
-                    .accept(stream)
-                    .await
-                    .unwrap();
-                tls.shutdown().await.unwrap();
-            } else {
-                warn!("Unable to get ACME challenge TLS config.");
-            }
-            return;
-        }
-        let ip = address.ip().to_canonical();
-        if let Some(tunnel_handler) = sandhole.sni.get(&sni, ip) {
-            let Ok(mut channel) = tunnel_handler.tunneling_channel(ip, address.port()).await else {
-                let io = TokioIo::new(stream);
-                let service = service_fn(async move |_: Request<Incoming>| {
-                    Ok::<_, Infallible>((StatusCode::NOT_FOUND, "").into_response())
-                });
-                let server = auto::Builder::new(TokioExecutor::new());
-                let _ = server.serve_connection(io, service).await;
-                return;
-            };
-            counter!(TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL, TELEMETRY_KEY_HOSTNAME => sni.clone())
-                .increment(1);
-            match sandhole.tcp_connection_timeout {
-                Some(duration) => {
-                    let _ = timeout(duration, async {
-                        let _ = copy_bidirectional_with_sizes(
-                            &mut stream,
-                            &mut channel,
-                            sandhole.buffer_size,
-                            sandhole.buffer_size,
-                        )
-                        .await;
-                    })
-                    .await;
-                }
-                None => {
+        counter!(TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL, TELEMETRY_KEY_HOSTNAME => sni.clone())
+            .increment(1);
+        match sandhole.tcp_connection_timeout {
+            Some(duration) => {
+                let _ = timeout(duration, async {
                     let _ = copy_bidirectional_with_sizes(
                         &mut stream,
                         &mut channel,
@@ -884,43 +858,53 @@ fn handle_https_connection(
                         sandhole.buffer_size,
                     )
                     .await;
-                }
+                })
+                .await;
             }
-            return;
-        };
-        let tunnel_handler = sandhole.http.get(&sni, ip);
-        let is_http2 = match tunnel_handler.as_ref() {
-            Some(conn) => conn.http_data().map(|data| data.http2).unwrap_or_default(),
-            None => false,
-        };
-        let server_config = if is_http2 {
-            http2_server_config
-        } else {
-            http11_server_config
-        };
-        match TlsAcceptor::from(server_config).accept(stream).await {
-            Ok(stream) => {
-                // Create a Hyper service and serve over the accepted TLS connection.
-                let io = TokioIo::new(stream);
-                let service = service_fn(move |req: Request<Incoming>| {
-                    proxy_handler(req, address, None, Arc::clone(&proxy_data))
-                });
-                let server = auto::Builder::new(TokioExecutor::new());
-                let conn = server.serve_connection_with_upgrades(io, service);
-                match sandhole.tcp_connection_timeout {
-                    Some(duration) => {
-                        let _ = timeout(duration, conn).await;
-                    }
-                    None => {
-                        let _ = conn.await;
-                    }
-                }
-            }
-            Err(error) => {
-                warn!(%error, %address, "Error establishing TLS connection.");
+            None => {
+                let _ = copy_bidirectional_with_sizes(
+                    &mut stream,
+                    &mut channel,
+                    sandhole.buffer_size,
+                    sandhole.buffer_size,
+                )
+                .await;
             }
         }
-    });
+        return;
+    };
+    let tunnel_handler = sandhole.http.get(&sni, ip);
+    let is_http2 = match tunnel_handler.as_ref() {
+        Some(conn) => conn.http_data().map(|data| data.http2).unwrap_or_default(),
+        None => false,
+    };
+    let server_config = if is_http2 {
+        http2_server_config
+    } else {
+        http11_server_config
+    };
+    match TlsAcceptor::from(server_config).accept(stream).await {
+        Ok(stream) => {
+            // Create a Hyper service and serve over the accepted TLS connection.
+            let io = TokioIo::new(stream);
+            let service = service_fn(move |req: Request<Incoming>| {
+                proxy_handler(req, address, None, Arc::clone(&proxy_data))
+            });
+            let server = auto::Builder::new(TokioExecutor::new());
+            let conn = server.serve_connection_with_upgrades(io, service);
+            match sandhole.tcp_connection_timeout {
+                Some(duration) => {
+                    let _ = timeout(duration, conn).await;
+                }
+                None => {
+                    let _ = conn.await;
+                }
+            }
+        }
+        Err(error) => {
+            warn!(%error, %address, "Error establishing TLS connection.");
+        }
+    };
 }
 
 struct HandleSshConnectionConfig<'a> {
