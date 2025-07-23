@@ -7,6 +7,7 @@
 - Add `--load-balancing-algorithm` CLI flag.
 - Add `--random-subdomain-value` CLI flag.
 - Add `--requested-subdomain-filter-profanities` CLI flag.
+- Add `--ssh-keepalive-interval` and `--ssh-keepalive-max` CLI flags.
 - Add current connection count to admin interface for SSH/SNI/TCP/alias.
 
 ### Changed

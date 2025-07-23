@@ -386,7 +386,7 @@ impl Handler for ServerHandler {
     // Receive and handle any additional commands from the client where appropriate.
     #[cfg_attr(
         not(coverage_nightly),
-        tracing::instrument(skip(self), fields(peer = %self.peer), level = "debug")
+        tracing::instrument(skip(self, session), fields(peer = %self.peer), level = "debug")
     )]
     async fn exec_request(
         &mut self,
@@ -748,7 +748,7 @@ impl Handler for ServerHandler {
     // Handle a remote forwarding request for the client.
     #[cfg_attr(
         not(coverage_nightly),
-        tracing::instrument(skip(self), fields(peer = %self.peer), level = "debug")
+        tracing::instrument(skip(self, session), fields(peer = %self.peer), level = "debug")
     )]
     async fn tcpip_forward(
         &mut self,
@@ -801,7 +801,7 @@ impl Handler for ServerHandler {
     // Handle closure of a remote forwarding request.
     #[cfg_attr(
         not(coverage_nightly),
-        tracing::instrument(skip(self), fields(peer = %self.peer), level = "debug")
+        tracing::instrument(skip(self, _session), fields(peer = %self.peer), level = "debug")
     )]
     async fn cancel_tcpip_forward(
         &mut self,
@@ -836,7 +836,7 @@ impl Handler for ServerHandler {
     // Handle a local forwarding request (i.e. proxy tunnel for aliases).
     #[cfg_attr(
         not(coverage_nightly),
-        tracing::instrument(skip(self), fields(peer = %self.peer), level = "debug")
+        tracing::instrument(skip(self, _session), fields(peer = %self.peer), level = "debug")
     )]
     async fn channel_open_direct_tcpip(
         &mut self,

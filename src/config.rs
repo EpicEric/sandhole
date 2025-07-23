@@ -344,11 +344,23 @@ pub struct ApplicationConfig {
     /// A higher value will lead to higher memory consumption.
     #[arg(
         long,
-        default_value = "32KB",
+        default_value = "32768B",
         value_parser = validate_byte_size_u32,
         value_name = "SIZE"
     )]
     pub buffer_size: u32,
+
+    /// How long to wait between each keepalive message that is sent to an unresponsive SSH connection.
+    #[arg(long, default_value = "15s", value_parser = validate_duration, value_name = "DURATION")]
+    pub ssh_keepalive_interval: Duration,
+
+    /// How many keepalive messages are sent to an unresponsive SSH connection before it is dropped.
+    ///
+    /// A value of zero disables timeouts.
+    ///
+    /// The timeout is equal to this value plus one, times `--ssh-keepalive-interval`.
+    #[arg(long, default_value_t = 3, value_name = "VALUE")]
+    pub ssh_keepalive_max: usize,
 
     /// Grace period for dangling/unauthenticated connections before they are forcefully disconnected.
     ///
@@ -487,7 +499,9 @@ mod application_config_tests {
                 requested_subdomain_filter_profanities: false,
                 ip_allowlist: None,
                 ip_blocklist: None,
-                buffer_size: 32_000,
+                buffer_size: 32_768,
+                ssh_keepalive_interval: Duration::from_secs(15),
+                ssh_keepalive_max: 3,
                 idle_connection_timeout: Duration::from_secs(2),
                 unproxied_connection_timeout: None,
                 authentication_request_timeout: Duration::from_secs(5),
@@ -543,6 +557,8 @@ mod application_config_tests {
             "--ip-allowlist=10.0.0.0/8",
             "--ip-blocklist=10.1.0.0/16,10.2.0.0/16",
             "--buffer-size=4KB",
+            "--ssh-keepalive-interval=10s",
+            "--ssh-keepalive-max=2",
             "--idle-connection-timeout=3s",
             "--unproxied-connection-timeout=4s",
             "--authentication-request-timeout=6s",
@@ -597,6 +613,8 @@ mod application_config_tests {
                     IpNet::from_str("10.2.0.0/16").unwrap()
                 ]),
                 buffer_size: 4_000,
+                ssh_keepalive_interval: Duration::from_secs(10),
+                ssh_keepalive_max: 2,
                 idle_connection_timeout: Duration::from_secs(3),
                 unproxied_connection_timeout: Some(Duration::from_secs(4)),
                 authentication_request_timeout: Duration::from_secs(6),

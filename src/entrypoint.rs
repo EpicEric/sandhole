@@ -500,8 +500,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         auth_rejection_time: Duration::from_secs(2),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
         inactivity_timeout: Some(Duration::from_secs(3_600)),
-        keepalive_interval: Some(Duration::from_secs(15)),
-        keepalive_max: 4,
+        keepalive_interval: Some(config.ssh_keepalive_interval),
+        keepalive_max: config.ssh_keepalive_max,
         keys: vec![key],
         maximum_packet_size: config.buffer_size,
         ..Default::default()

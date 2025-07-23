@@ -96,6 +96,7 @@ Features related to system-wide configuration options.
 ### Resources
 
 - Configurable buffer size for bidirectional proxying. (CLI: `--buffer-size`)
+- Automatic cleanup of unresponsive SSH connections. (CLI: `--ssh-keepalive-interval`, `--ssh-keepalive-max`)
 - Automatic cleanup of idle connections via timeout. (CLI: `--idle-connection-timeout`)
 - Automatic cleanup of unproxied connections via timeout. (CLI: `--unproxied-connection-timeout`)
 - Option to configure a timeout for HTTP/HTTPS requests. (CLI: `--http-request-timeout`)

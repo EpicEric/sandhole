@@ -270,6 +270,23 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           [default: 32768B]
 
+      <b>--ssh-keepalive-interval</b> &lt;DURATION&gt;
+          How long to wait between each keepalive message that is sent to an
+          unresponsive SSH connection
+
+          [default: 15s]
+
+      <b>--ssh-keepalive-max</b> &lt;VALUE&gt;
+          How many keepalive messages are sent to an unresponsive SSH connection
+          before it is dropped.
+
+          A value of zero disables timeouts.
+
+          The timeout is equal to this value plus one,
+          times `--ssh-keepalive-interval`.
+
+          [default: 3]
+
       <b>--idle-connection-timeout</b> &lt;DURATION&gt;
           Grace period for dangling/unauthenticated connections before they are
           forcefully disconnected.
