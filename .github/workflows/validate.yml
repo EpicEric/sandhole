@@ -89,6 +89,7 @@ jobs:
           files: ./codecov.json
           token: ${{ secrets.CODECOV_TOKEN }}
   build:
+    name: Build on main
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: read

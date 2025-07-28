@@ -12,7 +12,7 @@ on:
 
 jobs:
   build-docker-images:
-    name: Build Docker images
+    name: Build Docker image
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -6,6 +6,7 @@ on:
 
 jobs:
   build:
+    name: Build for release
     permissions:
       contents: read
       packages: write

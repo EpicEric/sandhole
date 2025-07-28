@@ -14,9 +14,9 @@ use tokio::{
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn tcp_fail_to_bind_port_if_taken() {
     // 1. Bind to our desired forwarding port externally
-    let _listener = TcpListener::bind("127.0.0.1:12345")
+    let _listener = TcpListener::bind("127.0.0.1:54321")
         .await
-        .expect("Failed to bind to port 12345");
+        .expect("Failed to bind to port 54321");
 
     // 2. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
@@ -85,9 +85,11 @@ async fn tcp_fail_to_bind_port_if_taken() {
         "authentication didn't succeed"
     );
     assert!(
-        session_one.tcpip_forward("localhost", 12345).await.is_err(),
+        session_one.tcpip_forward("localhost", 54321).await.is_err(),
         "tcpip_forward should've failed"
     );
+    drop(_listener);
+    sleep(Duration::from_millis(100)).await; // To ensure that socket is freed
 }
 
 struct SshClient;

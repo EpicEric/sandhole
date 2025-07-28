@@ -11,7 +11,7 @@ Make sure to point the `A` and `AAAA` records to your server's IP address(es). I
 
 How to set up your DNS records depends on your choice of DNS provider. For example, on DigitalOcean, this is what the configuration might look like:
 
-![A table showing DNS records for "sandhole.com.br" and "*.sandhole.com.br" pointing to IPv4 and IPv6 addresses, as well as "_acme-challenge.sandhole.com.br" having its nameservers redirected to "agnos-ns.sandhole.com.br".](./digitalocean_dns.png)
+![A table showing DNS records (A and AAAA) for "sandhole.com.br" and "*.sandhole.com.br" pointing to IPv4 and IPv6 addresses, as well as "_acme-challenge.sandhole.com.br" having its nameservers (NS record) redirected to "agnos-ns.sandhole.com.br".](./digitalocean_dns.png)
 
 ## 2. Get the executable
 
@@ -20,9 +20,9 @@ Download a copy of the latest release:
 ```bash
 # x64
 wget --output-document sandhole https://github.com/EpicEric/sandhole/releases/latest/download/sandhole-linux-amd64
-#
+
 # -- OR --
-#
+
 # AArch64
 wget --output-document sandhole https://github.com/EpicEric/sandhole/releases/latest/download/sandhole-linux-arm64
 ```
@@ -34,6 +34,7 @@ If you prefer, you may also use [Docker Compose](./docker_compose.md) (recommend
 You can now run Sandhole! Just make sure that it points to your domain:
 
 ```bash
+chmod +x ./sandhole
 ./sandhole --domain sandhole.com.br
 ```
 
@@ -54,7 +55,7 @@ Now you're ready to dig sandholes like a crab! 🦀
 
 Once Sandhole is up and running, you should:
 
-1. [**Customize settings**](./configuration.md) - Adjust configuration options for your deployment.
-2. [**Set up authentication**](./configuration.md#adding-users-and-admins) - Add SSH public keys for users and admins.
-3. [**Configure services**](./exposing_your_first_service.md) - Use SSH tunneling to expose your first service.
+1. [**Set up authentication**](./configuration.md#adding-users-and-admins) - Add SSH public keys for users and admins.
+2. [**Configure services**](./exposing_your_first_service.md) - Use SSH tunneling to expose your first service.
+3. [**Customize settings**](./configuration.md) - Adjust configuration options for your deployment.
 4. [**Access admin interface**](./administration.md#admin-interface) - Connect via SSH as an admin user for system management.
