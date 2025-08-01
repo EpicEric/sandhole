@@ -116,6 +116,7 @@ pub struct ApplicationConfig {
     /// This will automatically be created for you.
     ///
     /// Note that this setting ignores the --disable-directory-creation flag.
+    #[cfg(feature = "acme")]
     #[arg(
         long,
         default_value_os = "./deploy/acme_cache/",
@@ -176,11 +177,13 @@ pub struct ApplicationConfig {
     /// Contact e-mail to use with Let's Encrypt. If set, enables ACME for HTTPS certificates.
     ///
     /// By providing your e-mail, you agree to the Let's Encrypt Subscriber Agreement.
+    #[cfg(feature = "acme")]
     #[arg(long, value_name = "EMAIL")]
     pub acme_contact_email: Option<String>,
 
     /// Controls whether to use the staging directory for Let's Encrypt certificates (default is production).
     /// Only set this option for testing.
+    #[cfg(feature = "acme")]
     #[arg(long, default_value_t = false)]
     pub acme_use_staging: bool,
 
@@ -190,6 +193,7 @@ pub struct ApplicationConfig {
     /// {"user": "...", "password": "...", "remote_address": "..."}
     ///
     /// Any 2xx response indicates that the credentials are authorized.
+    #[cfg(feature = "login")]
     #[arg(long, value_name = "URL")]
     pub password_authentication_url: Option<String>,
 
@@ -268,6 +272,7 @@ pub struct ApplicationConfig {
     pub disable_aliasing: bool,
 
     /// Disable the admin-only alias for the Prometheus exporter. By default, it is enabled.
+    #[cfg(feature = "prometheus")]
     #[arg(long, default_value_t = false)]
     pub disable_prometheus: bool,
 
@@ -314,18 +319,21 @@ pub struct ApplicationConfig {
     pub random_subdomain_length: NonZero<u8>,
 
     /// Prevents random subdomains from containing profanities.
+    #[cfg(feature = "rustrict")]
     #[arg(long, default_value_t = false)]
     pub random_subdomain_filter_profanities: bool,
 
     /// Prevents user-requested domains from containing profanities.
     ///
     /// Beware that this can lead to false positives being blocked!
+    #[cfg(feature = "rustrict")]
     #[arg(long, default_value_t = false)]
     pub requested_domain_filter_profanities: bool,
 
     /// Prevents user-requested subdomains from containing profanities.
     ///
     /// Beware that this can lead to false positives being blocked!
+    #[cfg(feature = "rustrict")]
     #[arg(long, default_value_t = false)]
     pub requested_subdomain_filter_profanities: bool,
 
@@ -383,6 +391,7 @@ pub struct ApplicationConfig {
 
     /// Time until a user+password authentication request is canceled.
     /// Any timed out requests will not authenticate the user.
+    #[cfg(feature = "login")]
     #[arg(
         long,
         default_value = "5s",

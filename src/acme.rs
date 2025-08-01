@@ -11,10 +11,9 @@ use rustls::{
     server::{ClientHello, ResolvesServerCert},
     sign::CertifiedKey,
 };
+#[cfg(feature = "acme")]
 use rustls_acme::{AcmeConfig, AcmeState, UseChallenge, caches::DirCache};
 use tokio_stream::StreamExt;
-#[cfg(not(coverage_nightly))]
-use tracing::{info, warn};
 
 use crate::{certificates::AlpnChallengeResolver, droppable_handle::DroppableHandle};
 
@@ -88,7 +87,7 @@ impl ResolverState for AlpnAcmeResolverState {
             while let Some(msg) = self.0.next().await {
                 if let Err(error) = msg {
                     #[cfg(not(coverage_nightly))]
-                    warn!(%error, "ACME listener error.");
+                    tracing::warn!(%error, "ACME listener error.");
                 }
             }
         }))
@@ -144,7 +143,7 @@ where
             return;
         }
         #[cfg(not(coverage_nightly))]
-        info!(?domains, "Generating ACME certificates.",);
+        tracing::info!(?domains, "Generating ACME certificates.",);
         // Create a new ACME config state.
         let new_state =
             self.resolver

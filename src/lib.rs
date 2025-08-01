@@ -23,7 +23,6 @@ use crate::{
     connections::{ConnectionMap, HttpAliasingConnection},
     fingerprints::FingerprintsValidator,
     http::ProxyData,
-    login::{ApiLogin, WebpkiVerifierConfigurer},
     quota::TokenHolderUser,
     reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
     ssh::connection_handler::SshTunnelHandler,
@@ -40,6 +39,7 @@ pub use crate::{
     entrypoint::entrypoint,
 };
 
+#[cfg(feature = "acme")]
 mod acme;
 mod addressing;
 mod admin;
@@ -54,6 +54,7 @@ mod error;
 mod fingerprints;
 mod http;
 mod ip;
+#[cfg(feature = "login")]
 mod login;
 mod quota;
 mod reactor;
@@ -121,7 +122,8 @@ pub(crate) struct SandholeServer {
     // Service for validating fingerprint authentications and automatically update its data when the filesystem changes.
     pub(crate) fingerprints_validator: FingerprintsValidator,
     // Service for user+password authentication via a login API via a config-provided URL.
-    pub(crate) api_login: Option<ApiLogin<WebpkiVerifierConfigurer>>,
+    #[cfg(feature = "login")]
+    pub(crate) api_login: Option<crate::login::ApiLogin<crate::login::WebpkiVerifierConfigurer>>,
     // Service for assigning automatic addresses according to the addressing policies.
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
     // Service for handling opening and closing TCP sockets for non-aliased services.
@@ -151,6 +153,7 @@ pub(crate) struct SandholeServer {
     // Rate limit per second for services of a single user.
     pub(crate) rate_limit: f64,
     // How long until a login API request is timed out.
+    #[cfg(feature = "login")]
     pub(crate) authentication_request_timeout: Duration,
     // How long until an unauthed connection is closed.
     pub(crate) idle_connection_timeout: Duration,

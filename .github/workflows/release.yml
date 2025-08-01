@@ -5,7 +5,7 @@ on:
     tags: ["v*.*.*"]
 
 jobs:
-  build:
+  build-release:
     name: Build for release
     permissions:
       contents: read

@@ -11,7 +11,7 @@ on:
         required: true
 
 jobs:
-  build-docker-images:
+  build-docker-image:
     name: Build Docker image
     runs-on: ubuntu-latest
     permissions:

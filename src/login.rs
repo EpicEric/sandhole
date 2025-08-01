@@ -5,7 +5,6 @@ use http::uri::Scheme;
 use hyper::Uri;
 use reqwest::Client;
 use rustls::{ClientConfig, RootCertStore, client::WebPkiServerVerifier, crypto::CryptoProvider};
-use serde::Serialize;
 use webpki_roots::TLS_SERVER_ROOTS;
 
 use crate::error::ServerError;
@@ -20,7 +19,7 @@ pub(crate) struct ApiLogin<C> {
     client: Client,
 }
 
-#[derive(Serialize)]
+#[derive(serde::Serialize)]
 pub(crate) struct AuthenticationRequest<'a> {
     pub(crate) user: &'a str,
     pub(crate) password: &'a str,

@@ -14,7 +14,7 @@ env:
   CARGO_PROFILE_TEST_DEBUG: 0
 
 jobs:
-  rustfmt:
+  rustfmt-msrv:
     name: Check rustfmt formatting on MSRV
     runs-on: ubuntu-latest
     steps:
@@ -29,7 +29,7 @@ jobs:
         run: |
           rustup component add rustfmt
           cargo fmt --check --all
-  clippy:
+  clippy-msrv:
     name: Check Clippy lints on MSRV
     runs-on: ubuntu-latest
     steps:
@@ -45,8 +45,8 @@ jobs:
         run: |
           rustup component add clippy
           cargo clippy --all-targets -- -D warnings
-  build-msrv:
-    name: Build on MSRV
+  build-msrv-default-features:
+    name: Build on MSRV (default features)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -60,7 +60,22 @@ jobs:
       - name: Build
         run: |
           cargo build --locked
-  tests:
+  build-msrv-no-default-features:
+    name: Build on MSRV (no default features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Fetch MSRV
+        run: |
+          rustup toolchain install ${RUST_MSRV}-x86_64-unknown-linux-gnu
+          rustup override set ${RUST_MSRV}-x86_64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
+      - name: Build
+        run: |
+          cargo build --locked --no-default-features
+  tests-nightly:
     name: Run tests on nightly
     runs-on: ubuntu-latest
     env:
@@ -88,17 +103,18 @@ jobs:
         with:
           files: ./codecov.json
           token: ${{ secrets.CODECOV_TOKEN }}
-  build:
+  build-main:
     name: Build on main
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: write
     needs:
-      - rustfmt
-      - clippy
-      - build-msrv
-      - tests
+      - rustfmt-msrv
+      - clippy-msrv
+      - build-msrv-default-features
+      - build-msrv-no-default-features
+      - tests-nightly
     uses: ./.github/workflows/build.yml
     secrets:
       dockerhub-push-token: ${{ secrets.DOCKERHUB_PUSH_TOKEN  }}

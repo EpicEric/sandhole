@@ -9,9 +9,8 @@ use rand_chacha::ChaCha20Rng;
 use rand_seeder::SipHasher;
 use russh::keys::ssh_key::Fingerprint;
 use rustls_pki_types::DnsName;
+#[cfg(feature = "rustrict")]
 use rustrict::CensorStr;
-#[cfg(not(coverage_nightly))]
-use tracing::{debug, warn};
 
 use crate::config::{BindHostnames, RandomSubdomainSeed};
 
@@ -93,7 +92,7 @@ impl Resolver for DnsResolver {
                             .map(|data| String::from_utf8_lossy(data))
                             .join(".");
                         #[cfg(not(coverage_nightly))]
-                        debug!(%cname, "Checking CNAME.");
+                        tracing::debug!(%cname, "Checking CNAME.");
                         // Check if the domain name matches
                         cname == domain
                     })
@@ -125,10 +124,13 @@ pub(crate) struct AddressDelegator<R> {
     // Policy for generating random subdomains.
     random_subdomain_seed: Option<RandomSubdomainSeed>,
     // Whether profanities should be filtered out from random subdomain addressing.
+    #[cfg(feature = "rustrict")]
     random_subdomain_filter_profanities: bool,
     // Trie to optionally verify for profanities in requested domains.
+    #[cfg(feature = "rustrict")]
     requested_domain_filter_profanities: bool,
     // Trie to optionally verify for profanities in requested subdomains.
+    #[cfg(feature = "rustrict")]
     requested_subdomain_filter_profanities: bool,
     // Random seed for generating consistent yet secure random values.
     #[builder(default = rand::rng().random())]
@@ -175,15 +177,18 @@ impl<R: Resolver> AddressDelegator<R> {
             let subdomain = requested_address.trim_end_matches(&format!(".{}", self.root_domain));
             let is_subdomain = !subdomain.is_empty() && !subdomain.contains('.');
             // Ensure that the domain/subdomain passes the profanity filter(s) if set
-            if (is_subdomain
+            #[cfg(feature = "rustrict")]
+            let filter = (is_subdomain
                 && self.requested_subdomain_filter_profanities
                 && subdomain.is_inappropriate())
                 || (!is_subdomain
                     && self.requested_domain_filter_profanities
-                    && requested_address.is_inappropriate())
-            {
+                    && requested_address.is_inappropriate());
+            #[cfg(not(feature = "rustrict"))]
+            let filter = false;
+            if filter {
                 #[cfg(not(coverage_nightly))]
-                warn!(%requested_address, "Profane address requested, defaulting to random.");
+                tracing::warn!(%requested_address, "Profane address requested, defaulting to random.");
             } else {
                 // If we bind all hostnames, return the provided address
                 if matches!(self.bind_hostnames, BindHostnames::All) {
@@ -225,7 +230,7 @@ impl<R: Resolver> AddressDelegator<R> {
                         return format!("{}.{}", subdomain, self.root_domain);
                     } else {
                         #[cfg(not(coverage_nightly))]
-                        warn!(
+                        tracing::warn!(
                             %requested_address, "Invalid address requested, defaulting to random."
                         );
                     }
@@ -233,7 +238,7 @@ impl<R: Resolver> AddressDelegator<R> {
             }
         } else {
             #[cfg(not(coverage_nightly))]
-            warn!(%requested_address, "Invalid address requested, defaulting to random.");
+            tracing::warn!(%requested_address, "Invalid address requested, defaulting to random.");
         }
         // Assign random subdomain under the root domain
         format!(
@@ -268,7 +273,9 @@ impl<R: Resolver> AddressDelegator<R> {
                         hash_initialized = true;
                     } else {
                         #[cfg(not(coverage_nightly))]
-                        warn!("No SSH user when assigning subdomain. Defaulting to random.")
+                        tracing::warn!(
+                            "No SSH user when assigning subdomain. Defaulting to random."
+                        )
                     }
                 }
                 // Requested address, user, and fingerprint
@@ -286,7 +293,7 @@ impl<R: Resolver> AddressDelegator<R> {
                         hash_initialized = true;
                     } else {
                         #[cfg(not(coverage_nightly))]
-                        warn!(
+                        tracing::warn!(
                             "No SSH user or key fingerprint when assigning subdomain. Defaulting to random."
                         )
                     }
@@ -325,7 +332,14 @@ impl<R: Resolver> AddressDelegator<R> {
                         .collect(),
                 )
                 .unwrap();
-                if !self.random_subdomain_filter_profanities || !result.is_inappropriate() {
+                #[cfg(feature = "rustrict")]
+                {
+                    if !self.random_subdomain_filter_profanities || !result.is_inappropriate() {
+                        break result;
+                    }
+                }
+                #[cfg(not(feature = "rustrict"))]
+                {
                     break result;
                 }
             }
@@ -335,7 +349,14 @@ impl<R: Resolver> AddressDelegator<R> {
                 let mut block_rng = self.block_rng.lock().unwrap();
                 let result = self.block_id.encode_string(*block_rng).unwrap();
                 *block_rng = block_rng.wrapping_add(1);
-                if !self.random_subdomain_filter_profanities || !result.is_inappropriate() {
+                #[cfg(feature = "rustrict")]
+                {
+                    if !self.random_subdomain_filter_profanities || !result.is_inappropriate() {
+                        break result;
+                    }
+                }
+                #[cfg(not(feature = "rustrict"))]
+                {
                     break result;
                 }
             };

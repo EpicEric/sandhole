@@ -14,8 +14,6 @@ use russh::{
     server::{Handle, Msg},
 };
 use tokio::{io::copy_bidirectional_with_sizes, time::timeout};
-#[cfg(not(coverage_nightly))]
-use tracing::{debug, info};
 
 use crate::{
     SandholeServer,
@@ -222,7 +220,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
         if !context.server.is_alias(address) {
             let error = eyre!("must be alias, not localhost");
             #[cfg(not(coverage_nightly))]
-            info!(
+            tracing::info!(
                 peer = %context.peer, alias = %address, %error,
                 "Failed to bind SSH alias.",
             );
@@ -251,7 +249,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
             Err(error) => {
                 // Adding to connection map failed.
                 #[cfg(not(coverage_nightly))]
-                info!(peer = %context.peer, alias = %address, %error, "Rejecting SSH.");
+                tracing::info!(peer = %context.peer, alias = %address, %error, "Rejecting SSH.");
                 let _ = context.tx.send(
                     format!(
                         "Cannot listen to SSH on {}:{} ({})\r\n",
@@ -264,7 +262,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
             _ => {
                 // Adding to connection map succeeded.
                 #[cfg(not(coverage_nightly))]
-                info!(peer = %context.peer, alias = %address, "Serving SSH connection...");
+                tracing::info!(peer = %context.peer, alias = %address, "Serving SSH connection...");
                 let _ = context.tx.send(
                     format!(
                         "Serving SSH on {}:{}\r\n\
@@ -307,7 +305,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
             .remove(&BorrowedTcpAlias(address, &port) as &dyn TcpAliasKey)
         {
             #[cfg(not(coverage_nightly))]
-            info!(
+            tracing::info!(
                 peer = %context.peer, alias = &assigned_host,
                 "Stopped SSH forwarding.",
             );
@@ -416,7 +414,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                     }
                 }
                 #[cfg(not(coverage_nightly))]
-                debug!(
+                tracing::debug!(
                     peer = %context.peer, remote = %handler.peer, alias = %address,
                     "Accepted SSH connection.",
                 );
@@ -450,7 +448,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
             if !context.server.is_alias(address) {
                 let error = eyre!("must be alias, not localhost");
                 #[cfg(not(coverage_nightly))]
-                info!(
+                tracing::info!(
                     peer = %context.peer, alias = %address, %error,
                     "Failed to bind HTTP alias.",
                 );
@@ -479,7 +477,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 Err(error) => {
                     // Adding to connection map failed.
                     #[cfg(not(coverage_nightly))]
-                    info!(
+                    tracing::info!(
                         peer = %context.peer, %error, alias = %address,
                         "Rejecting HTTP alias.",
                     );
@@ -491,7 +489,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 _ => {
                     // Adding to connection map succeeded.
                     #[cfg(not(coverage_nightly))]
-                    info!(peer = %context.peer, alias = %address, "Tunneling HTTP...");
+                    tracing::info!(peer = %context.peer, alias = %address, "Tunneling HTTP...");
                     let _ = context.tx.send(
                         format!(
                             "Tunneling HTTP for alias {}{}\r\n",
@@ -541,7 +539,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 Err(error) => {
                     // Adding to connection map failed.
                     #[cfg(not(coverage_nightly))]
-                    info!(
+                    tracing::info!(
                         peer = %context.peer, %error, host = %address,
                         "Rejecting SNI proxy.",
                     );
@@ -553,7 +551,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 _ => {
                     // Adding to connection map succeeded.
                     #[cfg(not(coverage_nightly))]
-                    info!(peer = %context.peer, host = %address, "Serving SNI proxy...",);
+                    tracing::info!(peer = %context.peer, host = %address, "Serving SNI proxy...",);
                     let _ = context.tx.send(
                         format!(
                             "Serving SNI proxy for https://{}{}\r\n",
@@ -576,7 +574,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
         } else if context.server.disable_http {
             let error = eyre!("HTTP is disabled");
             #[cfg(not(coverage_nightly))]
-            info!(
+            tracing::info!(
                 peer = %context.peer, host = %address, %error,
                 "Failed to bind HTTP host.",
             );
@@ -612,7 +610,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 Err(error) => {
                     // Adding to connection map failed.
                     #[cfg(not(coverage_nightly))]
-                    info!(
+                    tracing::info!(
                         peer = %context.peer, host = %assigned_host, %error,
                         "Rejecting HTTP.",
                     );
@@ -634,7 +632,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 _ => {
                     // Adding to connection map succeeded.
                     #[cfg(not(coverage_nightly))]
-                    info!(peer = %context.peer, host = %assigned_host, "Serving HTTP...");
+                    tracing::info!(peer = %context.peer, host = %assigned_host, "Serving HTTP...");
                     let _ = context.tx.send(
                         format!(
                             "Serving HTTP on http://{}{} for {}\r\n",
@@ -696,7 +694,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 .remove(&BorrowedTcpAlias(address, &80) as &dyn TcpAliasKey)
             {
                 #[cfg(not(coverage_nightly))]
-                info!(
+                tracing::info!(
                     peer = %context.peer, alias = %assigned_alias.0, port = %assigned_alias.1,
                     "Stopped TCP aliasing.",
                 );
@@ -717,7 +715,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 .remove(&BorrowedTcpAlias(address, &{ port }) as &dyn TcpAliasKey)
             {
                 #[cfg(not(coverage_nightly))]
-                info!(
+                tracing::info!(
                     peer = %context.peer, host = %assigned_alias,
                     "Stopped SNI proxying.",
                 );
@@ -734,7 +732,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 .remove(&BorrowedTcpAlias(address, &{ port }) as &dyn TcpAliasKey)
             {
                 #[cfg(not(coverage_nightly))]
-                info!(
+                tracing::info!(
                     peer = %context.peer, host = %assigned_host,
                     "Stopped HTTP forwarding.",
                 );
@@ -876,7 +874,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
         let assigned_port = if *port == 0 {
             let error = eyre!("cannot assign random port to alias");
             #[cfg(not(coverage_nightly))]
-            debug!(
+            tracing::debug!(
                 peer = %context.peer, alias = %address, %error,
                 "Failed to bind port for alias.",
             );
@@ -891,7 +889,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             // Port 10 is reserved for admin aliases
             let error = eyre!("port {ADMIN_ALIAS_PORT} is reserved by Sandhole");
             #[cfg(not(coverage_nightly))]
-            debug!(
+            tracing::debug!(
                 peer = %context.peer, alias = %address, %error,
                 "Failed to bind port for alias.",
             );
@@ -926,7 +924,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             Err(error) => {
                 // Adding to connection map failed.
                 #[cfg(not(coverage_nightly))]
-                info!(
+                tracing::info!(
                     peer = %context.peer, alias = %address, port = %assigned_port, %error,
                     "Rejecting port for alias.",
                 );
@@ -946,7 +944,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                     TcpAlias(address.to_string(), assigned_port),
                 );
                 #[cfg(not(coverage_nightly))]
-                info!(
+                tracing::info!(
                     peer = %context.peer, alias = %address, port = %assigned_port,
                     "Tunneling port for alias...",
                 );
@@ -975,7 +973,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                 .remove(&BorrowedTcpAlias(address, &{ port }) as &dyn TcpAliasKey)
         {
             #[cfg(not(coverage_nightly))]
-            info!(
+            tracing::info!(
                 peer = %context.peer, alias = %assigned_alias.0, port = %assigned_alias.1,
                 "Stopped TCP aliasing.",
             );
@@ -1048,7 +1046,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                         gauge.decrement(1);
                     });
                     #[cfg(not(coverage_nightly))]
-                    debug!(
+                    tracing::debug!(
                         peer = %context.peer, alias = %address, port = %port,
                         "Accepted admin alias connection.",
                     );
@@ -1059,7 +1057,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                 }
             } else {
                 #[cfg(not(coverage_nightly))]
-                debug!(
+                tracing::debug!(
                     peer = %context.peer, fingerprint = ?context.key_fingerprint, alias = %address, port = %port,
                     "Non-admin user attempt to local forward admin alias",
                 )
@@ -1153,7 +1151,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                     }
                 }
                 #[cfg(not(coverage_nightly))]
-                debug!(
+                tracing::debug!(
                     peer = %context.peer, remote = %handler.peer, alias = %address, port = %port,
                     "Accepted alias connection.",
                 );
@@ -1182,7 +1180,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
         if context.server.disable_tcp {
             let error = eyre!("TCP is disabled");
             #[cfg(not(coverage_nightly))]
-            info!(
+            tracing::info!(
                 peer = %context.peer, %port, %error,
                 "Failed to bind TCP port.",
             );
@@ -1201,7 +1199,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
         ) {
             let error = eyre!("session is in alias-only mode");
             #[cfg(not(coverage_nightly))]
-            info!(
+            tracing::info!(
                 peer = %context.peer, %port, %error,
                 "Failed to bind TCP port.",
             );
@@ -1217,7 +1215,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
         } else if (1..1024).contains(port) {
             let error = eyre!("port too low");
             #[cfg(not(coverage_nightly))]
-            info!(
+            tracing::info!(
                 peer = %context.peer, %port, %error,
                 "Failed to bind TCP port.",
             );
@@ -1236,7 +1234,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                     Ok(port) => port,
                     Err(error) => {
                         #[cfg(not(coverage_nightly))]
-                        info!(
+                        tracing::info!(
                             peer = %context.peer, alias = %address, %error,
                             "Failed to bind random TCP port for alias.",
                         );
@@ -1258,7 +1256,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                     Ok(port) => port,
                     Err(error) => {
                         #[cfg(not(coverage_nightly))]
-                        info!(
+                        tracing::info!(
                             peer = %context.peer, alias = %address, %error,
                             "Failed to bind random TCP port for alias.",
                         );
@@ -1281,7 +1279,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                     Err(error) => {
                         // Creating port listener failed.
                         #[cfg(not(coverage_nightly))]
-                        info!(
+                        tracing::info!(
                             peer = %context.peer, %port, %error,
                             "Rejecting TCP.",
                         );
@@ -1317,7 +1315,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                 Err(error) => {
                     // Adding to connection map failed.
                     #[cfg(not(coverage_nightly))]
-                    info!(
+                    tracing::info!(
                         peer = %context.peer, port = %assigned_port, %error,
                         "Rejecting TCP.",
                     );
@@ -1337,7 +1335,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                         .port_addressing
                         .insert(TcpAlias(address.to_string(), *port as u16), assigned_port);
                     #[cfg(not(coverage_nightly))]
-                    info!(
+                    tracing::info!(
                         peer = %context.peer, port = %assigned_port,
                         "Serving TCP...",
                     );
@@ -1367,7 +1365,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                 .remove(&BorrowedTcpAlias(address, &{ port }) as &dyn TcpAliasKey)
         {
             #[cfg(not(coverage_nightly))]
-            info!(
+            tracing::info!(
                 peer = %context.peer, port = %port,
                 "Stopped TCP forwarding.",
             );
@@ -1472,7 +1470,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                     }
                 }
                 #[cfg(not(coverage_nightly))]
-                debug!(
+                tracing::debug!(
                     peer = %context.peer, remote = %handler.peer, port = %port,
                     "Accepted TCP connection.",
                 );

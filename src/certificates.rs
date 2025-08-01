@@ -17,8 +17,6 @@ use rustls::{
 };
 use rustls_pki_types::CertificateDer;
 use tokio::{fs::read_dir, sync::oneshot};
-#[cfg(not(coverage_nightly))]
-use tracing::{error, warn};
 use trie_rs::map::{Trie, TrieBuilder};
 use webpki::EndEntityCert;
 
@@ -94,7 +92,7 @@ impl CertificateResolver {
                                     Ok(cert) => cert,
                                     Err(error) => {
                                         #[cfg(not(coverage_nightly))]
-                                        warn!(
+                                        tracing::warn!(
                                             path = ?certificate_path,
                                             %error,
                                             "Unable to load certificate chain.",
@@ -108,7 +106,7 @@ impl CertificateResolver {
                                     Ok(key) => key,
                                     Err(error) => {
                                         #[cfg(not(coverage_nightly))]
-                                        warn!(
+                                        tracing::warn!(
                                             path = ?key_path,
                                             %error,
                                             "Unable to load certificate key.",
@@ -120,7 +118,7 @@ impl CertificateResolver {
                                     Ok(key) => key,
                                     Err(error) => {
                                         #[cfg(not(coverage_nightly))]
-                                        warn!(
+                                        tracing::warn!(
                                             path = ?key_path,
                                             %error,
                                             "Invalid key.",
@@ -153,7 +151,7 @@ impl CertificateResolver {
                     }
                     Err(error) => {
                         #[cfg(not(coverage_nightly))]
-                        error!(
+                        tracing::error!(
                             ?directory, %error,
                             "Unable to read certificates directory.",
                         );
@@ -204,6 +202,7 @@ impl CertificateResolver {
     }
 
     // Return the config for TLS-ALPN-01 challenges
+    #[cfg_attr(not(feature = "acme"), expect(dead_code))]
     pub(crate) fn challenge_rustls_config(&self) -> Option<Arc<ServerConfig>> {
         self.alpn_resolver.read().unwrap().challenge_rustls_config()
     }

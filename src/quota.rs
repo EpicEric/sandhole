@@ -9,6 +9,7 @@ use serde::Serialize;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum UserIdentification {
     PublicKey(Fingerprint),
+    #[cfg_attr(not(feature = "login"), expect(dead_code))]
     Username(String),
 }
 
@@ -56,6 +57,7 @@ impl Serialize for TokenHolderUser {
 pub(crate) enum TokenHolder {
     User(UserIdentification),
     Admin(UserIdentification),
+    #[cfg_attr(not(feature = "prometheus"), expect(dead_code))]
     System,
 }
 

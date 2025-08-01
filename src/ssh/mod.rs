@@ -19,7 +19,6 @@ use crate::{
     droppable_handle::DroppableHandle,
     fingerprints::AuthenticationType,
     ip::{IpFilter, IpFilterConfig},
-    login::AuthenticationRequest,
     quota::{TokenHolder, UserIdentification},
     ssh::{
         auth::{AdminData, AuthenticatedData, ProxyAutoCancellation, UserData},
@@ -32,6 +31,9 @@ use crate::{
     },
 };
 
+#[cfg(feature = "login")]
+use crate::login::AuthenticationRequest;
+
 use async_speed_limit::Limiter;
 use enumflags2::BitFlags;
 use ipnet::IpNet;
@@ -40,13 +42,13 @@ use russh::{
     keys::{HashAlg, PublicKey, ssh_key::Fingerprint},
     server::{Auth, Handler, Msg, Session},
 };
+#[cfg_attr(not(feature = "login"), expect(unused_imports))]
+use tokio::time::timeout;
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
-    time::{sleep, timeout},
+    time::sleep,
 };
 use tokio_util::sync::CancellationToken;
-#[cfg(not(coverage_nightly))]
-use tracing::{debug, error, info, warn};
 
 type FingerprintFn = dyn Fn(Option<&Fingerprint>) -> bool + Send + Sync;
 
@@ -108,7 +110,7 @@ impl Server for Arc<SandholeServer> {
     ) -> ServerHandler {
         let id = self.session_id.fetch_add(1, Ordering::AcqRel);
         #[cfg(not(coverage_nightly))]
-        info!(peer = %peer_address, "SSH client connected.");
+        tracing::info!(peer = %peer_address, "SSH client connected.");
         let (tx, rx) = mpsc::unbounded_channel();
         let unproxied_connection_timeout = self.unproxied_connection_timeout;
         ServerHandler {
@@ -202,57 +204,61 @@ impl Handler for ServerHandler {
     )]
     async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
         // Check if the API login service has been initialized.
-        if let Some(ref api_login) = self.server.api_login {
-            // Send an auth request with a timeout.
-            match timeout(self.server.authentication_request_timeout, async {
-                api_login
-                    .authenticate(&AuthenticationRequest {
-                        user,
-                        password,
-                        remote_address: &self.peer,
-                    })
-                    .await
-            })
-            .await
-            {
-                Ok(Ok(is_authenticated)) => {
-                    // Check if authentication succeeded.
-                    if is_authenticated {
-                        // Add this session to the password sessions, allowing it to be canceled via the admin TUI.
-                        let limiter = {
-                            let mut user_sessions = self.server.sessions_password.lock().unwrap();
-                            let entry = user_sessions.entry(user.into()).or_insert((
-                                Limiter::new(self.server.rate_limit),
-                                HashMap::default(),
-                            ));
-                            entry.1.insert(self.id, self.cancellation_token.clone());
-                            entry.0.clone()
-                        };
-                        self.user = Some(user.into());
-                        // Add user data, identifying its tokens by the username.
-                        self.auth_data = AuthenticatedData::User {
-                            user_data: Box::new(UserData::new(
-                                TokenHolder::User(UserIdentification::Username(user.into())),
-                                limiter,
-                            )),
-                        };
-                        #[cfg(not(coverage_nightly))]
-                        info!(
-                            peer = %self.peer, %user, role = %self.auth_data, "SSH client authenticated with password.",
-                        );
-                        return Ok(Auth::Accept);
-                    } else {
-                        #[cfg(not(coverage_nightly))]
-                        warn!(peer = %self.peer, %user, "Failed password authentication.");
+        #[cfg(feature = "login")]
+        {
+            if let Some(ref api_login) = self.server.api_login {
+                // Send an auth request with a timeout.
+                match timeout(self.server.authentication_request_timeout, async {
+                    api_login
+                        .authenticate(&AuthenticationRequest {
+                            user,
+                            password,
+                            remote_address: &self.peer,
+                        })
+                        .await
+                })
+                .await
+                {
+                    Ok(Ok(is_authenticated)) => {
+                        // Check if authentication succeeded.
+                        if is_authenticated {
+                            // Add this session to the password sessions, allowing it to be canceled via the admin TUI.
+                            let limiter = {
+                                let mut user_sessions =
+                                    self.server.sessions_password.lock().unwrap();
+                                let entry = user_sessions.entry(user.into()).or_insert((
+                                    Limiter::new(self.server.rate_limit),
+                                    HashMap::default(),
+                                ));
+                                entry.1.insert(self.id, self.cancellation_token.clone());
+                                entry.0.clone()
+                            };
+                            self.user = Some(user.into());
+                            // Add user data, identifying its tokens by the username.
+                            self.auth_data = AuthenticatedData::User {
+                                user_data: Box::new(UserData::new(
+                                    TokenHolder::User(UserIdentification::Username(user.into())),
+                                    limiter,
+                                )),
+                            };
+                            #[cfg(not(coverage_nightly))]
+                            tracing::info!(
+                                peer = %self.peer, %user, role = %self.auth_data, "SSH client authenticated with password.",
+                            );
+                            return Ok(Auth::Accept);
+                        } else {
+                            #[cfg(not(coverage_nightly))]
+                            tracing::warn!(peer = %self.peer, %user, "Failed password authentication.");
+                        }
                     }
-                }
-                Ok(Err(error)) => {
-                    #[cfg(not(coverage_nightly))]
-                    error!(peer = %self.peer, %user, %error, "SSH authentication error.");
-                }
-                _ => {
-                    #[cfg(not(coverage_nightly))]
-                    warn!(peer = %self.peer, "Authentication request timed out.");
+                    Ok(Err(error)) => {
+                        #[cfg(not(coverage_nightly))]
+                        tracing::error!(peer = %self.peer, %user, %error, "SSH authentication error.");
+                    }
+                    _ => {
+                        #[cfg(not(coverage_nightly))]
+                        tracing::warn!(peer = %self.peer, "Authentication request timed out.");
+                    }
                 }
             }
         }
@@ -328,7 +334,7 @@ impl Handler for ServerHandler {
             }
         }
         #[cfg(not(coverage_nightly))]
-        info!(
+        tracing::info!(
             peer = %self.peer, %user, fingerprint = %fingerprint, role = %self.auth_data, "SSH client authenticated with public key."
         );
         Ok(Auth::Accept)
@@ -346,7 +352,7 @@ impl Handler for ServerHandler {
             .is_some_and(|channel_id| channel_id == channel)
         {
             #[cfg(not(coverage_nightly))]
-            debug!(peer = %self.peer, ?data, "Received channel data.");
+            tracing::debug!(peer = %self.peer, ?data, "Received channel data.");
             match &mut self.auth_data {
                 // Ignore other commands for non-admin users
                 AuthenticatedData::None { .. } | AuthenticatedData::User { .. } => (),
@@ -398,7 +404,7 @@ impl Handler for ServerHandler {
             return Err(russh::Error::Disconnect);
         };
         #[cfg(not(coverage_nightly))]
-        debug!(peer = %self.peer, ?data, "Received exec_request data.");
+        tracing::debug!(peer = %self.peer, ?data, "Received exec_request data.");
         let mut success = true;
         let cmd = String::from_utf8_lossy(data);
         // Split commands by whitespace and handle each.
@@ -420,7 +426,7 @@ impl Handler for ServerHandler {
                         Ok(_) => {}
                         Err(error) => {
                             #[cfg(not(coverage_nightly))]
-                            debug!(peer = %self.peer, %error, "'admin' command failed.");
+                            tracing::debug!(peer = %self.peer, %error, "'admin' command failed.");
                             let _ = self
                                 .tx
                                 .send(format!("'admin' command failed: {error}\r\n").into());
@@ -453,7 +459,7 @@ impl Handler for ServerHandler {
                         Ok(_) => {}
                         Err(error) => {
                             #[cfg(not(coverage_nightly))]
-                            debug!(peer = %self.peer, %error, "'allowed-fingerprints' command failed.");
+                            tracing::debug!(peer = %self.peer, %error, "'allowed-fingerprints' command failed.");
                             let _ = self.tx.send(
                                 format!("'allowed-fingerprints' command failed: {error}\r\n")
                                     .into(),
@@ -480,7 +486,7 @@ impl Handler for ServerHandler {
                         Ok(_) => {}
                         Err(error) => {
                             #[cfg(not(coverage_nightly))]
-                            debug!(peer = %self.peer, %error, "'tcp-alias' command failed.");
+                            tracing::debug!(peer = %self.peer, %error, "'tcp-alias' command failed.");
                             let _ = self
                                 .tx
                                 .send(format!("'tcp-alias' command failed: {error}\r\n").into());
@@ -506,7 +512,7 @@ impl Handler for ServerHandler {
                         Ok(_) => {}
                         Err(error) => {
                             #[cfg(not(coverage_nightly))]
-                            debug!(peer = %self.peer, %error, "'force-https' command failed.");
+                            tracing::debug!(peer = %self.peer, %error, "'force-https' command failed.");
                             let _ = self
                                 .tx
                                 .send(format!("'force-https' command failed: {error}\r\n").into());
@@ -532,7 +538,7 @@ impl Handler for ServerHandler {
                         Ok(_) => {}
                         Err(error) => {
                             #[cfg(not(coverage_nightly))]
-                            debug!(peer = %self.peer, %error, "'http2' command failed.");
+                            tracing::debug!(peer = %self.peer, %error, "'http2' command failed.");
                             let _ = self
                                 .tx
                                 .send(format!("'http2' command failed: {error}\r\n").into());
@@ -558,7 +564,7 @@ impl Handler for ServerHandler {
                         Ok(_) => {}
                         Err(error) => {
                             #[cfg(not(coverage_nightly))]
-                            debug!(peer = %self.peer, %error, "'sni-proxy' command failed.");
+                            tracing::debug!(peer = %self.peer, %error, "'sni-proxy' command failed.");
                             let _ = self
                                 .tx
                                 .send(format!("'sni-proxy' command failed: {error}\r\n").into());
@@ -591,7 +597,7 @@ impl Handler for ServerHandler {
                         Ok(_) => {}
                         Err(error) => {
                             #[cfg(not(coverage_nightly))]
-                            debug!(peer = %self.peer, %error, "'ip-allowlist' command failed.");
+                            tracing::debug!(peer = %self.peer, %error, "'ip-allowlist' command failed.");
                             let _ = self
                                 .tx
                                 .send(format!("'ip-allowlist' command failed: {error}\r\n").into());
@@ -624,7 +630,7 @@ impl Handler for ServerHandler {
                         Ok(_) => {}
                         Err(error) => {
                             #[cfg(not(coverage_nightly))]
-                            debug!(peer = %self.peer, %error, "'ip-blocklist' command failed.");
+                            tracing::debug!(peer = %self.peer, %error, "'ip-blocklist' command failed.");
                             let _ = self
                                 .tx
                                 .send(format!("'ip-blocklist' command failed: {error}\r\n").into());
@@ -637,7 +643,7 @@ impl Handler for ServerHandler {
                 // - Unknown command
                 command => {
                     #[cfg(not(coverage_nightly))]
-                    debug!(
+                    tracing::debug!(
                         peer = %self.peer, %command, role = %self.auth_data, "Invalid SSH command received."
                     );
                     let _ = self
@@ -706,7 +712,7 @@ impl Handler for ServerHandler {
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         #[cfg(not(coverage_nightly))]
-        debug!(peer = %self.peer, "Received pty_request.");
+        tracing::debug!(peer = %self.peer, "Received pty_request.");
         if let AuthenticatedData::Admin { admin_data, .. } = &mut self.auth_data {
             // Change the size of the pseudo-terminal.
             admin_data.col_width = Some(col_width);
@@ -736,7 +742,7 @@ impl Handler for ServerHandler {
             if let Some(ref mut admin_interface) = admin_data.admin_interface {
                 if let Err(error) = admin_interface.resize(col_width as u16, row_height as u16) {
                     #[cfg(not(coverage_nightly))]
-                    warn!(peer = %self.peer, %error, "Failed to resize terminal.");
+                    tracing::warn!(peer = %self.peer, %error, "Failed to resize terminal.");
                     return session.channel_failure(channel);
                 }
             }
@@ -897,7 +903,7 @@ impl Drop for ServerHandler {
     fn drop(&mut self) {
         let user = self.user.as_ref().map(String::as_ref).unwrap_or("unknown");
         #[cfg(not(coverage_nightly))]
-        info!(peer = %self.peer, %user, "SSH client disconnected.");
+        tracing::info!(peer = %self.peer, %user, "SSH client disconnected.");
         match self.auth_data {
             AuthenticatedData::User { .. } | AuthenticatedData::Admin { .. } => {
                 let server = Arc::clone(&self.server);

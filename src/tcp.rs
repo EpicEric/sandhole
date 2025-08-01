@@ -15,8 +15,6 @@ use color_eyre::eyre::Context;
 use dashmap::DashMap;
 use metrics::counter;
 use tokio::{io::copy_bidirectional_with_sizes, net::TcpListener, time::timeout};
-#[cfg(not(coverage_nightly))]
-use tracing::{error, info, warn};
 
 // Service that handles creating TCP sockets for reverse forwarding connections.
 #[derive(Builder)]
@@ -65,12 +63,12 @@ impl PortHandler for Arc<TcpHandler> {
                         let ip = address.ip();
                         if !clone.ip_filter.is_allowed(ip) {
                             #[cfg(not(coverage_nightly))]
-                            info!(%address, "Rejecting TCP connection: IP not allowed.");
+                            tracing::info!(%address, "Rejecting TCP connection: IP not allowed.");
                             continue;
                         }
                         if let Err(error) = stream.set_nodelay(true) {
                             #[cfg(not(coverage_nightly))]
-                            warn!(%address, %error, "Error setting nodelay.");
+                            tracing::warn!(%address, %error, "Error setting nodelay.");
                         }
                         // Get the handler for this port
                         let ip = address.ip().to_canonical();
@@ -126,7 +124,7 @@ impl PortHandler for Arc<TcpHandler> {
                     }
                     Err(error) => {
                         #[cfg(not(coverage_nightly))]
-                        error!(%port, %error, "Error listening on TCP port.")
+                        tracing::error!(%port, %error, "Error listening on TCP port.")
                     }
                 }
             }
@@ -156,7 +154,7 @@ impl PortHandler for Arc<TcpHandler> {
                 for port in ports.into_iter() {
                     if let Err(error) = clone.create_port_listener(port).await {
                         #[cfg(not(coverage_nightly))]
-                        error!(%port, %error, "Failed to create listener for TCP port.");
+                        tracing::error!(%port, %error, "Failed to create listener for TCP port.");
                     }
                 }
             });

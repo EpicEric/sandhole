@@ -9,6 +9,7 @@
 - Add `--requested-subdomain-filter-profanities` CLI flag.
 - Add `--ssh-keepalive-interval` and `--ssh-keepalive-max` CLI flags.
 - Add current connection count to admin interface for SSH/SNI/TCP/alias.
+- Add feature flags for login, rustrict, ACME, and Prometheus.
 
 ### Changed
 

@@ -38,8 +38,6 @@ use tokio::{
     io::{AsyncRead, AsyncWrite, copy_bidirectional_with_sizes},
     time::timeout,
 };
-#[cfg(not(coverage_nightly))]
-use tracing::{debug, info, warn};
 
 const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 const X_FORWARDED_HOST: &str = "X-Forwarded-Host";
@@ -151,7 +149,7 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
         "{status_style}[{status}] {method_style} {method} {reset_style} {host} => {uri} {dimmed_style}({ip}) {duration}{reset_style}"
     );
     #[cfg(not(coverage_nightly))]
-    info!("{line}");
+    tracing::info!("{line}");
     if !disable_http_logs {
         let _ = tx.map(|tx| {
             let time = chrono::Utc::now().to_rfc3339();
@@ -203,7 +201,7 @@ pub(crate) enum HttpError {
 impl IntoResponse for HttpError {
     fn into_response(self) -> axum::response::Response {
         #[cfg(not(coverage_nightly))]
-        debug!(error = %self, "HTTP proxy error.");
+        tracing::debug!(error = %self, "HTTP proxy error.");
         match self {
             HttpError::HeaderToStrError(_)
             | HttpError::MissingUriHost
@@ -436,7 +434,7 @@ where
             tokio::spawn(Box::pin(async move {
                 if let Err(error) = conn.await {
                     #[cfg(not(coverage_nightly))]
-                    warn!(%error, "HTTP/2 connection failed.");
+                    tracing::warn!(%error, "HTTP/2 connection failed.");
                 }
             }));
             let response = match proxy_data.http_request_timeout {
@@ -511,7 +509,7 @@ where
                 tokio::spawn(async move {
                     if let Err(error) = conn.with_upgrades().await {
                         #[cfg(not(coverage_nightly))]
-                        warn!(%error, "HTTP/1.1 connection with upgrades failed.");
+                        tracing::warn!(%error, "HTTP/1.1 connection with upgrades failed.");
                     }
                 });
                 let request_type = request_upgrade.to_str()?.to_string();
@@ -616,7 +614,7 @@ where
                 tokio::spawn(async move {
                     if let Err(error) = conn.await {
                         #[cfg(not(coverage_nightly))]
-                        warn!(%error, "HTTP/1.1 connection failed.");
+                        tracing::warn!(%error, "HTTP/1.1 connection failed.");
                     }
                 });
                 let response = match proxy_data.http_request_timeout {

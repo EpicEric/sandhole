@@ -14,6 +14,7 @@ pub(crate) enum ServerError {
     QuotaReached,
     #[error("No matching user key")]
     NoMatchingUserKey,
+    #[cfg_attr(not(feature = "login"), expect(dead_code))]
     #[error("Unknown scheme (must be set to either http:// or https://)")]
     UnknownHttpScheme,
     #[error("Missing directory {0}")]

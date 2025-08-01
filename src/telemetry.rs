@@ -1,6 +1,7 @@
+#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+use std::future;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    future,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -15,12 +16,14 @@ use metrics::{
     Counter, CounterFn, Gauge, GaugeFn, Recorder, Unit, describe_counter, describe_gauge,
     describe_histogram,
 };
+#[cfg(feature = "prometheus")]
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle, PrometheusRecorder};
+#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
 use tokio::time::sleep;
-#[cfg(not(coverage_nightly))]
-use tracing::warn;
 
-use crate::{droppable_handle::DroppableHandle, tcp_alias::TcpAlias};
+#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+use crate::droppable_handle::DroppableHandle;
+use crate::tcp_alias::TcpAlias;
 
 // A value that increases with time.
 struct SlidingWindowCounter {
@@ -208,13 +211,17 @@ pub(crate) struct Telemetry {
     // Current connections for each TCP port.
     tcp_connections_current: DashMap<u16, Arc<TelemetryGauge>, RandomState>,
     // Recorder for Prometheus metrics export.
+    #[cfg(feature = "prometheus")]
     prometheus_recorder: Option<PrometheusRecorder>,
     // Join handle for the Prometheus upkeep task.
+    #[cfg(feature = "prometheus")]
     _join_handle: DroppableHandle<()>,
 }
 
 impl Telemetry {
+    #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
     pub(crate) fn new(enable_prometheus: bool) -> Self {
+        #[cfg(feature = "prometheus")]
         let (prometheus_recorder, join_handle) = if enable_prometheus {
             let prometheus_recorder = PrometheusBuilder::new()
                 .set_buckets_for_metric(
@@ -251,7 +258,9 @@ impl Telemetry {
             alias_connections_current: DashMap::default(),
             admin_alias_connections_current: DashMap::default(),
             tcp_connections_current: DashMap::default(),
+            #[cfg(feature = "prometheus")]
             prometheus_recorder,
+            #[cfg(feature = "prometheus")]
             _join_handle: join_handle,
         }
     }
@@ -313,6 +322,7 @@ impl Telemetry {
         );
     }
 
+    #[cfg(feature = "prometheus")]
     pub(crate) fn prometheus_handle(&self) -> Option<PrometheusHandle> {
         self.prometheus_recorder
             .as_ref()
@@ -440,34 +450,40 @@ impl Telemetry {
 }
 
 impl Recorder for Telemetry {
+    #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
     fn describe_counter(
         &self,
         key: metrics::KeyName,
         unit: Option<Unit>,
         description: metrics::SharedString,
     ) {
+        #[cfg(feature = "prometheus")]
         self.prometheus_recorder
             .as_ref()
             .inspect(|recorder| recorder.describe_counter(key, unit, description));
     }
 
+    #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
     fn describe_gauge(
         &self,
         key: metrics::KeyName,
         unit: Option<Unit>,
         description: metrics::SharedString,
     ) {
+        #[cfg(feature = "prometheus")]
         self.prometheus_recorder
             .as_ref()
             .inspect(|recorder| recorder.describe_gauge(key, unit, description));
     }
 
+    #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
     fn describe_histogram(
         &self,
         key: metrics::KeyName,
         unit: Option<Unit>,
         description: metrics::SharedString,
     ) {
+        #[cfg(feature = "prometheus")]
         self.prometheus_recorder
             .as_ref()
             .inspect(|recorder| recorder.describe_histogram(key, unit, description));
@@ -476,13 +492,17 @@ impl Recorder for Telemetry {
     fn register_counter(
         &self,
         key: &metrics::Key,
+        #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
         metadata: &metrics::Metadata<'_>,
     ) -> metrics::Counter {
+        #[cfg(feature = "prometheus")]
         let prometheus_counter = self
             .prometheus_recorder
             .as_ref()
             .map(|recorder| recorder.register_counter(key, metadata))
             .unwrap_or(metrics::Counter::noop());
+        #[cfg(not(feature = "prometheus"))]
+        let prometheus_counter = metrics::Counter::noop();
         let name = key.name();
         let labels: Vec<(&str, &str)> = key
             .labels()
@@ -552,7 +572,7 @@ impl Recorder for Telemetry {
                             }
                             Err(error) => {
                                 #[cfg(not(coverage_nightly))]
-                                warn!(alias = value, %error, "Invalid TCP alias in telemetry.")
+                                tracing::warn!(alias = value, %error, "Invalid TCP alias in telemetry.")
                             }
                         }
                     }
@@ -575,7 +595,7 @@ impl Recorder for Telemetry {
                             }
                             Err(error) => {
                                 #[cfg(not(coverage_nightly))]
-                                warn!(alias = value, %error, "Invalid admin alias in telemetry.")
+                                tracing::warn!(alias = value, %error, "Invalid admin alias in telemetry.")
                             }
                         }
                     }
@@ -598,7 +618,7 @@ impl Recorder for Telemetry {
                             }
                             Err(error) => {
                                 #[cfg(not(coverage_nightly))]
-                                warn!(port = value, %error, "Invalid port in telemetry.");
+                                tracing::warn!(port = value, %error, "Invalid port in telemetry.");
                             }
                         }
                     }
@@ -612,13 +632,17 @@ impl Recorder for Telemetry {
     fn register_gauge(
         &self,
         key: &metrics::Key,
+        #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
         metadata: &metrics::Metadata<'_>,
     ) -> metrics::Gauge {
+        #[cfg(feature = "prometheus")]
         let prometheus_gauge = self
             .prometheus_recorder
             .as_ref()
             .map(|recorder| recorder.register_gauge(key, metadata))
             .unwrap_or(metrics::Gauge::noop());
+        #[cfg(not(feature = "prometheus"))]
+        let prometheus_gauge = metrics::Gauge::noop();
         let name = key.name();
         let labels: Vec<(&str, &str)> = key
             .labels()
@@ -664,7 +688,7 @@ impl Recorder for Telemetry {
                             }
                             Err(error) => {
                                 #[cfg(not(coverage_nightly))]
-                                warn!(alias = value, %error, "Invalid admin alias in telemetry.")
+                                tracing::warn!(alias = value, %error, "Invalid admin alias in telemetry.")
                             }
                         }
                     }
@@ -684,7 +708,7 @@ impl Recorder for Telemetry {
                             }
                             Err(error) => {
                                 #[cfg(not(coverage_nightly))]
-                                warn!(alias = value, %error, "Invalid admin alias in telemetry.")
+                                tracing::warn!(alias = value, %error, "Invalid admin alias in telemetry.")
                             }
                         }
                     }
@@ -704,7 +728,7 @@ impl Recorder for Telemetry {
                             }
                             Err(error) => {
                                 #[cfg(not(coverage_nightly))]
-                                warn!(port = value, %error, "Invalid port in telemetry.");
+                                tracing::warn!(port = value, %error, "Invalid port in telemetry.");
                             }
                         }
                     }
@@ -717,13 +741,21 @@ impl Recorder for Telemetry {
 
     fn register_histogram(
         &self,
-        key: &metrics::Key,
+        #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))] key: &metrics::Key,
+        #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
         metadata: &metrics::Metadata<'_>,
     ) -> metrics::Histogram {
-        self.prometheus_recorder
-            .as_ref()
-            .map(|recorder| recorder.register_histogram(key, metadata))
-            .unwrap_or(metrics::Histogram::noop())
+        #[cfg(feature = "prometheus")]
+        {
+            self.prometheus_recorder
+                .as_ref()
+                .map(|recorder| recorder.register_histogram(key, metadata))
+                .unwrap_or(metrics::Histogram::noop())
+        }
+        #[cfg(not(feature = "prometheus"))]
+        {
+            metrics::Histogram::noop()
+        }
     }
 }
 
