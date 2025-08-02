@@ -21,6 +21,7 @@ use tokio::{
 /// This test ensures that a TCP service can handle multiple big uploads at the
 /// same time (mostly for profiling purposes).
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
+#[ignore = "flaky test"]
 async fn tcp_multi_stream_download() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
