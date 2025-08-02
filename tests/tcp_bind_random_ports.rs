@@ -85,7 +85,7 @@ async fn tcp_bind_random_ports() {
         .tcpip_forward("", 12345)
         .await
         .expect("tcpip_forward failed");
-    let regex = regex::Regex::new(r"foobar.tld:(\d+)").expect("Invalid regex");
+    let regex = regex::Regex::new(r"foobar\.tld:(\d+)").expect("Invalid regex");
     let Ok(port) = timeout(Duration::from_secs(3), async move {
         while let Some(message) = channel.wait().await {
             match message {

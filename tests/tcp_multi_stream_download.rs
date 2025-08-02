@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
+use bytes::BytesMut;
 use clap::Parser;
 use rand::RngCore;
 use russh::{
@@ -118,6 +119,7 @@ async fn tcp_multi_stream_download() {
                     .await
                     .unwrap();
                 write_half.write_all(&data[..file_size]).await.unwrap();
+                write_half.flush().await.unwrap();
             });
             let jh = tokio::spawn(async move {
                 let mut buf = [0u8; size_of::<usize>()];
@@ -160,14 +162,16 @@ impl russh::client::Handler for SshClient {
             let mut stream = channel.into_stream();
             stream.read_exact(&mut len_buf).await.unwrap();
             let mut size = usize::from_le_bytes(len_buf);
-            let mut buf = [0u8; 64_000];
-            while let Ok(n) = stream.read(&mut buf).await {
+            let mut buf = BytesMut::new();
+            while let Ok(n) = stream.read_buf(&mut buf).await {
+                buf.truncate(0);
                 size = size.saturating_sub(n);
                 if size == 0 {
                     break;
                 }
             }
             stream.write_all(&len_buf[..]).await.unwrap();
+            stream.flush().await.unwrap();
         });
         Ok(())
     }

@@ -851,7 +851,6 @@ async fn handle_https_connection(
         proxy_data,
         ssh_config,
         mut sandhole,
-        #[cfg_attr(not(feature = "acme"), expect(unused_variables))]
         certificates,
         http2_server_config,
         http11_server_config,
@@ -889,6 +888,8 @@ async fn handle_https_connection(
         }
         return;
     }
+    #[cfg(not(feature = "acme"))]
+    let _ = certificates;
     let ip = address.ip().to_canonical();
     if let Some(tunnel_handler) = sandhole.sni.get(&sni, ip) {
         let Ok(mut channel) = tunnel_handler.tunneling_channel(ip, address.port()).await else {
