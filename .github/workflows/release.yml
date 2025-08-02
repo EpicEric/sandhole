@@ -16,7 +16,7 @@ jobs:
       ghcr-push-token: ${{ secrets.GITHUB_TOKEN }}
   create-release-draft:
     name: Create release draft
-    needs: build
+    needs: build-release
     runs-on: ubuntu-latest
     permissions:
       contents: write
