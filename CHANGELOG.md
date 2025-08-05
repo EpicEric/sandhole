@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.8.1
+
+### Changed
 
 - Update russh to 0.54.1.
 
