@@ -111,6 +111,7 @@ async fn tcp_multi_stream_upload() {
             let tcp_stream = TcpStream::connect("127.0.0.1:12345")
                 .await
                 .expect("TCP connection failed");
+            tcp_stream.set_nodelay(true).unwrap();
             let (mut read_half, mut write_half) = tcp_stream.into_split();
             tokio::spawn(async move {
                 write_half

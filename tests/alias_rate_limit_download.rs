@@ -126,7 +126,7 @@ async fn alias_rate_limit_download() {
         "authentication didn't succeed"
     );
 
-    let mut data = vec![0u8; 50_000];
+    let mut data = vec![0u8; 55_000];
     rand::rng().fill_bytes(&mut data);
     let channel = client_session
         .channel_open_direct_tcpip("my.tunnel", 42, "::1", 23456)
@@ -171,7 +171,7 @@ impl russh::client::Handler for SshClient {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
-            let mut expected_len = 50_000;
+            let mut expected_len = 55_000;
             while let Some(msg) = channel.wait().await {
                 if let ChannelMsg::Data { data } = msg {
                     expected_len -= data.len();

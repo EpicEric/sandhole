@@ -154,7 +154,7 @@ async fn https_rate_limit_upload() {
         .await
         .unwrap();
     let elapsed = start.elapsed();
-    assert!(body.len() == 50_000);
+    assert!(body.len() == 55_000);
     assert!(
         elapsed > Duration::from_secs(2),
         "must've taken more than 2 seconds, but was {elapsed:?}"
@@ -186,7 +186,7 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let mut data = vec![0u8; 50_000];
+        let mut data = vec![0u8; 55_000];
         rand::rng().fill_bytes(&mut data);
         let data: &'static [u8] = data.leak();
         let router = Router::new().route("/", get(async || data.to_vec()));

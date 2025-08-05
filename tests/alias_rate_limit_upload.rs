@@ -128,7 +128,7 @@ async fn alias_rate_limit_upload() {
         .channel_open_direct_tcpip("my.tunnel", 42, "::1", 23456)
         .await
         .expect("Local forwarding failed");
-    let mut data = vec![0u8; 50_000];
+    let mut data = vec![0u8; 55_000];
     let start = Instant::now();
     channel.into_stream().read_exact(&mut data).await.unwrap();
     let elapsed = start.elapsed();
@@ -163,7 +163,7 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let mut data = vec![0u8; 50_000];
+        let mut data = vec![0u8; 55_000];
         rand::rng().fill_bytes(&mut data);
         tokio::spawn(async move {
             let mut stream = channel.into_stream();

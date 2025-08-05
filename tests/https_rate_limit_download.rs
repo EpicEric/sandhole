@@ -121,7 +121,7 @@ async fn https_rate_limit_download() {
             .with_root_certificates(root_store)
             .with_no_client_auth(),
     );
-    let mut data = vec![0u8; 50_000];
+    let mut data = vec![0u8; 55_000];
     rand::rng().fill_bytes(&mut data);
     let connector = TlsConnector::from(Arc::clone(&tls_config));
     let tcp_stream = TcpStream::connect("127.0.0.1:18443")

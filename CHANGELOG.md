@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Update russh to 0.54.1.
+
 ## 0.8.0
 
 ### Added

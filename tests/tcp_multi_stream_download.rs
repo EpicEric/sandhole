@@ -21,7 +21,6 @@ use tokio::{
 /// This test ensures that a TCP service can handle multiple big uploads at the
 /// same time (mostly for profiling purposes).
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-#[ignore = "flaky test"]
 async fn tcp_multi_stream_download() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
@@ -113,6 +112,7 @@ async fn tcp_multi_stream_download() {
             let tcp_stream = TcpStream::connect("127.0.0.1:12345")
                 .await
                 .expect("TCP connection failed");
+            tcp_stream.set_nodelay(true).unwrap();
             let (mut read_half, mut write_half) = tcp_stream.into_split();
             tokio::spawn(async move {
                 write_half
@@ -124,7 +124,10 @@ async fn tcp_multi_stream_download() {
             });
             let jh = tokio::spawn(async move {
                 let mut buf = [0u8; size_of::<usize>()];
-                read_half.read_exact(&mut buf).await.unwrap();
+                read_half
+                    .read_exact(&mut buf)
+                    .await
+                    .expect("socket closed unexpectedly");
                 assert_eq!(usize::from_le_bytes(buf), file_size);
             });
             jh_vec.push(jh);
@@ -162,9 +165,13 @@ impl russh::client::Handler for SshClient {
             let mut len_buf = [0u8; size_of::<usize>()];
             let mut stream = channel.into_stream();
             stream.read_exact(&mut len_buf).await.unwrap();
-            let mut size = usize::from_le_bytes(len_buf);
+            let total_size = usize::from_le_bytes(len_buf);
+            let mut size = total_size;
             let mut buf = BytesMut::new();
             while let Ok(n) = stream.read_buf(&mut buf).await {
+                if n == 0 {
+                    return;
+                }
                 buf.truncate(0);
                 size = size.saturating_sub(n);
                 if size == 0 {

@@ -144,7 +144,7 @@ async fn ssh_rate_limit_download() {
             .success(),
         "authentication didn't succeed"
     );
-    let mut data = vec![0u8; 50_000];
+    let mut data = vec![0u8; 55_000];
     rand::rng().fill_bytes(&mut data);
     let session_channel = proxy_session
         .channel_open_session()
@@ -268,7 +268,7 @@ impl server::Handler for HoneypotHandler {
         _session: &mut server::Session,
     ) -> Result<bool, Self::Error> {
         tokio::spawn(async move {
-            let mut expected_len = 50_000;
+            let mut expected_len = 55_000;
             while let Some(msg) = channel.wait().await {
                 if let ChannelMsg::Data { data } = msg {
                     expected_len -= data.len();

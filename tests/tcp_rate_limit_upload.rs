@@ -93,7 +93,7 @@ async fn tcp_rate_limit_upload() {
         .expect("tcpip_forward failed");
 
     // 3. Connect to the TCP port of our proxy
-    let mut data = vec![0u8; 50_000];
+    let mut data = vec![0u8; 55_000];
     let mut tcp_stream = TcpStream::connect("127.0.0.1:12345")
         .await
         .expect("TCP connection failed");
@@ -131,7 +131,7 @@ impl russh::client::Handler for SshClient {
         _originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let mut data = vec![0u8; 50_000];
+        let mut data = vec![0u8; 55_000];
         rand::rng().fill_bytes(&mut data);
         tokio::spawn(async move {
             let mut stream = channel.into_stream();
