@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Improve SSH log messages.
+
 ## 0.8.1
 
 ### Changed

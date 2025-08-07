@@ -34,7 +34,9 @@ use crate::{
 #[cfg(feature = "login")]
 use crate::login::AuthenticationRequest;
 
+use ansic::ansi;
 use async_speed_limit::Limiter;
+use chrono::Utc;
 use enumflags2::BitFlags;
 use ipnet::IpNet;
 use russh::{
@@ -775,7 +777,14 @@ impl Handler for ServerHandler {
                 if admin_data.admin_interface.is_some() {
                     let _ = self
                         .tx
-                        .send(b"Cannot remote forward if admin interface is being used".to_vec());
+                        .send(format!(
+                            "{}{}{} {} Error {} Cannot remote forward if admin interface is being used",
+                            ansi!(dim),
+                            Utc::now().to_rfc3339(),
+                            ansi!(reset),
+                            ansi!(bg.red black bold),
+                            ansi!(reset),
+                        ).into_bytes());
                     self.cancellation_token.cancel();
                     return Ok(false);
                 } else {
@@ -860,21 +869,38 @@ impl Handler for ServerHandler {
         let port_to_connect = port_to_connect as u16;
         // Only allow local forwarding if aliasing is enabled
         if self.server.disable_aliasing {
-            let _ = self.tx.send(b"Error: Aliasing is disabled\r\n".to_vec());
+            let _ = self.tx.send(
+                format!(
+                    "{}{}{} {} Error {} Aliasing is disabled\r\n",
+                    ansi!(dim),
+                    Utc::now().to_rfc3339(),
+                    ansi!(reset),
+                    ansi!(bg.red black bold),
+                    ansi!(reset),
+                )
+                .into_bytes(),
+            );
             return Ok(false);
         }
         if let AuthenticatedData::Admin { admin_data, .. } = &mut self.auth_data {
             if admin_data.admin_interface.is_some() {
                 let _ = self
                     .tx
-                    .send(b"Cannot local forward if admin interface is being used".to_vec());
+                    .send(format!(
+                        "{}{}{} {} Error {} Cannot local forward if admin interface is being used\r\n",
+                        ansi!(dim),
+                        Utc::now().to_rfc3339(),
+                        ansi!(reset),
+                        ansi!(bg.red black bold),
+                        ansi!(reset),
+                    ).into_bytes());
                 self.cancellation_token.cancel();
                 return Ok(false);
             } else {
                 admin_data.is_forwarding = true;
             }
         }
-        // Handle local forwarding for SSH
+        // Handle local forwarding
         if Forwarder::local_forwarding(
             &mut LocalForwardingContext {
                 server: &mut self.server,

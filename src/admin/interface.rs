@@ -208,10 +208,11 @@ impl AdminState {
         } else {
             // If this is not a pseudo-terminal, show some information on how to allocate one
             let text = Text::from(vec![
-                Line::from(
-                    r#"PTY not detected! Make sure to connect with "ssh -t" instead."#.red(),
-                ),
-                Line::from("Press Ctrl-C to close this connection."),
+                Line::from(vec![
+                    " Error ".black().on_red().bold(),
+                    r#"PTY not detected! Make sure to connect with "ssh -t" instead."#.into(),
+                ]),
+                Line::from("  = hint: press Ctrl-C to close this connection".dim()),
             ]);
             let widget = Paragraph::new(text).left_aligned();
             widget.render(area, buf);
