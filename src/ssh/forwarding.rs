@@ -292,7 +292,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                 tracing::info!(peer = %context.peer, alias = %address, "Serving SSH connection...");
                 let _ = context.tx.send(
                     format!(
-                        "{}{}{} {}{:>14}{} forwarding on {}:{}\r\n{}  = hint: connect with {} {} {}\r\n",
+                        "{}{}{} {}{:>14}{} forwarding on {}:{}\r\n{}  = hint: connect with {}{} {} {}\r\n",
                         ansi!(dim),
                         Utc::now().to_rfc3339(),
                         ansi!(reset),
@@ -302,7 +302,8 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                         address,
                         context.server.ssh_port,
                         ansi!(dim),
-                        ansi!(bold invert),
+                        ansi!(reset),
+                        ansi!(black bg.white bold),
                         if context.server.ssh_port == 22 {
                             format!("ssh -J {} {}", context.server.domain, address)
                         } else {

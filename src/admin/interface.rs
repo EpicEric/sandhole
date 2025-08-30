@@ -210,11 +210,11 @@ impl AdminState {
             let text = Text::from(vec![
                 Line::from(vec![
                     " Error ".black().on_red().bold(),
-                    r#"PTY not detected! Make sure to connect with "ssh -t" instead."#.into(),
+                    r#" PTY not detected! Make sure to connect with "ssh -t" instead."#.into(),
                 ]),
                 Line::from(vec![
                     "  = hint: press ".dim(),
-                    " Ctrl-C ".dim().reversed(),
+                    " Ctrl-C ".black().on_white().bold(),
                     " to close this connection".dim(),
                 ]),
             ]);
