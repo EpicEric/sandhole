@@ -160,7 +160,7 @@ async fn admin_missing_pty() {
         let search_strings: Vec<Regex> = [
             "Error",
             r#"PTY not detected! Make sure to connect with "ssh -t" instead\."#,
-            r"= hint: press Ctrl-C to close this connection",
+            r"= hint: press  Ctrl-C  to close this connection",
         ]
         .into_iter()
         .map(|re| Regex::new(re).expect("Invalid regex"))

@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  RUST_MSRV: 1.85.0
+  RUST_MSRV: 1.88.0
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_TEST_DEBUG: 0
 

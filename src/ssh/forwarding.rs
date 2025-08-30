@@ -292,7 +292,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                 tracing::info!(peer = %context.peer, alias = %address, "Serving SSH connection...");
                 let _ = context.tx.send(
                     format!(
-                        "{}{}{} {}{:>14}{} forwarding on {}:{}\r\n{}  = hint: connect with {}{}{}\r\n",
+                        "{}{}{} {}{:>14}{} forwarding on {}:{}\r\n{}  = hint: connect with {} {} {}\r\n",
                         ansi!(dim),
                         Utc::now().to_rfc3339(),
                         ansi!(reset),
@@ -302,7 +302,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                         address,
                         context.server.ssh_port,
                         ansi!(dim),
-                        ansi!(bold),
+                        ansi!(bold invert),
                         if context.server.ssh_port == 22 {
                             format!("ssh -J {} {}", context.server.domain, address)
                         } else {
@@ -374,110 +374,109 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
         channel: Channel<Msg>,
     ) -> Result<bool, russh::Error> {
         let ip = context.peer.ip().to_canonical();
-        if let Some(handler) = context.server.ssh.get(address, ip) {
-            if let Ok(mut io) = handler
+        if let Some(handler) = context.server.ssh.get(address, ip)
+            && let Ok(mut io) = handler
                 .aliasing_channel(
                     context.peer.ip(),
                     context.peer.port(),
                     context.key_fingerprint.as_ref(),
                 )
                 .await
-            {
-                let gauge = gauge!(TELEMETRY_GAUGE_SSH_CONNECTIONS_CURRENT, TELEMETRY_KEY_ALIAS => address.to_string());
-                gauge.increment(1);
-                counter!(TELEMETRY_COUNTER_SSH_CONNECTIONS_TOTAL, TELEMETRY_KEY_ALIAS => address.to_string())
+        {
+            let gauge = gauge!(TELEMETRY_GAUGE_SSH_CONNECTIONS_CURRENT, TELEMETRY_KEY_ALIAS => address.to_string());
+            gauge.increment(1);
+            counter!(TELEMETRY_COUNTER_SSH_CONNECTIONS_TOTAL, TELEMETRY_KEY_ALIAS => address.to_string())
                     .increment(1);
-                let _ = handler.log_channel().send(
-                    format!(
-                        "{}{}{} {}{:>14}{} - {}:{} => {}:{}\r\n",
-                        ansi!(dim),
-                        Utc::now().to_rfc3339(),
-                        ansi!(reset),
-                        ansi!(blue bold),
-                        "Proxying SSH",
-                        ansi!(reset),
-                        originator_address,
-                        originator_port,
-                        address,
-                        port,
-                    )
-                    .into_bytes(),
-                );
-                match context.auth_data {
-                    // Serve SSH for unauthed user, then add disconnection timeout if this is the last proxy connection
-                    AuthenticatedData::None { proxy_data } => {
-                        let guard = proxy_data.clone();
-                        let tcp_connection_timeout = context.server.tcp_connection_timeout;
-                        let buffer_size = context.server.buffer_size;
-                        tokio::spawn(async move {
-                            let mut stream = channel.into_stream();
-                            match tcp_connection_timeout {
-                                Some(duration) => {
-                                    let _ = timeout(duration, async {
-                                        copy_bidirectional_with_sizes(
-                                            &mut stream,
-                                            &mut io,
-                                            buffer_size,
-                                            buffer_size,
-                                        )
-                                        .await
-                                    })
-                                    .await;
-                                }
-                                None => {
-                                    let _ = copy_bidirectional_with_sizes(
+            let _ = handler.log_channel().send(
+                format!(
+                    "{}{}{} {}{:>14}{} - {}:{} => {}:{}\r\n",
+                    ansi!(dim),
+                    Utc::now().to_rfc3339(),
+                    ansi!(reset),
+                    ansi!(blue bold),
+                    "Proxying SSH",
+                    ansi!(reset),
+                    originator_address,
+                    originator_port,
+                    address,
+                    port,
+                )
+                .into_bytes(),
+            );
+            match context.auth_data {
+                // Serve SSH for unauthed user, then add disconnection timeout if this is the last proxy connection
+                AuthenticatedData::None { proxy_data } => {
+                    let guard = proxy_data.clone();
+                    let tcp_connection_timeout = context.server.tcp_connection_timeout;
+                    let buffer_size = context.server.buffer_size;
+                    tokio::spawn(async move {
+                        let mut stream = channel.into_stream();
+                        match tcp_connection_timeout {
+                            Some(duration) => {
+                                let _ = timeout(duration, async {
+                                    copy_bidirectional_with_sizes(
                                         &mut stream,
                                         &mut io,
                                         buffer_size,
                                         buffer_size,
                                     )
-                                    .await;
-                                }
+                                    .await
+                                })
+                                .await;
                             }
-                            drop(guard);
-                            gauge.decrement(1);
-                        });
-                    }
-                    // Serve SSH normally for authed user
-                    _ => {
-                        let tcp_connection_timeout = context.server.tcp_connection_timeout;
-                        let buffer_size = context.server.buffer_size;
-                        tokio::spawn(async move {
-                            let mut stream = channel.into_stream();
-                            match tcp_connection_timeout {
-                                Some(duration) => {
-                                    let _ = timeout(duration, async {
-                                        copy_bidirectional_with_sizes(
-                                            &mut stream,
-                                            &mut io,
-                                            buffer_size,
-                                            buffer_size,
-                                        )
-                                        .await
-                                    })
-                                    .await;
-                                }
-                                None => {
-                                    let _ = copy_bidirectional_with_sizes(
-                                        &mut stream,
-                                        &mut io,
-                                        buffer_size,
-                                        buffer_size,
-                                    )
-                                    .await;
-                                }
+                            None => {
+                                let _ = copy_bidirectional_with_sizes(
+                                    &mut stream,
+                                    &mut io,
+                                    buffer_size,
+                                    buffer_size,
+                                )
+                                .await;
                             }
-                            gauge.decrement(1);
-                        });
-                    }
+                        }
+                        drop(guard);
+                        gauge.decrement(1);
+                    });
                 }
-                #[cfg(not(coverage_nightly))]
-                tracing::debug!(
-                    peer = %context.peer, remote = %handler.peer, alias = %address,
-                    "Accepted SSH connection.",
-                );
-                return Ok(true);
+                // Serve SSH normally for authed user
+                _ => {
+                    let tcp_connection_timeout = context.server.tcp_connection_timeout;
+                    let buffer_size = context.server.buffer_size;
+                    tokio::spawn(async move {
+                        let mut stream = channel.into_stream();
+                        match tcp_connection_timeout {
+                            Some(duration) => {
+                                let _ = timeout(duration, async {
+                                    copy_bidirectional_with_sizes(
+                                        &mut stream,
+                                        &mut io,
+                                        buffer_size,
+                                        buffer_size,
+                                    )
+                                    .await
+                                })
+                                .await;
+                            }
+                            None => {
+                                let _ = copy_bidirectional_with_sizes(
+                                    &mut stream,
+                                    &mut io,
+                                    buffer_size,
+                                    buffer_size,
+                                )
+                                .await;
+                            }
+                        }
+                        gauge.decrement(1);
+                    });
+                }
             }
+            #[cfg(not(coverage_nightly))]
+            tracing::debug!(
+                peer = %context.peer, remote = %handler.peer, alias = %address,
+                "Accepted SSH connection.",
+            );
+            return Ok(true);
         }
         let _ = context.tx.send(
             format!(
@@ -651,17 +650,19 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                     tracing::info!(peer = %context.peer, host = %address, "Serving SNI proxy...",);
                     let _ = context.tx.send(
                         format!(
-                            "{}{}{} {}{:>14}{} proxy for https://{}\r\n",
+                            "{}{}{} {}{:>14}{} proxy for {}https://{}{}\r\n",
                             ansi!(dim),
                             Utc::now().to_rfc3339(),
                             ansi!(reset),
                             ansi!(green bold),
                             "Starting SNI",
                             ansi!(reset),
+                            ansi!(underline),
                             match context.server.https_port {
                                 443 => address.to_string(),
                                 port => format!("{address}:{port}"),
-                            }
+                            },
+                            ansi!(reset),
                         )
                         .into_bytes(),
                     );
@@ -751,21 +752,23 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                     tracing::info!(peer = %context.peer, host = %assigned_host, "Serving HTTP...");
                     let _ = context.tx.send(
                         format!(
-                            "{}{}{} {}{:>14}{} on http://{} for {}\r\n",
+                            "{}{}{} {}{:>14}{} on {}http://{}{} for {}\r\n",
                             ansi!(dim),
                             Utc::now().to_rfc3339(),
                             ansi!(reset),
                             ansi!(green bold),
                             "Starting HTTP",
                             ansi!(reset),
+                            ansi!(underline),
                             match context.server.http_port {
                                 80 => assigned_host.clone(),
                                 port => format!("{assigned_host}:{port}"),
                             },
+                            ansi!(reset),
                             if address.is_empty() {
-                                "unspecified address"
+                                "unspecified address".into()
                             } else {
-                                address
+                                format!("address {address}")
                             },
                         )
                         .into_bytes(),
@@ -773,21 +776,23 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                     if !context.server.disable_https {
                         let _ = context.tx.send(
                             format!(
-                                "{}{}{} {}{:>14}{} on https://{} for {}\r\n",
+                                "{}{}{} {}{:>14}{} on {}https://{}{} for {}\r\n",
                                 ansi!(dim),
                                 Utc::now().to_rfc3339(),
                                 ansi!(reset),
                                 ansi!(green bold),
                                 "Starting HTTPS",
                                 ansi!(reset),
+                                ansi!(underline),
                                 match context.server.http_port {
                                     80 => assigned_host.clone(),
                                     port => format!("{assigned_host}:{port}"),
                                 },
+                                ansi!(reset),
                                 if address.is_empty() {
-                                    "unspecified address"
+                                    "unspecified address".into()
                                 } else {
-                                    address
+                                    format!("address {address}")
                                 },
                             )
                             .into_bytes(),
@@ -979,57 +984,56 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
             .aliasing_proxy_data
             .conn_manager()
             .get_by_http_host(address, ip)
+            && handler.can_alias(ip, context.peer.port(), context.key_fingerprint.as_ref())
         {
-            if handler.can_alias(ip, context.peer.port(), context.key_fingerprint.as_ref()) {
-                let peer = *context.peer;
-                let fingerprint = *context.key_fingerprint;
-                let proxy_data = Arc::clone(&context.server.aliasing_proxy_data);
-                let address = address.to_string();
-                let service = service_fn(move |mut req: Request<Incoming>| {
-                    // Set HTTP host via header
-                    req.headers_mut()
-                        .insert("host", address.clone().try_into().unwrap());
-                    proxy_handler(req, peer, fingerprint, Arc::clone(&proxy_data))
-                });
-                let io = TokioIo::new(channel.into_stream());
-                let tcp_connection_timeout = context.server.tcp_connection_timeout;
-                match context.auth_data {
-                    // Serve HTTP for unauthed user, then add disconnection timeout if this is the last proxy connection
-                    AuthenticatedData::None { proxy_data } => {
-                        let guard = proxy_data.clone();
-                        tokio::spawn(async move {
-                            let server = auto::Builder::new(TokioExecutor::new());
-                            let conn = server.serve_connection_with_upgrades(io, service);
-                            match tcp_connection_timeout {
-                                Some(duration) => {
-                                    let _ = timeout(duration, conn).await;
-                                }
-                                None => {
-                                    let _ = conn.await;
-                                }
+            let peer = *context.peer;
+            let fingerprint = *context.key_fingerprint;
+            let proxy_data = Arc::clone(&context.server.aliasing_proxy_data);
+            let address = address.to_string();
+            let service = service_fn(move |mut req: Request<Incoming>| {
+                // Set HTTP host via header
+                req.headers_mut()
+                    .insert("host", address.clone().try_into().unwrap());
+                proxy_handler(req, peer, fingerprint, Arc::clone(&proxy_data))
+            });
+            let io = TokioIo::new(channel.into_stream());
+            let tcp_connection_timeout = context.server.tcp_connection_timeout;
+            match context.auth_data {
+                // Serve HTTP for unauthed user, then add disconnection timeout if this is the last proxy connection
+                AuthenticatedData::None { proxy_data } => {
+                    let guard = proxy_data.clone();
+                    tokio::spawn(async move {
+                        let server = auto::Builder::new(TokioExecutor::new());
+                        let conn = server.serve_connection_with_upgrades(io, service);
+                        match tcp_connection_timeout {
+                            Some(duration) => {
+                                let _ = timeout(duration, conn).await;
                             }
-                            drop(guard);
-                        });
-                    }
-                    // Serve HTTP normally for authed user
-                    _ => {
-                        tokio::spawn(async move {
-                            let server = auto::Builder::new(TokioExecutor::new());
-                            let conn = server.serve_connection_with_upgrades(io, service);
-                            match tcp_connection_timeout {
-                                Some(duration) => {
-                                    let _ = timeout(duration, conn).await;
-                                }
-                                None => {
-                                    let _ = conn.await;
-                                }
+                            None => {
+                                let _ = conn.await;
                             }
-                        });
-                    }
+                        }
+                        drop(guard);
+                    });
                 }
-
-                return Ok(true);
+                // Serve HTTP normally for authed user
+                _ => {
+                    tokio::spawn(async move {
+                        let server = auto::Builder::new(TokioExecutor::new());
+                        let conn = server.serve_connection_with_upgrades(io, service);
+                        match tcp_connection_timeout {
+                            Some(duration) => {
+                                let _ = timeout(duration, conn).await;
+                            }
+                            None => {
+                                let _ = conn.await;
+                            }
+                        }
+                    });
+                }
             }
+
+            return Ok(true);
         }
         let _ = context.tx.send(
             format!(
@@ -1303,107 +1307,105 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             .server
             .alias
             .get(&BorrowedTcpAlias(address, &port) as &dyn TcpAliasKey, ip)
-        {
-            if let Ok(mut io) = handler
+            && let Ok(mut io) = handler
                 .aliasing_channel(ip, context.peer.port(), context.key_fingerprint.as_ref())
                 .await
-            {
-                let alias = TcpAlias(address.into(), port);
-                let gauge = gauge!(TELEMETRY_GAUGE_ALIAS_CONNECTIONS_CURRENT, TELEMETRY_KEY_ALIAS => alias.to_string());
-                gauge.increment(1);
-                counter!(TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL, TELEMETRY_KEY_ALIAS => alias.to_string())
+        {
+            let alias = TcpAlias(address.into(), port);
+            let gauge = gauge!(TELEMETRY_GAUGE_ALIAS_CONNECTIONS_CURRENT, TELEMETRY_KEY_ALIAS => alias.to_string());
+            gauge.increment(1);
+            counter!(TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL, TELEMETRY_KEY_ALIAS => alias.to_string())
                     .increment(1);
-                let _ = handler.log_channel().send(
-                    format!(
-                        "{}{}{} {}{:>14}{} - {}:{} => {}:{}\r\n",
-                        ansi!(dim),
-                        Utc::now().to_rfc3339(),
-                        ansi!(reset),
-                        ansi!(blue bold),
-                        "Proxying alias",
-                        ansi!(reset),
-                        originator_address,
-                        originator_port,
-                        address,
-                        port,
-                    )
-                    .into_bytes(),
-                );
-                match context.auth_data {
-                    // Serve TCP for unauthed user, then add disconnection timeout if this is the last proxy connection
-                    AuthenticatedData::None { proxy_data } => {
-                        let guard = proxy_data.clone();
-                        let tcp_connection_timeout = context.server.tcp_connection_timeout;
-                        let buffer_size = context.server.buffer_size;
-                        tokio::spawn(async move {
-                            let mut stream = channel.into_stream();
-                            match tcp_connection_timeout {
-                                Some(duration) => {
-                                    let _ = timeout(duration, async {
-                                        copy_bidirectional_with_sizes(
-                                            &mut stream,
-                                            &mut io,
-                                            buffer_size,
-                                            buffer_size,
-                                        )
-                                        .await
-                                    })
-                                    .await;
-                                }
-                                None => {
-                                    let _ = copy_bidirectional_with_sizes(
+            let _ = handler.log_channel().send(
+                format!(
+                    "{}{}{} {}{:>14}{} - {}:{} => {}:{}\r\n",
+                    ansi!(dim),
+                    Utc::now().to_rfc3339(),
+                    ansi!(reset),
+                    ansi!(blue bold),
+                    "Proxying alias",
+                    ansi!(reset),
+                    originator_address,
+                    originator_port,
+                    address,
+                    port,
+                )
+                .into_bytes(),
+            );
+            match context.auth_data {
+                // Serve TCP for unauthed user, then add disconnection timeout if this is the last proxy connection
+                AuthenticatedData::None { proxy_data } => {
+                    let guard = proxy_data.clone();
+                    let tcp_connection_timeout = context.server.tcp_connection_timeout;
+                    let buffer_size = context.server.buffer_size;
+                    tokio::spawn(async move {
+                        let mut stream = channel.into_stream();
+                        match tcp_connection_timeout {
+                            Some(duration) => {
+                                let _ = timeout(duration, async {
+                                    copy_bidirectional_with_sizes(
                                         &mut stream,
                                         &mut io,
                                         buffer_size,
                                         buffer_size,
                                     )
-                                    .await;
-                                }
+                                    .await
+                                })
+                                .await;
                             }
-                            drop(guard);
-                            gauge.decrement(1);
-                        });
-                    }
-                    // Serve alias normally for authed user
-                    _ => {
-                        let tcp_connection_timeout = context.server.tcp_connection_timeout;
-                        let buffer_size = context.server.buffer_size;
-                        tokio::spawn(async move {
-                            let mut stream = channel.into_stream();
-                            match tcp_connection_timeout {
-                                Some(duration) => {
-                                    let _ = timeout(duration, async {
-                                        copy_bidirectional_with_sizes(
-                                            &mut stream,
-                                            &mut io,
-                                            buffer_size,
-                                            buffer_size,
-                                        )
-                                        .await
-                                    })
-                                    .await;
-                                }
-                                None => {
-                                    let _ = copy_bidirectional_with_sizes(
-                                        &mut stream,
-                                        &mut io,
-                                        buffer_size,
-                                        buffer_size,
-                                    )
-                                    .await;
-                                }
+                            None => {
+                                let _ = copy_bidirectional_with_sizes(
+                                    &mut stream,
+                                    &mut io,
+                                    buffer_size,
+                                    buffer_size,
+                                )
+                                .await;
                             }
-                            gauge.decrement(1);
-                        });
-                    }
+                        }
+                        drop(guard);
+                        gauge.decrement(1);
+                    });
                 }
-                #[cfg(not(coverage_nightly))]
-                tracing::debug!(
-                    peer = %context.peer, remote = %handler.peer, alias = %address, port = %port,
-                    "Accepted alias connection.",
-                );
-                return Ok(true);
+                // Serve alias normally for authed user
+                _ => {
+                    let tcp_connection_timeout = context.server.tcp_connection_timeout;
+                    let buffer_size = context.server.buffer_size;
+                    tokio::spawn(async move {
+                        let mut stream = channel.into_stream();
+                        match tcp_connection_timeout {
+                            Some(duration) => {
+                                let _ = timeout(duration, async {
+                                    copy_bidirectional_with_sizes(
+                                        &mut stream,
+                                        &mut io,
+                                        buffer_size,
+                                        buffer_size,
+                                    )
+                                    .await
+                                })
+                                .await;
+                            }
+                            None => {
+                                let _ = copy_bidirectional_with_sizes(
+                                    &mut stream,
+                                    &mut io,
+                                    buffer_size,
+                                    buffer_size,
+                                )
+                                .await;
+                            }
+                        }
+                        gauge.decrement(1);
+                    });
+                }
             }
+            #[cfg(not(coverage_nightly))]
+            tracing::debug!(
+                peer = %context.peer, remote = %handler.peer, alias = %address, port = %port,
+                "Accepted alias connection.",
+            );
+            return Ok(true);
         }
         let _ = context.tx.send(
             format!(
@@ -1712,106 +1714,105 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
         channel: Channel<Msg>,
     ) -> Result<bool, russh::Error> {
         let ip = context.peer.ip().to_canonical();
-        if let Some(handler) = context.server.tcp.get(&port, ip) {
-            if let Ok(mut io) = handler
+        if let Some(handler) = context.server.tcp.get(&port, ip)
+            && let Ok(mut io) = handler
                 .aliasing_channel(ip, context.peer.port(), context.key_fingerprint.as_ref())
                 .await
-            {
-                let gauge = gauge!(TELEMETRY_GAUGE_TCP_CONNECTIONS_CURRENT, TELEMETRY_KEY_PORT => port.to_string());
-                gauge.increment(1);
-                counter!(TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL, TELEMETRY_KEY_PORT => port.to_string())
+        {
+            let gauge = gauge!(TELEMETRY_GAUGE_TCP_CONNECTIONS_CURRENT, TELEMETRY_KEY_PORT => port.to_string());
+            gauge.increment(1);
+            counter!(TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL, TELEMETRY_KEY_PORT => port.to_string())
                     .increment(1);
-                let _ = handler.log_channel().send(
-                    format!(
-                        "{}{}{} {}{:>14}{} - {}:{} => {}:{}\r\n",
-                        ansi!(dim),
-                        Utc::now().to_rfc3339(),
-                        ansi!(reset),
-                        ansi!(blue bold),
-                        "Proxying TCP",
-                        ansi!(reset),
-                        originator_address,
-                        originator_port,
-                        address,
-                        port,
-                    )
-                    .into_bytes(),
-                );
-                match context.auth_data {
-                    // Serve TCP for unauthed user, then add disconnection timeout if this is the last proxy connection
-                    AuthenticatedData::None { proxy_data } => {
-                        let guard = proxy_data.clone();
-                        let tcp_connection_timeout = context.server.tcp_connection_timeout;
-                        let buffer_size = context.server.buffer_size;
-                        tokio::spawn(async move {
-                            let mut stream = channel.into_stream();
-                            match tcp_connection_timeout {
-                                Some(duration) => {
-                                    let _ = timeout(duration, async {
-                                        copy_bidirectional_with_sizes(
-                                            &mut stream,
-                                            &mut io,
-                                            buffer_size,
-                                            buffer_size,
-                                        )
-                                        .await
-                                    })
-                                    .await;
-                                }
-                                None => {
-                                    let _ = copy_bidirectional_with_sizes(
+            let _ = handler.log_channel().send(
+                format!(
+                    "{}{}{} {}{:>14}{} - {}:{} => {}:{}\r\n",
+                    ansi!(dim),
+                    Utc::now().to_rfc3339(),
+                    ansi!(reset),
+                    ansi!(blue bold),
+                    "Proxying TCP",
+                    ansi!(reset),
+                    originator_address,
+                    originator_port,
+                    address,
+                    port,
+                )
+                .into_bytes(),
+            );
+            match context.auth_data {
+                // Serve TCP for unauthed user, then add disconnection timeout if this is the last proxy connection
+                AuthenticatedData::None { proxy_data } => {
+                    let guard = proxy_data.clone();
+                    let tcp_connection_timeout = context.server.tcp_connection_timeout;
+                    let buffer_size = context.server.buffer_size;
+                    tokio::spawn(async move {
+                        let mut stream = channel.into_stream();
+                        match tcp_connection_timeout {
+                            Some(duration) => {
+                                let _ = timeout(duration, async {
+                                    copy_bidirectional_with_sizes(
                                         &mut stream,
                                         &mut io,
                                         buffer_size,
                                         buffer_size,
                                     )
-                                    .await;
-                                }
+                                    .await
+                                })
+                                .await;
                             }
-                            drop(guard);
-                            gauge.decrement(1);
-                        });
-                    }
-                    // Serve TCP normally for authed user
-                    _ => {
-                        let tcp_connection_timeout = context.server.tcp_connection_timeout;
-                        let buffer_size = context.server.buffer_size;
-                        tokio::spawn(async move {
-                            let mut stream = channel.into_stream();
-                            match tcp_connection_timeout {
-                                Some(duration) => {
-                                    let _ = timeout(duration, async {
-                                        copy_bidirectional_with_sizes(
-                                            &mut stream,
-                                            &mut io,
-                                            buffer_size,
-                                            buffer_size,
-                                        )
-                                        .await
-                                    })
-                                    .await;
-                                }
-                                None => {
-                                    let _ = copy_bidirectional_with_sizes(
-                                        &mut stream,
-                                        &mut io,
-                                        buffer_size,
-                                        buffer_size,
-                                    )
-                                    .await;
-                                }
+                            None => {
+                                let _ = copy_bidirectional_with_sizes(
+                                    &mut stream,
+                                    &mut io,
+                                    buffer_size,
+                                    buffer_size,
+                                )
+                                .await;
                             }
-                            gauge.decrement(1);
-                        });
-                    }
+                        }
+                        drop(guard);
+                        gauge.decrement(1);
+                    });
                 }
-                #[cfg(not(coverage_nightly))]
-                tracing::debug!(
-                    peer = %context.peer, remote = %handler.peer, port = %port,
-                    "Accepted TCP connection.",
-                );
-                return Ok(true);
+                // Serve TCP normally for authed user
+                _ => {
+                    let tcp_connection_timeout = context.server.tcp_connection_timeout;
+                    let buffer_size = context.server.buffer_size;
+                    tokio::spawn(async move {
+                        let mut stream = channel.into_stream();
+                        match tcp_connection_timeout {
+                            Some(duration) => {
+                                let _ = timeout(duration, async {
+                                    copy_bidirectional_with_sizes(
+                                        &mut stream,
+                                        &mut io,
+                                        buffer_size,
+                                        buffer_size,
+                                    )
+                                    .await
+                                })
+                                .await;
+                            }
+                            None => {
+                                let _ = copy_bidirectional_with_sizes(
+                                    &mut stream,
+                                    &mut io,
+                                    buffer_size,
+                                    buffer_size,
+                                )
+                                .await;
+                            }
+                        }
+                        gauge.decrement(1);
+                    });
+                }
             }
+            #[cfg(not(coverage_nightly))]
+            tracing::debug!(
+                peer = %context.peer, remote = %handler.peer, port = %port,
+                "Accepted TCP connection.",
+            );
+            return Ok(true);
         }
         let _ = context.tx.send(
             format!(

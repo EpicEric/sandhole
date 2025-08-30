@@ -212,7 +212,11 @@ impl AdminState {
                     " Error ".black().on_red().bold(),
                     r#"PTY not detected! Make sure to connect with "ssh -t" instead."#.into(),
                 ]),
-                Line::from("  = hint: press Ctrl-C to close this connection".dim()),
+                Line::from(vec![
+                    "  = hint: press ".dim(),
+                    " Ctrl-C ".dim().reversed(),
+                    " to close this connection".dim(),
+                ]),
             ]);
             let widget = Paragraph::new(text).left_aligned();
             widget.render(area, buf);
@@ -818,19 +822,18 @@ impl AdminInterface {
                                 cancellation_token.cancel();
                             });
                         }
-                    } else if let TokenHolderUser::Username(username) = user {
-                        if let Some((_, sessions)) = interface
+                    } else if let TokenHolderUser::Username(username) = user
+                        && let Some((_, sessions)) = interface
                             .state
                             .server
                             .sessions_password
                             .lock()
                             .unwrap()
                             .remove(&username)
-                        {
-                            sessions.values().for_each(|cancellation_token| {
-                                cancellation_token.cancel();
-                            });
-                        }
+                    {
+                        sessions.values().for_each(|cancellation_token| {
+                            cancellation_token.cancel();
+                        });
                     }
                     interface.state.prompt = Some(AdminPrompt::Infobox(text));
                     true

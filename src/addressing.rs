@@ -208,20 +208,17 @@ impl<R: Resolver> AddressDelegator<R> {
                 if matches!(
                     self.bind_hostnames,
                     BindHostnames::Cname | BindHostnames::Txt
-                ) {
-                    if let Some(fingerprint) = fingerprint {
-                        if self
-                            .resolver
-                            .has_txt_record_for_fingerprint(
-                                &self.txt_record_prefix,
-                                requested_address,
-                                fingerprint,
-                            )
-                            .await
-                        {
-                            return requested_address.to_string();
-                        }
-                    }
+                ) && let Some(fingerprint) = fingerprint
+                    && self
+                        .resolver
+                        .has_txt_record_for_fingerprint(
+                            &self.txt_record_prefix,
+                            requested_address,
+                            fingerprint,
+                        )
+                        .await
+                {
+                    return requested_address.to_string();
                 }
                 // If subdomains aren't random, check if user provided a valid one
                 if !self.force_random_subdomains {

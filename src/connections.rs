@@ -134,10 +134,10 @@ where
             }
         }
         // If the entry count increased, notify the reactor.
-        if self.map.len() > len {
-            if let Some(reactor) = self.reactor.read().unwrap().as_ref() {
-                reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
-            }
+        if self.map.len() > len
+            && let Some(reactor) = self.reactor.read().unwrap().as_ref()
+        {
+            reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
         }
         Ok(())
     }
@@ -194,10 +194,10 @@ where
             value.is_empty()
         });
         // If the entry was removed, notify the reactor.
-        if self.map.len() < len {
-            if let Some(reactor) = self.reactor.read().unwrap().as_ref() {
-                reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
-            }
+        if self.map.len() < len
+            && let Some(reactor) = self.reactor.read().unwrap().as_ref()
+        {
+            reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
         }
         element
     }
@@ -221,10 +221,10 @@ where
             !value.is_empty()
         });
         // If one or more entries were removed, notify the reactor.
-        if self.map.len() < len {
-            if let Some(reactor) = self.reactor.read().unwrap().as_ref() {
-                reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
-            }
+        if self.map.len() < len
+            && let Some(reactor) = self.reactor.read().unwrap().as_ref()
+        {
+            reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
         }
         elements
     }

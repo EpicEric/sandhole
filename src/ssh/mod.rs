@@ -741,12 +741,12 @@ impl Handler for ServerHandler {
             admin_data.col_width = Some(col_width);
             admin_data.row_height = Some(row_height);
             // Dynamically update the TUI if present.
-            if let Some(ref mut admin_interface) = admin_data.admin_interface {
-                if let Err(error) = admin_interface.resize(col_width as u16, row_height as u16) {
-                    #[cfg(not(coverage_nightly))]
-                    tracing::warn!(peer = %self.peer, %error, "Failed to resize terminal.");
-                    return session.channel_failure(channel);
-                }
+            if let Some(ref mut admin_interface) = admin_data.admin_interface
+                && let Err(error) = admin_interface.resize(col_width as u16, row_height as u16)
+            {
+                #[cfg(not(coverage_nightly))]
+                tracing::warn!(peer = %self.peer, %error, "Failed to resize terminal.");
+                return session.channel_failure(channel);
             }
         }
 

@@ -5,6 +5,7 @@
 ### Changed
 
 - Improve SSH log messages.
+- Update dependencies.
 
 ## 0.8.1
 
