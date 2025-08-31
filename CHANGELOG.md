@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.8.2
 
 ### Changed
 
+- Bump MSRV to 1.88.0.
 - Improve SSH log messages.
 - Update dependencies.
 
