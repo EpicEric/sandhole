@@ -3882,7 +3882,7 @@ dependencies = [
 
 [[package]]
 name = "sandhole"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "ahash",
  "ansic",
