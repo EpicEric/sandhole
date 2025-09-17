@@ -2,6 +2,8 @@
 
 ## 0.8.3
 
+### Changed
+
 - Fix regression from `tracing-subscriber`.
 
 ## 0.8.2
