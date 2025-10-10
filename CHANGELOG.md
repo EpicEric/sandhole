@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Update Docker base image.
 - Update dependencies.
 
 ## 0.8.3
