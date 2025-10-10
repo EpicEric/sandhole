@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use clap::{Parser, ValueEnum, command};
+use clap::{Parser, ValueEnum};
 use color_eyre::eyre::{Context, eyre};
 use ipnet::IpNet;
 use rustls_pki_types::DnsName;
