@@ -1,19 +1,25 @@
 # Changelog
 
-## 0.8.4
+## Unreleased
+
+- Use `owo-colors` for ANSI logs.
+- Update Docker base image.
+- Update dependencies.
+
+## 0.8.4 (2025-10-09)
 
 ### Changed
 
 - Update Docker base image.
 - Update dependencies.
 
-## 0.8.3
+## 0.8.3 (2025-09-17)
 
 ### Changed
 
 - Fix regression from `tracing-subscriber`.
 
-## 0.8.2
+## 0.8.2 (2025-08-31)
 
 ### Changed
 
@@ -21,13 +27,13 @@
 - Improve SSH log messages.
 - Update dependencies.
 
-## 0.8.1
+## 0.8.1 (2025-08-05)
 
 ### Changed
 
 - Update russh to 0.54.1.
 
-## 0.8.0
+## 0.8.0 (2025-08-02)
 
 ### Added
 

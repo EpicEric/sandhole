@@ -34,11 +34,11 @@ use crate::{
 #[cfg(feature = "login")]
 use crate::login::AuthenticationRequest;
 
-use ansic::ansi;
 use async_speed_limit::Limiter;
 use chrono::Utc;
 use enumflags2::BitFlags;
 use ipnet::IpNet;
+use owo_colors::OwoColorize;
 use russh::{
     Channel, ChannelId, MethodKind, MethodSet,
     keys::{HashAlg, PublicKey, ssh_key::Fingerprint},
@@ -775,16 +775,14 @@ impl Handler for ServerHandler {
                 user_data,
             } => {
                 if admin_data.admin_interface.is_some() {
-                    let _ = self
-                        .tx
-                        .send(format!(
-                            "{}{}{} {} Error {} Cannot remote forward if admin interface is being used",
-                            ansi!(dim),
-                            Utc::now().to_rfc3339(),
-                            ansi!(reset),
-                            ansi!(bg.red black bold),
-                            ansi!(reset),
-                        ).into_bytes());
+                    let _ = self.tx.send(
+                        format!(
+                            "{} {} Cannot remote forward if admin interface is being used",
+                            Utc::now().to_rfc3339().dimmed(),
+                            " Error ".black().on_red().bold(),
+                        )
+                        .into_bytes(),
+                    );
                     self.cancellation_token.cancel();
                     return Ok(false);
                 } else {
@@ -871,12 +869,9 @@ impl Handler for ServerHandler {
         if self.server.disable_aliasing {
             let _ = self.tx.send(
                 format!(
-                    "{}{}{} {} Error {} Aliasing is disabled\r\n",
-                    ansi!(dim),
-                    Utc::now().to_rfc3339(),
-                    ansi!(reset),
-                    ansi!(bg.red black bold),
-                    ansi!(reset),
+                    "{} {} Aliasing is disabled\r\n",
+                    Utc::now().to_rfc3339().dimmed(),
+                    " Error ".black().on_red().bold(),
                 )
                 .into_bytes(),
             );
@@ -884,16 +879,14 @@ impl Handler for ServerHandler {
         }
         if let AuthenticatedData::Admin { admin_data, .. } = &mut self.auth_data {
             if admin_data.admin_interface.is_some() {
-                let _ = self
-                    .tx
-                    .send(format!(
-                        "{}{}{} {} Error {} Cannot local forward if admin interface is being used\r\n",
-                        ansi!(dim),
-                        Utc::now().to_rfc3339(),
-                        ansi!(reset),
-                        ansi!(bg.red black bold),
-                        ansi!(reset),
-                    ).into_bytes());
+                let _ = self.tx.send(
+                    format!(
+                        "{} {} Cannot local forward if admin interface is being used\r\n",
+                        Utc::now().to_rfc3339().dimmed(),
+                        " Error ".black().on_red().bold(),
+                    )
+                    .into_bytes(),
+                );
                 self.cancellation_token.cancel();
                 return Ok(false);
             } else {

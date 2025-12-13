@@ -18,7 +18,6 @@ use crate::{connections::ConnectionGetByHttpHost, telemetry::TELEMETRY_KEY_ALIAS
 use crate::{ssh::ServerHandlerSender, telemetry::TELEMETRY_COUNTER_HTTP_REQUESTS_TOTAL};
 use crate::{tcp_alias::TcpAlias, telemetry::TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL};
 
-use ansic::ansi;
 use axum::{
     body::Body as AxumBody,
     response::{IntoResponse, Redirect},
@@ -33,6 +32,7 @@ use hyper::{
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use metrics::{counter, histogram};
+use owo_colors::{OwoColorize, Style};
 use russh::keys::ssh_key::Fingerprint;
 use tokio::{
     io::{AsyncRead, AsyncWrite, copy_bidirectional_with_sizes},
@@ -126,34 +126,37 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
     )
     .record(elapsed_time.as_secs_f64());
     let status_style = match status {
-        100..=199 => ansi!(white),
-        200..=299 => ansi!(blue),
-        300..=399 => ansi!(green),
-        400..=499 => ansi!(yellow),
-        500..=599 => ansi!(red),
+        100..=199 => Style::new().white(),
+        200..=299 => Style::new().blue(),
+        300..=399 => Style::new().green(),
+        400..=499 => Style::new().yellow(),
+        500..=599 => Style::new().red(),
         _ => unreachable!(),
     };
     let method_style = match method.as_str() {
-        "POST" => ansi!(bg.green black bold),
-        "PUT" | "PATCH" => ansi!(bg.yellow black bold),
-        "DELETE" => ansi!(bg.red black bold),
-        "HEAD" => ansi!(bg.cyan black bold),
-        "OPTIONS" | "CONNECT" | "TRACE" => ansi!(bg.magenta black bold),
+        "POST" => Style::new().black().on_green().bold(),
+        "PUT" | "PATCH" => Style::new().black().on_yellow().bold(),
+        "DELETE" => Style::new().black().on_red().bold(),
+        "HEAD" => Style::new().black().on_cyan().bold(),
+        "OPTIONS" | "CONNECT" | "TRACE" => Style::new().black().on_magenta().bold(),
         // GET or other
-        _ => ansi!(bg.blue black bold),
+        _ => Style::new().black().on_blue().bold(),
     };
-    let dimmed_style = ansi!(dim);
-    let reset_style = ansi!(reset);
     let duration = pretty_duration::pretty_duration(&elapsed_time, None);
     let line = format!(
-        "{status_style}[{status}] {method_style} {method} {reset_style} {host} => {uri} {dimmed_style}({ip}) {duration}{reset_style}"
+        "{} {} {} => {} {}",
+        format!("[{status}]").style(status_style),
+        format!(" {method} ").style(method_style),
+        host,
+        uri,
+        format!("({ip}) {duration}").dimmed()
     );
     #[cfg(not(coverage_nightly))]
     tracing::info!("{line}");
     if !disable_http_logs {
         let _ = tx.map(|tx| {
             let time = chrono::Utc::now().to_rfc3339();
-            tx.send(format!("{dimmed_style}{time}{reset_style} {line}\r\n").into_bytes())
+            tx.send(format!("{} {}\r\n", time.dimmed(), line).into_bytes())
         });
     }
 }
