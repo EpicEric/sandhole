@@ -2,7 +2,7 @@ default:
   just --list
 
 test $RUST_LOG="sandhole=debug":
-  cargo test
+  cargo nextest run --no-fail-fast
 
 clippy:
   cargo clippy --all-targets --fix --allow-dirty --allow-staged && cargo fmt --all
@@ -19,10 +19,13 @@ cli:
 flamegraph-test test:
   cargo flamegraph --dev --test {{test}}
 
-install-dev-deps: install-book-deps install-profiling-deps
+install-dev-deps: install-book-deps install-profiling-deps install-test-deps
 
 install-book-deps:
   cargo install mdbook mdbook-mermaid to-html
 
 install-profiling-deps:
   cargo install flamegraph
+
+install-test-deps:
+  cargo install cargo-nextest

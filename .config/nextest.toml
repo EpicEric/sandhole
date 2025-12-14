@@ -1,0 +1,6 @@
+[test-groups]
+integration = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary_id(sandhole::integration)'
+test-group = 'integration'

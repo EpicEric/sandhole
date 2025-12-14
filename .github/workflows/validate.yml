@@ -84,11 +84,10 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-      - name: Install cargo-llvm-cov
-        run: |
-          wget https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${CARGO_LLVM_COV_VERSION}/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz \
-            -O /tmp/cargo-llvm-cov.tar.gz
-          tar -xvzf /tmp/cargo-llvm-cov.tar.gz -C ${HOME}/.cargo/bin
+      - name: Install cargo-llvm-cov and cargo-nextest
+        uses: taiki-e/install-action@59679e24ffb0dbbbc136684eda7fcd21fe9eddea # v2.63.0
+        with:
+          tool: cargo-llvm-cov@0.6.20,cargo-nextest@0.9.114
       - name: Fetch nightly Rust
         run: |
           rustup toolchain install nightly-x86_64-unknown-linux-gnu
@@ -97,7 +96,7 @@ jobs:
         env:
           RUSTFLAGS: -A dead_code -A unused_variables
         run: |
-          cargo llvm-cov --verbose --codecov --locked --output-path codecov.json
+          cargo llvm-cov nextest --no-fail-fast --verbose --codecov --locked --output-path codecov.json
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
         with:
