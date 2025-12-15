@@ -26,7 +26,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding. A self-hosted ngrok / 
 
 ## Status
 
-Sandhole is in active development. Contributions are welcome, but try it in production at your own risk.
+Sandhole is mostly feature-complete, but still receives occasional updates and fixes. Contributions are welcome, but try it in production at your own risk.
 
 ## Some alternatives
 
