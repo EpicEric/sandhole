@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.5 (2025-12-20)
 
 - Use `owo-colors` for ANSI logs.
 - Update Docker base image.
