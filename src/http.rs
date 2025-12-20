@@ -161,22 +161,17 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
     }
 }
 
-fn append_to_header(
-    headers: &mut HeaderMap,
-    new_header_name: &str,
-    new_value: String,
-) {
+fn append_to_header(headers: &mut HeaderMap, new_header_name: &str, new_value: String) {
     let header_name: HeaderName = HeaderName::from_str(new_header_name).unwrap();
 
     match headers.entry(header_name) {
         http::header::Entry::Vacant(entry) => {
             entry.insert(HeaderValue::from_str(new_value.as_str()).unwrap());
-        },
+        }
         http::header::Entry::Occupied(mut entry) => {
             let existing = entry.get().as_bytes();
 
-            let mut combined_bytes = Vec::with_capacity(
-                existing.len() + 2 + new_value.len());
+            let mut combined_bytes = Vec::with_capacity(existing.len() + 2 + new_value.len());
 
             combined_bytes.extend_from_slice(existing);
             combined_bytes.extend_from_slice(b", ");
