@@ -102,6 +102,18 @@ jobs:
         with:
           files: ./codecov.json
           token: ${{ secrets.CODECOV_TOKEN }}
+  nix-flake-check:
+    name: Check Nix flake
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@4e002c8ec80594ecd40e759629461e26c8abed15 # v31.9.0
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - run: nix build
+      - run: nix flake check
   build-main:
     name: Build on main
     if: github.ref == 'refs/heads/main'
