@@ -24,7 +24,7 @@ use axum::{
 };
 use bon::Builder;
 use http::header::COOKIE;
-use http::{Uri, Version};
+use http::{HeaderMap, HeaderName, HeaderValue, Uri, Version};
 use hyper::{
     Request, Response, StatusCode,
     body::Body,
@@ -158,6 +158,34 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
             let time = chrono::Utc::now().to_rfc3339();
             tx.send(format!("{} {}\r\n", time.dimmed(), line).into_bytes())
         });
+    }
+}
+
+fn append_to_header(
+    headers: &mut HeaderMap,
+    new_header_name: &str,
+    new_value: String,
+) {
+    let header_name: HeaderName = HeaderName::from_str(new_header_name).unwrap();
+
+    match headers.entry(header_name) {
+        http::header::Entry::Vacant(entry) => {
+            entry.insert(HeaderValue::from_str(new_value.as_str()).unwrap());
+        },
+        http::header::Entry::Occupied(mut entry) => {
+            let existing = entry.get().as_bytes();
+
+            let mut combined_bytes = Vec::with_capacity(
+                existing.len() + 2 + new_value.len());
+
+            combined_bytes.extend_from_slice(existing);
+            combined_bytes.extend_from_slice(b", ");
+            combined_bytes.extend_from_slice(new_value.as_bytes());
+
+            if let Ok(new_val) = HeaderValue::from_bytes(&combined_bytes) {
+                entry.insert(new_val);
+            }
+        }
     }
 }
 
@@ -395,12 +423,12 @@ where
         | (Protocol::TlsRedirect { from: port, .. }, _, ProxyType::Aliasing) => ("http", *port),
         (Protocol::Https { port }, _, _) => ("https", *port),
     };
-    // Add proxied info to the proper headers
+    // Add proxied info to the proper headers, but don't overwrite any existing proxy headers
     let headers = request.headers_mut();
-    headers.insert(X_FORWARDED_FOR, ip_string.parse().unwrap());
-    headers.insert(X_FORWARDED_HOST, host.parse().unwrap());
-    headers.insert(X_FORWARDED_PROTO, proto.parse().unwrap());
-    headers.insert(X_FORWARDED_PORT, port.into());
+    append_to_header(headers, X_FORWARDED_FOR, ip_string.parse().unwrap());
+    append_to_header(headers, X_FORWARDED_HOST, host.parse().unwrap());
+    append_to_header(headers, X_FORWARDED_PROTO, proto.parse().unwrap());
+    append_to_header(headers, X_FORWARDED_PORT, port.to_string());
     // Add this request to the telemetry for the host
     if http_data.as_ref().is_some_and(|data| data.is_aliasing) {
         counter!(TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL, TELEMETRY_KEY_ALIAS => TcpAlias(host.clone(), port).to_string())
