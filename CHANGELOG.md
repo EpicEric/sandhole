@@ -1,6 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Don't replace headers if already provided by a reverse proxy.
+
 ## 0.8.5 (2025-12-20)
+
+### Changed
 
 - Use `owo-colors` for ANSI logs.
 - Update Docker base image.
