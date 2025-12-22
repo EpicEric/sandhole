@@ -12,7 +12,7 @@ Please search the [existing issues](https://github.com/EpicEric/sandhole/issues)
 
 In the case that you'd like to make contributions to Sandhole, create an issue first if one does not exist.
 
-If you wish to contribute changes to Sandhole, please [fork the repository](https://github.com/EpicEric/sandhole/fork), push your modifications to a branch, and create a [pull request](https://github.com/EpicEric/sandhole/compare). Make sure to [link to the original issue](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword) in your PR's body.
+If you wish to contribute changes to Sandhole, please [fork the repository](https://github.com/EpicEric/sandhole/fork), push your modifications to a branch other than main, and create a [pull request](https://github.com/EpicEric/sandhole/compare). Make sure to [link to the original issue](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword) in your PR's body.
 
 If possible, make sure that your changes pass all tests and linting/formatting checks before creating a pull request by running `just test` and `just clippy`, respectively. This should ensure that your PR will pass the CI pipeline.
 
