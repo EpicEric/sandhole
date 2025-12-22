@@ -22,6 +22,8 @@
 
         inherit (pkgs) lib;
 
+        inherit (pkgs.rustPackages) rustPlatform;
+
         craneLib = crane.mkLib pkgs;
 
         unfilteredRoot = ./.;
@@ -49,6 +51,34 @@
         };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+        mdbook = rustPlatform.buildRustPackage rec {
+          pname = "mdbook";
+          version = "0.5.2";
+
+          src = pkgs.fetchFromGitHub {
+            owner = "rust-lang";
+            repo = "mdBook";
+            tag = "v${version}";
+            hash = "sha256-gyjD47ZR9o2lIxipzesyJ6mxb9J9W+WS77TNWhKHP6U=";
+          };
+
+          cargoHash = "sha256-230KljOUSrDy8QCQki7jvJvdAsjVlUEjKDNVyTF4tWs=";
+        };
+
+        mdbook-mermaid = rustPlatform.buildRustPackage rec {
+          pname = "mdbook-mermaid";
+          version = "0.17.0";
+
+          src = pkgs.fetchFromGitHub {
+            owner = "badboy";
+            repo = "mdbook-mermaid";
+            tag = "v${version}";
+            hash = "sha256-9aiu3mQaRgVVhtX/v2hMPzclnVQIhUz4gVy0Xc84zO8=";
+          };
+
+          cargoHash = "sha256-MDtXgNiN4tVgP/98fbcL9WQXAJire+c3lmnc12KhQ50=";
+        };
 
         sandhole = craneLib.buildPackage (
           commonArgs
@@ -92,12 +122,12 @@
 
           inputsFrom = [ sandhole ];
 
-          packages = with pkgs; [
-            cargo-flamegraph
-            just
+          packages = [
+            pkgs.cargo-flamegraph
+            pkgs.just
             mdbook
             mdbook-mermaid
-            to-html
+            pkgs.to-html
           ];
         };
       }

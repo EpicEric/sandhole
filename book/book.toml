@@ -1,7 +1,6 @@
 [book]
 authors = ["Eric Rodrigues Pires <eric@eric.dev.br>"]
 language = "en"
-multilingual = false
 src = "src"
 title = "The Sandhole Book"
 
