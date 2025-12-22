@@ -220,15 +220,10 @@ impl CertificateResolver {
 
 impl ResolvesServerCert for CertificateResolver {
     fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
-        match client_hello
+        client_hello
             .server_name()
             .and_then(|server_name| self.resolve_server_name(server_name))
-        {
-            // Return the certificate that we have if it matches
-            Some(cert) => Some(cert),
-            // Otherwise, return any certificate from the ACME resolver
-            None => self.alpn_resolver.read().unwrap().resolve(client_hello),
-        }
+            .or_else(|| self.alpn_resolver.read().unwrap().resolve(client_hello))
     }
 }
 

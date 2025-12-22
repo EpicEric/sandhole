@@ -1502,6 +1502,105 @@ mod proxy_handler_tests {
     }
 
     #[test_log::test(tokio::test)]
+    async fn returns_response_for_existing_handler_with_proxy() {
+        let conn_manager: Arc<
+            ConnectionMap<
+                String,
+                Arc<MockConnectionHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
+        > = Arc::new(
+            ConnectionMap::builder()
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
+                .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
+                .build(),
+        );
+        let (server, handler) = tokio::io::duplex(1024);
+        let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let mut mock = MockConnectionHandler::new();
+        mock.expect_log_channel()
+            .once()
+            .return_once(move || ServerHandlerSender(Some(logging_tx)));
+        mock.expect_tunneling_channel()
+            .once()
+            .return_once(move |_, _| Ok(handler));
+        mock.expect_http_data().once().return_once(move || {
+            Some(ConnectionHttpData {
+                redirect_http_to_https_port: None,
+                is_aliasing: false,
+                http2: false,
+            })
+        });
+        conn_manager
+            .insert(
+                "with.handler".into(),
+                "127.0.0.1:12345".parse().unwrap(),
+                TokenHolder::User(UserIdentification::Username("a".into())),
+                Arc::new(mock),
+            )
+            .unwrap();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/endpoint")
+            .header(HOST, "with.handler")
+            .header("X-Forwarded-For", "10.15.0.1")
+            .header("X-Forwarded-Host", "sand.hole")
+            .body(String::from("Hello world"))
+            .unwrap();
+        let router = Router::new().route(
+            "/api/endpoint",
+            post(|headers: HeaderMap, body: String| async move {
+                if headers.get("X-Forwarded-For").unwrap() == "10.15.0.1, 127.0.0.1"
+                    && headers.get("X-Forwarded-Host").unwrap() == "sand.hole, with.handler"
+                    && body == "Hello world"
+                {
+                    "Success."
+                } else {
+                    "Failure."
+                }
+            }),
+        );
+        let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
+        let jh = tokio::spawn(async move {
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection(TokioIo::new(server), router_service)
+                .await
+                .expect("Invalid request");
+        });
+        assert!(
+            logging_rx.is_empty(),
+            "shouldn't log before handling request"
+        );
+        let response = proxy_handler(
+            request,
+            "127.0.0.1:12345".parse().unwrap(),
+            None,
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }))
+                    .protocol(Protocol::Https { port: 443 })
+                    .proxy_type(ProxyType::Tunneling)
+                    .buffer_size(8_000)
+                    .disable_http_logs(false)
+                    .build(),
+            ),
+        )
+        .await;
+        let response = response.expect("should return response after proxy");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().frame().await.unwrap().unwrap();
+        assert_eq!(body.data_ref(), Some(&Bytes::copy_from_slice(b"Success.")));
+        drop(body);
+        assert!(!logging_rx.is_empty(), "should log after proxying request");
+        jh.abort();
+    }
+
+    #[test_log::test(tokio::test)]
     async fn returns_response_for_aliasing_handler() {
         let conn_manager: Arc<
             ConnectionMap<
