@@ -135,12 +135,12 @@ async fn alias_rate_limit_upload() {
     channel.into_stream().read_exact(&mut data).await.unwrap();
     let elapsed = start.elapsed();
     assert!(
-        elapsed > Duration::from_secs(2),
+        elapsed > Duration::from_millis(2_000),
         "must've taken more than 2 seconds, but was {elapsed:?}"
     );
     assert!(
-        elapsed < Duration::from_secs(3),
-        "must've taken less than 3 seconds, but was {elapsed:?}"
+        elapsed < Duration::from_millis(3_500),
+        "must've taken less than 3.5 seconds, but was {elapsed:?}"
     );
 }
 

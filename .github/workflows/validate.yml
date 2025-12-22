@@ -122,11 +122,6 @@ jobs:
         run: |
           rustup toolchain install nightly-x86_64-unknown-linux-gnu
           rustup override set nightly-x86_64-unknown-linux-gnu
-      - name: Test
-        env:
-          RUSTFLAGS: -A dead_code -A unused_variables
-        run: |
-          cargo nextest run --no-fail-fast --verbose --locked
       - name: Test with coverage
         env:
           RUSTFLAGS: -A dead_code -A unused_variables
