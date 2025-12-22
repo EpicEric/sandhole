@@ -1,37 +1,10 @@
 # NixOS
 
-Sandhole is available as a flake, containing an overlay and a NixOS service.
+Sandhole is available in the `unstable` channel as [a Nix package](https://search.nixos.org/packages?channel=unstable&query=sandhole), as well as [a NixOS service](https://search.nixos.org/options?channel=unstable&query=services.sandhole). It's also available as a flake in the Sandhole repository.
 
 ## Setup
 
-If you're using Nix Flakes for your system, you can install the NixOS service like so:
-
-```nix
-{
-  inputs = {
-    # ...
-    sandhole.url = "github:EpicEric/sandhole";
-  };
-
-  outputs =
-    {
-      nixpkgs,
-      sandhole,
-      ...
-    }@inputs:
-    {
-      nixosConfigurations."your-hostname" = nixpkgs.lib.nixosSystem {
-        specialArgs = { inherit inputs; };
-        modules = [
-          # ...
-          sandhole.nixosModules.sandhole
-        ];
-      };
-    };
-}
-```
-
-Here's an example `configuration.nix` with Sandhole and Agnos. You can find full options in [the NixOS module options page](./nixos_options.md):
+Here's an example `configuration.nix` with Sandhole and Agnos:
 
 ```nix
 {
@@ -81,7 +54,7 @@ in
     # Install the Sandhole package and enable the systemd service
     enable = true;
     # Let Sandhole manage the firewall and open ports from its configuration.
-    # Note: If `disableTcp` is `false` (default), it will open all ports >= 1024
+    # Note: If `disable-tcp` is `false` (default), it will open all ports >= 1024
     openFirewall = true;
     # These are the same CLI options from Sandhole, except without leading hyphens.
     # See: http://sandhole.com.br/cli.html
@@ -118,8 +91,8 @@ in
                   {
                     # Change these from `sandhole.com.br` to your domain
                     domains = [ "sandhole.com.br" "*.sandhole.com.br" ];
-                    fullchain_output_file = "${certificatesDirectory}/sandhole.com.br/fullchain.pem";
-                    key_output_file = "${certificatesDirectory}/sandhole.com.br/privkey.pem";
+                    fullchain_output_file = "${certificates-directory}/sandhole.com.br/fullchain.pem";
+                    key_output_file = "${certificates-directory}/sandhole.com.br/privkey.pem";
                   }
                 ];
             }
@@ -129,7 +102,56 @@ in
 }
 ```
 
-You can then connect services with the provided keys. For example, to use a Vaultwarden NixOS container in the same machine:
+### Setup with Flake
+
+If you're using Nix Flakes for your system, you can optionally install the bleeding-edge NixOS package with an overlay:
+
+```nix
+{
+  description = "My NixOS config";
+
+  inputs = {
+    # ...
+    sandhole.url = "github:EpicEric/sandhole";
+  };
+
+  outputs =
+    {
+      nixpkgs,
+      # ...
+      sandhole,
+      ...
+    }@inputs:
+    {
+      nixosConfigurations."your-hostname" = nixpkgs.lib.nixosSystem {
+        specialArgs = { inherit inputs; };
+        modules = [
+          # ...
+          sandhole.overlays.sandhole
+        ];
+      };
+    };
+}
+```
+
+In order to avoid building Sandhole, you can use either of the Sandhole binary caches. In `configuration.nix`:
+
+```nix
+nix.settings = {
+  substituters = [
+    "https://sandhole.cachix.org"
+    "https://cache.garnix.io"
+  ];
+  trusted-public-keys = [
+    "sandhole.cachix.org-1:cZadr6kgjQcRvsr++Nv9kgtMOrbLahiZBpuI9WpIXvA="
+    "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
+  ];
+};
+```
+
+## Connecting to Sandhole
+
+You can connect services with the keys provided to `user-keys-directory`. For example, to use a Vaultwarden NixOS container in the same machine:
 
 ```nix
 {
@@ -140,6 +162,7 @@ You can then connect services with the provided keys. For example, to use a Vaul
 {
   # ...
 
+  # Set up NAT for NixOS containers
   networking.nat = {
     enable = true;
     internalInterfaces = ["ve-+"];
@@ -198,21 +221,4 @@ You can then connect services with the provided keys. For example, to use a Vaul
     }
   ];
 }
-```
-
-## Binary caching
-
-In order to avoid re-building Sandhole for each update, you can use either of the Sandhole binary caches. In `configuration.nix`:
-
-```nix
-  nix.settings = {
-    substituters = [
-      "https://sandhole.cachix.org"
-      "https://cache.garnix.io"
-    ];
-    trusted-public-keys = [
-      "sandhole.cachix.org-1:cZadr6kgjQcRvsr++Nv9kgtMOrbLahiZBpuI9WpIXvA="
-      "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
-    ];
-  };
 ```

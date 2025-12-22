@@ -21,19 +21,6 @@
       ...
     }:
     {
-      nixosModules = {
-        default = self.nixosModules.sandhole;
-        sandhole =
-          {
-            pkgs,
-            lib,
-            ...
-          }:
-          {
-            imports = [ ./nixos/module.nix ];
-            services.sandhole.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-          };
-      };
       overlays = {
         default = self.overlays.sandhole;
         sandhole = final: prev: {
@@ -92,25 +79,6 @@
             meta.mainProgram = "sandhole";
           };
 
-        evalOptions = lib.evalModules {
-          modules = [
-            (
-              { config, ... }:
-              {
-                options =
-                  (import ./nixos/module.nix {
-                    inherit pkgs lib;
-                    config = config;
-                  }).options;
-              }
-            )
-          ];
-        };
-
-        optionsDoc = pkgs.nixosOptionsDoc {
-          options = removeAttrs evalOptions.options [ "_module" ];
-        };
-
         sandhole-book = pkgs.stdenv.mkDerivation {
           name = "sandhole-book";
           src = lib.fileset.toSource {
@@ -136,7 +104,6 @@
           inherit sandhole;
           default = sandhole;
           _book = sandhole-book;
-          _docs = optionsDoc.optionsCommonMark;
         };
 
         apps.default =
