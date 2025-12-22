@@ -22,16 +22,38 @@
 
         inherit (pkgs) lib;
 
-        inherit (pkgs.rustPackages) rustPlatform;
-
         craneLib = crane.mkLib pkgs;
 
-        unfilteredRoot = ./.;
+        mdbook = craneLib.buildPackage rec {
+          pname = "mdbook";
+          version = "0.5.2";
+          src = pkgs.fetchFromGitHub {
+            owner = "rust-lang";
+            repo = "mdBook";
+            tag = "v${version}";
+            hash = "sha256-gyjD47ZR9o2lIxipzesyJ6mxb9J9W+WS77TNWhKHP6U=";
+          };
+          doCheck = false;
+        };
+
+        mdbook-mermaid = craneLib.buildPackage rec {
+          pname = "mdbook-mermaid";
+          version = "0.17.0";
+          src = pkgs.fetchFromGitHub {
+            owner = "badboy";
+            repo = "mdbook-mermaid";
+            tag = "v${version}";
+            hash = "sha256-9aiu3mQaRgVVhtX/v2hMPzclnVQIhUz4gVy0Xc84zO8=";
+          };
+          doCheck = false;
+        };
+
         src = lib.fileset.toSource {
-          root = unfilteredRoot;
+          root = ./.;
           fileset = lib.fileset.unions [
-            (craneLib.fileset.commonCargoSources unfilteredRoot)
-            (lib.fileset.fileFilter (file: file.hasExt "md") unfilteredRoot)
+            (craneLib.fileset.commonCargoSources ./.)
+            ./README.md
+            ./.config/nextest.toml
             ./tests/data
           ];
         };
@@ -40,45 +62,11 @@
           inherit src;
           strictDeps = true;
 
-          buildInputs = with pkgs; [
-            cmake
-            gnumake
-          ];
-
-          nativeBuildInputs = with pkgs; [
-            perl
-          ];
+          buildInputs = with pkgs; [ cmake ];
+          nativeBuildInputs = with pkgs; [ perl ];
         };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-
-        mdbook = rustPlatform.buildRustPackage rec {
-          pname = "mdbook";
-          version = "0.5.2";
-
-          src = pkgs.fetchFromGitHub {
-            owner = "rust-lang";
-            repo = "mdBook";
-            tag = "v${version}";
-            hash = "sha256-gyjD47ZR9o2lIxipzesyJ6mxb9J9W+WS77TNWhKHP6U=";
-          };
-
-          cargoHash = "sha256-230KljOUSrDy8QCQki7jvJvdAsjVlUEjKDNVyTF4tWs=";
-        };
-
-        mdbook-mermaid = rustPlatform.buildRustPackage rec {
-          pname = "mdbook-mermaid";
-          version = "0.17.0";
-
-          src = pkgs.fetchFromGitHub {
-            owner = "badboy";
-            repo = "mdbook-mermaid";
-            tag = "v${version}";
-            hash = "sha256-9aiu3mQaRgVVhtX/v2hMPzclnVQIhUz4gVy0Xc84zO8=";
-          };
-
-          cargoHash = "sha256-MDtXgNiN4tVgP/98fbcL9WQXAJire+c3lmnc12KhQ50=";
-        };
 
         sandhole = craneLib.buildPackage (
           commonArgs
@@ -91,9 +79,19 @@
       {
         packages.default = sandhole;
 
-        apps.default = flake-utils.lib.mkApp {
-          drv = sandhole;
-        };
+        apps.default =
+          (flake-utils.lib.mkApp {
+            drv = sandhole;
+          })
+          // {
+            meta = {
+              description = "Expose HTTP/SSH/TCP services through SSH port forwarding";
+              homepage = "https://sandhole.com.br";
+              license = lib.licenses.mit;
+              mainProgram = "sandhole";
+              platforms = lib.platforms.linux ++ lib.platforms.darwin;
+            };
+          };
 
         checks = {
           inherit sandhole;
@@ -115,6 +113,14 @@
           sandhole-fmt = craneLib.cargoFmt {
             inherit src;
           };
+
+          sandhole-test = craneLib.cargoNextest (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoNextestExtraArgs = "-P nix";
+            }
+          );
         };
 
         devShells.default = craneLib.devShell {

@@ -9,14 +9,14 @@ RUN rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src \
-  && echo "fn main() {}" > src/main.rs \
-  && cargo zigbuild --release --locked --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl \
-  && rm src/main.rs
+    && echo "fn main() {}" > src/main.rs \
+    && cargo zigbuild --release --locked --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl \
+    && rm src/main.rs
 # Build application
 COPY src ./src
 COPY README.md .
 RUN touch src/main.rs \
-  && cargo zigbuild --release --locked --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
+    && cargo zigbuild --release --locked --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
 
 # Export compiled binaries to a single image (for both CI artifacts and arch-specific images)
 FROM --platform=$BUILDPLATFORM scratch AS binary

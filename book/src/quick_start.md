@@ -27,7 +27,7 @@ wget --output-document sandhole https://github.com/EpicEric/sandhole/releases/la
 wget --output-document sandhole https://github.com/EpicEric/sandhole/releases/latest/download/sandhole-linux-arm64
 ```
 
-If you prefer, you may also use [Docker Compose](./docker_compose.md) (recommended) or [compile the binary yourself](./compiling_from_source.md).
+If you prefer, you may also use [Docker Compose](./docker_compose.md) (recommended), or [compile the binary yourself](./compiling_from_source.md).
 
 ## 3. Run Sandhole
 
