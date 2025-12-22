@@ -2,7 +2,7 @@ name: Validate
 
 on:
   push:
-    branches: ["**"]
+    branches: ["main"]
   pull_request:
 
 permissions:
@@ -12,6 +12,8 @@ env:
   RUST_MSRV: 1.88.0
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_LLVM_COV_VERSION: 0.6.20
+  CARGO_NEXTEST_VERSION: 0.9.114
 
 jobs:
   rustfmt-msrv:
@@ -76,10 +78,38 @@ jobs:
         run: |
           cargo build --locked --no-default-features
   tests-nightly:
-    name: Run tests on nightly
-    runs-on: ubuntu-latest
-    env:
-      CARGO_LLVM_COV_VERSION: 0.6.20
+    name: Run tests on nightly (${{ matrix.platform.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@59679e24ffb0dbbbc136684eda7fcd21fe9eddea # v2.63.0
+        with:
+          tool: cargo-nextest@${{ env.CARGO_NEXTEST_VERSION }}
+      - name: Fetch nightly Rust
+        run: |
+          rustup toolchain install nightly-${{ matrix.platform.target }}
+          rustup override set nightly-${{ matrix.platform.target }}
+      - name: Test
+        env:
+          RUSTFLAGS: -A dead_code -A unused_variables
+        run: |
+          cargo nextest run --no-fail-fast --verbose --locked
+  coverage-nightly:
+    name: Test coverage on nightly (ubuntu-24.04)
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -87,12 +117,12 @@ jobs:
       - name: Install cargo-llvm-cov and cargo-nextest
         uses: taiki-e/install-action@59679e24ffb0dbbbc136684eda7fcd21fe9eddea # v2.63.0
         with:
-          tool: cargo-llvm-cov@0.6.20,cargo-nextest@0.9.114
+          tool: cargo-llvm-cov@${{ env.CARGO_LLVM_COV_VERSION }},cargo-nextest@${{ env.CARGO_NEXTEST_VERSION }}
       - name: Fetch nightly Rust
         run: |
           rustup toolchain install nightly-x86_64-unknown-linux-gnu
           rustup override set nightly-x86_64-unknown-linux-gnu
-      - name: Test
+      - name: Test with coverage
         env:
           RUSTFLAGS: -A dead_code -A unused_variables
         run: |
@@ -126,6 +156,7 @@ jobs:
       - build-msrv-default-features
       - build-msrv-no-default-features
       - tests-nightly
+      - coverage-nightly
     uses: ./.github/workflows/build.yml
     secrets:
       dockerhub-push-token: ${{ secrets.DOCKERHUB_PUSH_TOKEN  }}
