@@ -43,27 +43,30 @@ jobs:
         platform:
           - runner: macos-15-intel
             target: x86_64-apple-darwin
-            key: macos-x64
+            key: macos-amd64
           - runner: macos-15
             target: aarch64-apple-darwin
             key: macos-arm64
     name: Build for ${{ matrix.platform.key }}
     runs-on: ${{ matrix.platform.runner }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: true
       - name: Fetch MSRV and add target
         run: |
           rustup toolchain install ${RUST_VERSION}
           rustup override set ${RUST_VERSION}
-          rustup target add ${{ matrix.target }}
+          rustup target add ${{ matrix.platform.target }}
       - name: Install dependencies
         run: |
-          brew install libressl
+          brew install cargo-zigbuild libressl zig
       - name: Build
-        if: matrix.os == 'macos'
         run: |
-          cargo build --locked --all-features --release --target ${{ matrix.target }}
+          cargo zigbuild --release --locked --target ${{ matrix.platform.target }}
           mkdir dist
-          cp target/${{ matrix.target }}/release/sandhole dist/sandhole-${{ matrix.key }}
+          cp target/${{ matrix.platform.target }}/release/sandhole dist/sandhole-${{ matrix.platform.key }}
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
