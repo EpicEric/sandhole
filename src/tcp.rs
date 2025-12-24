@@ -7,7 +7,7 @@ use crate::{
     ip::IpFilter,
     reactor::TcpReactor,
     ssh::connection_handler::SshTunnelHandler,
-    telemetry::{TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL, TELEMETRY_KEY_PORT},
+    telemetry::{TELEMETRY_COUNTER_TCP_CONNECTIONS, TELEMETRY_KEY_PORT},
 };
 use ahash::RandomState;
 use bon::Builder;
@@ -76,7 +76,7 @@ impl PortHandler for Arc<TcpHandler> {
                             && let Ok(mut channel) =
                                 handler.tunneling_channel(ip, address.port()).await
                         {
-                            counter!(TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL, TELEMETRY_KEY_PORT => port.to_string())
+                            counter!(TELEMETRY_COUNTER_TCP_CONNECTIONS, TELEMETRY_KEY_PORT => port.to_string())
                                     .increment(1);
                             // Log new connection to SSH handler
                             if !clone.disable_tcp_logs {

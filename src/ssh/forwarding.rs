@@ -30,9 +30,9 @@ use crate::{
     tcp::PortHandler,
     tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
     telemetry::{
-        TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS_TOTAL, TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL,
-        TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL, TELEMETRY_COUNTER_SSH_CONNECTIONS_TOTAL,
-        TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL, TELEMETRY_GAUGE_ADMIN_ALIAS_CONNECTIONS_CURRENT,
+        TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS, TELEMETRY_COUNTER_ALIAS_CONNECTIONS,
+        TELEMETRY_COUNTER_SNI_CONNECTIONS, TELEMETRY_COUNTER_SSH_CONNECTIONS,
+        TELEMETRY_COUNTER_TCP_CONNECTIONS, TELEMETRY_GAUGE_ADMIN_ALIAS_CONNECTIONS_CURRENT,
         TELEMETRY_GAUGE_ALIAS_CONNECTIONS_CURRENT, TELEMETRY_GAUGE_SNI_CONNECTIONS_CURRENT,
         TELEMETRY_GAUGE_SSH_CONNECTIONS_CURRENT, TELEMETRY_GAUGE_TCP_CONNECTIONS_CURRENT,
         TELEMETRY_KEY_ALIAS, TELEMETRY_KEY_HOSTNAME, TELEMETRY_KEY_PORT,
@@ -369,8 +369,8 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
         {
             let gauge = gauge!(TELEMETRY_GAUGE_SSH_CONNECTIONS_CURRENT, TELEMETRY_KEY_ALIAS => address.to_string());
             gauge.increment(1);
-            counter!(TELEMETRY_COUNTER_SSH_CONNECTIONS_TOTAL, TELEMETRY_KEY_ALIAS => address.to_string())
-                    .increment(1);
+            counter!(TELEMETRY_COUNTER_SSH_CONNECTIONS, TELEMETRY_KEY_ALIAS => address.to_string())
+                .increment(1);
             let _ = handler.log_channel().send(
                 format!(
                     "{} {:>14} - {}:{} => {}:{}\r\n",
@@ -874,7 +874,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
             {
                 let gauge = gauge!(TELEMETRY_GAUGE_SNI_CONNECTIONS_CURRENT, TELEMETRY_KEY_HOSTNAME => address.to_string());
                 gauge.increment(1);
-                counter!(TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL, TELEMETRY_KEY_HOSTNAME => address.to_string())
+                counter!(TELEMETRY_COUNTER_SNI_CONNECTIONS, TELEMETRY_KEY_HOSTNAME => address.to_string())
                     .increment(1);
                 let tcp_connection_timeout = context.server.tcp_connection_timeout;
                 let buffer_size = context.server.buffer_size;
@@ -1160,7 +1160,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                     let alias = TcpAlias(address.into(), port);
                     let gauge = gauge!(TELEMETRY_GAUGE_ADMIN_ALIAS_CONNECTIONS_CURRENT, TELEMETRY_KEY_ALIAS => alias.to_string());
                     gauge.increment(1);
-                    counter!(TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS_TOTAL, TELEMETRY_KEY_ALIAS => alias.to_string())
+                    counter!(TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS, TELEMETRY_KEY_ALIAS => alias.to_string())
                     .increment(1);
                     let tcp_connection_timeout = context.server.tcp_connection_timeout;
                     let buffer_size = context.server.buffer_size;
@@ -1216,8 +1216,8 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             let alias = TcpAlias(address.into(), port);
             let gauge = gauge!(TELEMETRY_GAUGE_ALIAS_CONNECTIONS_CURRENT, TELEMETRY_KEY_ALIAS => alias.to_string());
             gauge.increment(1);
-            counter!(TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL, TELEMETRY_KEY_ALIAS => alias.to_string())
-                    .increment(1);
+            counter!(TELEMETRY_COUNTER_ALIAS_CONNECTIONS, TELEMETRY_KEY_ALIAS => alias.to_string())
+                .increment(1);
             let _ = handler.log_channel().send(
                 format!(
                     "{} {:>14} - {}:{} => {}:{}\r\n",
@@ -1587,8 +1587,8 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
         {
             let gauge = gauge!(TELEMETRY_GAUGE_TCP_CONNECTIONS_CURRENT, TELEMETRY_KEY_PORT => port.to_string());
             gauge.increment(1);
-            counter!(TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL, TELEMETRY_KEY_PORT => port.to_string())
-                    .increment(1);
+            counter!(TELEMETRY_COUNTER_TCP_CONNECTIONS, TELEMETRY_KEY_PORT => port.to_string())
+                .increment(1);
             let _ = handler.log_channel().send(
                 format!(
                     "{} {:>14} - {}:{} => {}:{}\r\n",

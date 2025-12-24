@@ -12,11 +12,11 @@ use std::{
 
 use crate::{
     connection_handler::ConnectionHandler,
-    telemetry::{TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME_SECONDS, TELEMETRY_KEY_HOSTNAME},
+    telemetry::{TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME, TELEMETRY_KEY_HOSTNAME},
 };
 use crate::{connections::ConnectionGetByHttpHost, telemetry::TELEMETRY_KEY_ALIAS};
-use crate::{ssh::ServerHandlerSender, telemetry::TELEMETRY_COUNTER_HTTP_REQUESTS_TOTAL};
-use crate::{tcp_alias::TcpAlias, telemetry::TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL};
+use crate::{ssh::ServerHandlerSender, telemetry::TELEMETRY_COUNTER_HTTP_REQUESTS};
+use crate::{tcp_alias::TcpAlias, telemetry::TELEMETRY_COUNTER_ALIAS_CONNECTIONS};
 
 use axum::{
     body::Body as AxumBody,
@@ -119,7 +119,7 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
         elapsed_time,
     } = data;
     histogram!(
-        TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME_SECONDS,
+        TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME,
         "method" => method.clone(),
         "host" => host.clone(),
         "uri" => uri.clone(),
@@ -426,10 +426,10 @@ where
     append_to_header(headers, X_FORWARDED_PORT, port.to_string());
     // Add this request to the telemetry for the host
     if http_data.as_ref().is_some_and(|data| data.is_aliasing) {
-        counter!(TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL, TELEMETRY_KEY_ALIAS => TcpAlias(host.clone(), port).to_string())
+        counter!(TELEMETRY_COUNTER_ALIAS_CONNECTIONS, TELEMETRY_KEY_ALIAS => TcpAlias(host.clone(), port).to_string())
             .increment(1);
     } else {
-        counter!(TELEMETRY_COUNTER_HTTP_REQUESTS_TOTAL, TELEMETRY_KEY_HOSTNAME => host.clone())
+        counter!(TELEMETRY_COUNTER_HTTP_REQUESTS, TELEMETRY_KEY_HOSTNAME => host.clone())
             .increment(1);
     }
 

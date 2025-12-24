@@ -1,5 +1,3 @@
-name: Analyse GitHub Actions
-
 on:
   push:
     branches: ["main"]

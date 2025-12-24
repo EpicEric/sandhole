@@ -161,18 +161,17 @@ pub(crate) const TELEMETRY_KEY_HOSTNAME: &str = "hostname";
 pub(crate) const TELEMETRY_KEY_PORT: &str = "port";
 pub(crate) const TELEMETRY_KEY_ALIAS: &str = "alias";
 
-pub(crate) const TELEMETRY_COUNTER_SSH_CONNECTIONS_TOTAL: &str = "sandhole_ssh_connections_total";
-pub(crate) const TELEMETRY_COUNTER_HTTP_REQUESTS_TOTAL: &str = "sandhole_http_requests_total";
-pub(crate) const TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL: &str = "sandhole_sni_connections_total";
-pub(crate) const TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL: &str =
-    "sandhole_alias_connections_total";
-pub(crate) const TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS_TOTAL: &str =
-    "sandhole_admin_alias_connections_total";
-pub(crate) const TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL: &str = "sandhole_tcp_connections_total";
-pub(crate) const TELEMETRY_COUNTER_USED_MEMORY_BYTES: &str = "system_used_memory_bytes";
-pub(crate) const TELEMETRY_COUNTER_TOTAL_MEMORY_BYTES: &str = "system_total_memory_bytes";
-pub(crate) const TELEMETRY_COUNTER_NETWORK_TX_BYTES: &str = "system_network_tx_bytes";
-pub(crate) const TELEMETRY_COUNTER_NETWORK_RX_BYTES: &str = "system_network_rx_bytes";
+pub(crate) const TELEMETRY_COUNTER_SSH_CONNECTIONS: &str = "sandhole_ssh_connections";
+pub(crate) const TELEMETRY_COUNTER_HTTP_REQUESTS: &str = "sandhole_http_requests";
+pub(crate) const TELEMETRY_COUNTER_SNI_CONNECTIONS: &str = "sandhole_sni_connections";
+pub(crate) const TELEMETRY_COUNTER_ALIAS_CONNECTIONS: &str = "sandhole_alias_connections";
+pub(crate) const TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS: &str =
+    "sandhole_admin_alias_connections";
+pub(crate) const TELEMETRY_COUNTER_TCP_CONNECTIONS: &str = "sandhole_tcp_connections";
+pub(crate) const TELEMETRY_COUNTER_USED_MEMORY: &str = "system_used_memory";
+pub(crate) const TELEMETRY_COUNTER_TOTAL_MEMORY: &str = "system_total_memory";
+pub(crate) const TELEMETRY_COUNTER_NETWORK_TX: &str = "system_network_tx";
+pub(crate) const TELEMETRY_COUNTER_NETWORK_RX: &str = "system_network_rx";
 
 pub(crate) const TELEMETRY_GAUGE_SSH_CONNECTIONS_CURRENT: &str = "sandhole_ssh_connections_current";
 pub(crate) const TELEMETRY_GAUGE_SNI_CONNECTIONS_CURRENT: &str = "sandhole_sni_connections_current";
@@ -181,10 +180,9 @@ pub(crate) const TELEMETRY_GAUGE_ALIAS_CONNECTIONS_CURRENT: &str =
 pub(crate) const TELEMETRY_GAUGE_ADMIN_ALIAS_CONNECTIONS_CURRENT: &str =
     "sandhole_admin_alias_connections_current";
 pub(crate) const TELEMETRY_GAUGE_TCP_CONNECTIONS_CURRENT: &str = "sandhole_tcp_connections_current";
-pub(crate) const TELEMETRY_GAUGE_CPU_USAGE_PERCENT: &str = "system_cpu_usage_percent";
+pub(crate) const TELEMETRY_GAUGE_CPU_USAGE: &str = "system_cpu_usage";
 
-pub(crate) const TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME_SECONDS: &str =
-    "sandhole_http_elapsed_time_seconds";
+pub(crate) const TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME: &str = "sandhole_http_elapsed_time";
 
 // Metadata to display on the admin interface.
 pub(crate) struct Telemetry {
@@ -226,13 +224,14 @@ impl Telemetry {
             let prometheus_recorder = PrometheusBuilder::new()
                 .set_buckets_for_metric(
                     metrics_exporter_prometheus::Matcher::Full(
-                        TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME_SECONDS.to_string(),
+                        TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME.to_string(),
                     ),
                     &[
                         0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0,
                     ],
                 )
                 .expect("values should not be empty")
+                .with_recommended_naming(true)
                 .build_recorder();
             let handle = prometheus_recorder.handle();
             let join_handle = DroppableHandle(tokio::spawn(async move {
@@ -267,36 +266,41 @@ impl Telemetry {
 
     pub(crate) fn register_metrics(&self) {
         describe_counter!(
-            TELEMETRY_COUNTER_SSH_CONNECTIONS_TOTAL,
+            TELEMETRY_COUNTER_SSH_CONNECTIONS,
             "Total connections for SSH aliases"
         );
         describe_counter!(
-            TELEMETRY_COUNTER_HTTP_REQUESTS_TOTAL,
+            TELEMETRY_COUNTER_HTTP_REQUESTS,
             "Total requests for HTTP(S) hosts"
         );
         describe_counter!(
-            TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL,
+            TELEMETRY_COUNTER_SNI_CONNECTIONS,
             "Total connections for SNI hosts"
         );
         describe_counter!(
-            TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL,
+            TELEMETRY_COUNTER_ALIAS_CONNECTIONS,
             "Total connections for aliases"
         );
         describe_counter!(
-            TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS_TOTAL,
+            TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS,
             "Total connections for admin aliases"
         );
         describe_counter!(
-            TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL,
+            TELEMETRY_COUNTER_TCP_CONNECTIONS,
             "Total connections for TCP ports"
         );
-        describe_counter!(TELEMETRY_COUNTER_USED_MEMORY_BYTES, "Used memory");
-        describe_counter!(TELEMETRY_COUNTER_TOTAL_MEMORY_BYTES, "Total memory");
+        describe_counter!(TELEMETRY_COUNTER_USED_MEMORY, Unit::Bytes, "Used memory");
+        describe_counter!(TELEMETRY_COUNTER_TOTAL_MEMORY, Unit::Bytes, "Total memory");
         describe_counter!(
-            TELEMETRY_COUNTER_NETWORK_TX_BYTES,
+            TELEMETRY_COUNTER_NETWORK_TX,
+            Unit::Bytes,
             "Network transmitted data"
         );
-        describe_counter!(TELEMETRY_COUNTER_NETWORK_RX_BYTES, "Network received data");
+        describe_counter!(
+            TELEMETRY_COUNTER_NETWORK_RX,
+            Unit::Bytes,
+            "Network received data"
+        );
 
         describe_gauge!(
             TELEMETRY_GAUGE_SSH_CONNECTIONS_CURRENT,
@@ -314,10 +318,11 @@ impl Telemetry {
             TELEMETRY_GAUGE_TCP_CONNECTIONS_CURRENT,
             "Current requests for TCP ports"
         );
-        describe_gauge!(TELEMETRY_GAUGE_CPU_USAGE_PERCENT, "Total CPU usage");
+        describe_gauge!(TELEMETRY_GAUGE_CPU_USAGE, Unit::Percent, "Total CPU usage");
 
         describe_histogram!(
-            TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME_SECONDS,
+            TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME,
+            Unit::Seconds,
             "Time to handle an HTTP request"
         );
     }
@@ -510,7 +515,7 @@ impl Recorder for Telemetry {
             .sorted()
             .collect();
         match name {
-            TELEMETRY_COUNTER_SSH_CONNECTIONS_TOTAL => {
+            TELEMETRY_COUNTER_SSH_CONNECTIONS => {
                 for (key, value) in labels {
                     if key == TELEMETRY_KEY_ALIAS {
                         return metrics::Counter::from_arc(Arc::clone(
@@ -525,7 +530,7 @@ impl Recorder for Telemetry {
                     }
                 }
             }
-            TELEMETRY_COUNTER_HTTP_REQUESTS_TOTAL => {
+            TELEMETRY_COUNTER_HTTP_REQUESTS => {
                 for (key, value) in labels {
                     if key == TELEMETRY_KEY_HOSTNAME {
                         return metrics::Counter::from_arc(Arc::clone(
@@ -540,7 +545,7 @@ impl Recorder for Telemetry {
                     }
                 }
             }
-            TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL => {
+            TELEMETRY_COUNTER_SNI_CONNECTIONS => {
                 for (key, value) in labels {
                     if key == TELEMETRY_KEY_HOSTNAME {
                         return metrics::Counter::from_arc(Arc::clone(
@@ -555,7 +560,7 @@ impl Recorder for Telemetry {
                     }
                 }
             }
-            TELEMETRY_COUNTER_ALIAS_CONNECTIONS_TOTAL => {
+            TELEMETRY_COUNTER_ALIAS_CONNECTIONS => {
                 for (key, value) in labels {
                     if key == TELEMETRY_KEY_ALIAS {
                         match value.parse::<TcpAlias>() {
@@ -578,7 +583,7 @@ impl Recorder for Telemetry {
                     }
                 }
             }
-            TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS_TOTAL => {
+            TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS => {
                 for (key, value) in labels {
                     if key == TELEMETRY_KEY_ALIAS {
                         match value.parse::<TcpAlias>() {
@@ -601,7 +606,7 @@ impl Recorder for Telemetry {
                     }
                 }
             }
-            TELEMETRY_COUNTER_TCP_CONNECTIONS_TOTAL => {
+            TELEMETRY_COUNTER_TCP_CONNECTIONS => {
                 for (key, value) in labels {
                     if key == TELEMETRY_KEY_PORT {
                         match value.parse::<u16>() {
