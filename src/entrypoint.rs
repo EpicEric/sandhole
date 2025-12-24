@@ -64,10 +64,10 @@ use crate::{
     ssh::Server,
     tcp::TcpHandler,
     telemetry::{
-        TELEMETRY_COUNTER_NETWORK_RX_BYTES, TELEMETRY_COUNTER_NETWORK_TX_BYTES,
-        TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL, TELEMETRY_COUNTER_TOTAL_MEMORY_BYTES,
-        TELEMETRY_COUNTER_USED_MEMORY_BYTES, TELEMETRY_GAUGE_CPU_USAGE_PERCENT,
-        TELEMETRY_KEY_HOSTNAME, Telemetry,
+        TELEMETRY_COUNTER_NETWORK_RX, TELEMETRY_COUNTER_NETWORK_TX,
+        TELEMETRY_COUNTER_SNI_CONNECTIONS, TELEMETRY_COUNTER_TOTAL_MEMORY,
+        TELEMETRY_COUNTER_USED_MEMORY, TELEMETRY_GAUGE_CPU_USAGE, TELEMETRY_KEY_HOSTNAME,
+        Telemetry,
     },
     tls::{TlsPeekData, peek_sni_and_alpn},
 };
@@ -507,13 +507,13 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 None => (0, 0),
             };
             let cpu_usage = system.global_cpu_usage() / system.cpus().len() as f32;
-            gauge!(TELEMETRY_GAUGE_CPU_USAGE_PERCENT).set(cpu_usage / 100.0);
+            gauge!(TELEMETRY_GAUGE_CPU_USAGE).set(cpu_usage / 100.0);
             let used_memory = system.used_memory();
-            counter!(TELEMETRY_COUNTER_USED_MEMORY_BYTES).absolute(used_memory);
+            counter!(TELEMETRY_COUNTER_USED_MEMORY).absolute(used_memory);
             let total_memory = system.total_memory();
-            counter!(TELEMETRY_COUNTER_TOTAL_MEMORY_BYTES).absolute(total_memory);
-            counter!(TELEMETRY_COUNTER_NETWORK_TX_BYTES).increment(network_tx);
-            counter!(TELEMETRY_COUNTER_NETWORK_RX_BYTES).increment(network_rx);
+            counter!(TELEMETRY_COUNTER_TOTAL_MEMORY).absolute(total_memory);
+            counter!(TELEMETRY_COUNTER_NETWORK_TX).increment(network_tx);
+            counter!(TELEMETRY_COUNTER_NETWORK_RX).increment(network_rx);
             let data = SystemData {
                 cpu_usage,
                 used_memory,
@@ -897,7 +897,7 @@ async fn handle_https_connection(
             tracing::warn!(%sni, "Unable to get tunneling channel for SNI proxy.");
             return;
         };
-        counter!(TELEMETRY_COUNTER_SNI_CONNECTIONS_TOTAL, TELEMETRY_KEY_HOSTNAME => sni.clone())
+        counter!(TELEMETRY_COUNTER_SNI_CONNECTIONS, TELEMETRY_KEY_HOSTNAME => sni.clone())
             .increment(1);
         match sandhole.tcp_connection_timeout {
             Some(duration) => {

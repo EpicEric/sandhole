@@ -2,6 +2,11 @@ on:
   push:
     tags: ["v*.*.*"]
 
+env:
+  RUST_VERSION: "1.92.0"
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
 jobs:
   publish-to-crates-io:
     name: Publish to crates.io
@@ -20,8 +25,9 @@ jobs:
         run: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-  build-release:
-    name: Build for release
+
+  build-linux:
+    name: Build for Linux via Docker
     permissions:
       contents: read
       packages: write
@@ -29,9 +35,49 @@ jobs:
     secrets:
       dockerhub-push-token: ${{ secrets.DOCKERHUB_PUSH_TOKEN  }}
       ghcr-push-token: ${{ secrets.GITHUB_TOKEN }}
+
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            key: macos-amd64
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            key: macos-arm64
+    name: Build for ${{ matrix.platform.key }}
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: true
+      - name: Fetch MSRV and add target
+        run: |
+          rustup toolchain install ${RUST_VERSION}
+          rustup override set ${RUST_VERSION}
+          rustup target add ${{ matrix.platform.target }}
+      - name: Install dependencies
+        run: |
+          brew install libressl
+      - name: Build
+        run: |
+          cargo build --release --locked --target ${{ matrix.platform.target }}
+          mkdir dist
+          cp target/${{ matrix.platform.target }}/release/sandhole dist/sandhole-${{ matrix.platform.key }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sandhole-${{ matrix.platform.key }}
+          path: dist
+
   create-release-draft:
     name: Create release draft
-    needs: build-release
+    needs:
+      - build-linux
+      - build-macos
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -39,10 +85,20 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: true
-      - name: Download artifact
+      - name: Download Linux artifact
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: sandhole-binaries
+          path: out/
+      - name: Download macos-amd64 artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: sandhole-macos-amd64
+          path: out/
+      - name: Download macos-arm64 artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: sandhole-macos-arm64
           path: out/
       - name: Create release draft with binary assets
         env:
