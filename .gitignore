@@ -1,7 +1,8 @@
 /.direnv
-/deploy
-/target
 /cli.html
-/perf.data*
+/deploy
 /flamegraph.svg
 /log.txt
+/perf.data*
+/result
+/target
