@@ -1,8 +1,4 @@
 pkgs: {
-  # This key is used in integration tests
-  # This is NOT a security issue
-  # It uses the same key than the one used in OpenSSH fuzz tests
-  # https://github.com/openssh/openssh-portable/blob/V_9_9_P2/regress/misc/fuzz-harness/fixed-keys.h#L76-L85
   snakeOilEd25519PrivateKey = pkgs.writeText "privkey.snakeoil" ''
     -----BEGIN OPENSSH PRIVATE KEY-----
     b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
@@ -13,5 +9,7 @@ pkgs: {
     -----END OPENSSH PRIVATE KEY-----
   '';
 
-  snakeOilEd25519PublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDPQXmEVMVLmeFRyafKMVWgPDkv8/uRBTwmcEDatZzMD snakeoil";
+  snakeOilEd25519PublicKey = pkgs.writeTextDir "user_keys/snakeoil.pub" ''
+    ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDPQXmEVMVLmeFRyafKMVWgPDkv8/uRBTwmcEDatZzMD snakeoil
+  '';
 }

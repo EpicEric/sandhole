@@ -10,9 +10,6 @@ let
     snakeOilEd25519PrivateKey
     snakeOilEd25519PublicKey
     ;
-
-  pubKey = pkgs.writeTextDir "user_keys/snakeoil.pub" snakeOilEd25519PublicKey;
-
 in
 pkgs.testers.runNixOSTest {
   name = "sandhole-with-container";
@@ -35,7 +32,7 @@ pkgs.testers.runNixOSTest {
         openFirewall = true;
         settings = {
           domain = "sandhole.nix";
-          userKeysDirectory = "${pubKey}/user_keys";
+          userKeysDirectory = "${snakeOilEd25519PublicKey}/user_keys";
           bindHostnames = "all";
           disableHttps = true;
           httpPort = 8080;

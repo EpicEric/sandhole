@@ -1,8 +1,41 @@
 # NixOS
 
-Sandhole is available in the `unstable` channel as [a Nix package](https://search.nixos.org/packages?channel=unstable&query=sandhole), as well as [a NixOS service](https://search.nixos.org/options?channel=unstable&query=services.sandhole).
+Sandhole is available as a flake, containing an overlay and a NixOS service.
 
-Here's an example `configuration.nix` with Sandhole and Agnos:
+## Setup
+
+If you're using Nix Flakes for your system, you can install the NixOS service like so:
+
+```nix
+{
+  description = "My NixOS config";
+
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    # ...
+    sandhole.url = "github:EpicEric/sandhole";
+  };
+
+  outputs =
+    {
+      nixpkgs,
+      sandhole,
+      ...
+    }@inputs:
+    {
+      nixosConfigurations."your-hostname" = nixpkgs.lib.nixosSystem {
+        specialArgs = { inherit inputs; };
+        modules = [
+          ./configuration.nix
+          # ...
+          sandhole.nixosModules.sandhole
+        ];
+      };
+    };
+}
+```
+
+Here's an example `configuration.nix` with Sandhole and Agnos. You can find full options in [the NixOS module options page](./nixos_options.md):
 
 ```nix
 {
@@ -45,7 +78,8 @@ in
     # Let Sandhole manage the firewall and open ports from its configuration.
     # Note: If `disableTcp` is `false` (default), it will open all ports >= 1024
     openFirewall = true;
-    # See: https://search.nixos.org/options?channel=unstable&query=services.sandhole.settings
+    # These are the same CLI options from Sandhole, except in camelCase.
+    # See: http://sandhole.com.br/nixos_options.html
     # Make sure to change at least `domain` and `acmeContactEmail` below
     settings = {
       domain = "sandhole.com.br";
@@ -119,14 +153,14 @@ You can then connect services with the provided keys. For example, to use a Sear
     extraFlags = [ "-U" ];
     config = { lib, ... }: {
       services.searx.enable = true;
-  
+
       networking = {
         firewall.allowedTCPPorts = [ 8888 ];
         useHostResolvConf = lib.mkForce false;
       };
       
       services.resolved.enable = true;
-  
+
       system.stateVersion = "25.11";
     };
   };
@@ -147,4 +181,21 @@ You can then connect services with the provided keys. For example, to use a Sear
     }
   ];
 }
+```
+
+## Binary caching
+
+In order to avoid re-building Sandhole for each update, you can use the Sandhole binary cache. In `configuration.nix`:
+
+```nix
+  nix.settings = {
+    substituters = [
+      "https://nix-community.cachix.org"
+      "https://sandhole.cachix.org"
+    ];
+    trusted-public-keys = [
+      "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+      "sandhole.cachix.org-1:cZadr6kgjQcRvsr++Nv9kgtMOrbLahiZBpuI9WpIXvA="
+    ];
+  };
 ```

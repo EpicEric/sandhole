@@ -1,5 +1,5 @@
 {
-  description = "Expose HTTP/SSH/TCP services through SSH port forwarding.";
+  description = "Expose HTTP/SSH/TCP services through SSH port forwarding";
 
   inputs = {
     nixpkgs.url = "nixpkgs/nixpkgs-unstable";
@@ -23,7 +23,16 @@
     {
       nixosModules = {
         default = self.nixosModules.sandhole;
-        sandhole = ./nixos/module.nix;
+        sandhole =
+          {
+            pkgs,
+            lib,
+            ...
+          }:
+          {
+            imports = [ ./nixos/module.nix ];
+            services.sandhole.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+          };
       };
       overlays = {
         default = self.overlays.sandhole;
@@ -40,10 +49,7 @@
 
         pkgs = import nixpkgs {
           inherit system;
-          overlays = [
-            (import rust-overlay)
-            self.overlays.sandhole
-          ];
+          overlays = [ (import rust-overlay) ];
         };
 
         inherit (pkgs) lib;
@@ -83,9 +89,32 @@
           // {
             meta.mainProgram = "sandhole";
           };
+
+        evalOptions = lib.evalModules {
+          modules = [
+            (
+              { config, ... }:
+              {
+                options =
+                  (import ./nixos/module.nix {
+                    inherit pkgs lib;
+                    config = config;
+                  }).options;
+              }
+            )
+          ];
+        };
+
+        optionsDoc = pkgs.nixosOptionsDoc {
+          options = builtins.removeAttrs evalOptions.options [ "_module" ];
+        };
       in
       {
-        packages.default = sandhole;
+        packages = {
+          inherit sandhole;
+          default = sandhole;
+          _docs = optionsDoc.optionsCommonMark;
+        };
 
         apps.default =
           (flake-utils.lib.mkApp {

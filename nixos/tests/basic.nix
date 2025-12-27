@@ -12,8 +12,6 @@ let
     snakeOilEd25519PublicKey
     ;
 
-  pubKey = pkgs.writeTextDir "user_keys/snakeoil.pub" snakeOilEd25519PublicKey;
-
   sandholeCerts = generate-certs {
     inherit pkgs;
     domain = "sandhole.nix";
@@ -62,7 +60,7 @@ pkgs.testers.runNixOSTest {
           openFirewall = true;
           settings = {
             domain = "sandhole.nix";
-            userKeysDirectory = "${pubKey}/user_keys";
+            userKeysDirectory = "${snakeOilEd25519PublicKey}/user_keys";
             certificatesDirectory = sandholeCerts;
             bindHostnames = "all";
             ipBlocklist = [ "192.168.10.30/32" ];
