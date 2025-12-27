@@ -5,6 +5,10 @@
     nixpkgs.url = "nixpkgs/nixpkgs-unstable";
     crane.url = "github:ipetkov/crane";
     flake-utils.url = "github:numtide/flake-utils";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -13,16 +17,25 @@
       nixpkgs,
       crane,
       flake-utils,
+      rust-overlay,
       ...
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        rustChannel = "stable";
+        rustVersion = "latest";
+
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ (import rust-overlay) ];
+        };
 
         inherit (pkgs) lib;
 
-        craneLib = crane.mkLib pkgs;
+        craneLib = (crane.mkLib pkgs).overrideToolchain (
+          pkgs: pkgs.rust-bin.${rustChannel}.${rustVersion}.default
+        );
 
         mdbook = craneLib.buildPackage rec {
           pname = "mdbook";
