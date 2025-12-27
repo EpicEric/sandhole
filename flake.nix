@@ -20,7 +20,19 @@
       rust-overlay,
       ...
     }:
-    flake-utils.lib.eachDefaultSystem (
+    {
+      nixosModules = {
+        default = self.nixosModules.sandhole;
+        sandhole = ./nixos/module.nix;
+      };
+      overlays = {
+        default = self.overlays.sandhole;
+        sandhole = final: prev: {
+          sandhole = self.packages.${prev.stdenv.hostPlatform.system}.default;
+        };
+      };
+    }
+    // flake-utils.lib.eachDefaultSystem (
       system:
       let
         rustChannel = "stable";
@@ -28,7 +40,10 @@
 
         pkgs = import nixpkgs {
           inherit system;
-          overlays = [ (import rust-overlay) ];
+          overlays = [
+            (import rust-overlay)
+            self.overlays.sandhole
+          ];
         };
 
         inherit (pkgs) lib;
@@ -36,30 +51,6 @@
         craneLib = (crane.mkLib pkgs).overrideToolchain (
           pkgs: pkgs.rust-bin.${rustChannel}.${rustVersion}.default
         );
-
-        mdbook = craneLib.buildPackage rec {
-          pname = "mdbook";
-          version = "0.5.2";
-          src = pkgs.fetchFromGitHub {
-            owner = "rust-lang";
-            repo = "mdBook";
-            tag = "v${version}";
-            hash = "sha256-gyjD47ZR9o2lIxipzesyJ6mxb9J9W+WS77TNWhKHP6U=";
-          };
-          doCheck = false;
-        };
-
-        mdbook-mermaid = craneLib.buildPackage rec {
-          pname = "mdbook-mermaid";
-          version = "0.17.0";
-          src = pkgs.fetchFromGitHub {
-            owner = "badboy";
-            repo = "mdbook-mermaid";
-            tag = "v${version}";
-            hash = "sha256-9aiu3mQaRgVVhtX/v2hMPzclnVQIhUz4gVy0Xc84zO8=";
-          };
-          doCheck = false;
-        };
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -75,19 +66,23 @@
           inherit src;
           strictDeps = true;
 
-          buildInputs = with pkgs; [ cmake ];
-          nativeBuildInputs = with pkgs; [ perl ];
+          buildInputs = [ pkgs.cmake ];
+          nativeBuildInputs = [ pkgs.perl ];
         };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-        sandhole = craneLib.buildPackage (
-          commonArgs
+        sandhole =
+          (craneLib.buildPackage (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              doCheck = false;
+            }
+          ))
           // {
-            inherit cargoArtifacts;
-            doCheck = false;
-          }
-        );
+            meta.mainProgram = "sandhole";
+          };
       in
       {
         packages.default = sandhole;
@@ -134,6 +129,14 @@
               cargoNextestExtraArgs = "-P nix";
             }
           );
+
+          sandhole-nixos-test-basic = pkgs.callPackage ./nixos/tests/basic.nix {
+            inherit self;
+          };
+
+          sandhole-nixos-test-with-container = pkgs.callPackage ./nixos/tests/with-container.nix {
+            inherit self;
+          };
         };
 
         devShells.default = craneLib.devShell {
@@ -141,13 +144,39 @@
 
           inputsFrom = [ sandhole ];
 
-          packages = [
-            pkgs.cargo-flamegraph
-            pkgs.just
-            mdbook
-            mdbook-mermaid
-            pkgs.to-html
-          ];
+          packages =
+            let
+              mdbook = craneLib.buildPackage rec {
+                pname = "mdbook";
+                version = "0.5.2";
+                src = pkgs.fetchFromGitHub {
+                  owner = "rust-lang";
+                  repo = "mdBook";
+                  tag = "v${version}";
+                  hash = "sha256-gyjD47ZR9o2lIxipzesyJ6mxb9J9W+WS77TNWhKHP6U=";
+                };
+                doCheck = false;
+              };
+
+              mdbook-mermaid = craneLib.buildPackage rec {
+                pname = "mdbook-mermaid";
+                version = "0.17.0";
+                src = pkgs.fetchFromGitHub {
+                  owner = "badboy";
+                  repo = "mdbook-mermaid";
+                  tag = "v${version}";
+                  hash = "sha256-9aiu3mQaRgVVhtX/v2hMPzclnVQIhUz4gVy0Xc84zO8=";
+                };
+                doCheck = false;
+              };
+            in
+            [
+              pkgs.cargo-flamegraph
+              pkgs.just
+              mdbook
+              mdbook-mermaid
+              pkgs.to-html
+            ];
         };
       }
     );
