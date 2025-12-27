@@ -6,6 +6,7 @@
 - [Quick start](./quick_start.md)
   - [Using Docker Compose](./docker_compose.md)
   - [Compiling from source](./compiling_from_source.md)
+  - [NixOS](./nixos.md)
 - [TLS support](./tls_support.md)
 - [Configuration](./configuration.md)
 - [Administration](./administration.md)
@@ -22,4 +23,5 @@
 - [Frequently asked questions](./faq.md)
 - [Features](./features.md)
 - [CLI](./cli.md)
+- [NixOS module options](./nixos_options.md)
 - [Benchmarks](./benchmarks.md)
