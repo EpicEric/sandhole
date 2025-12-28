@@ -7,10 +7,15 @@
 
 let
   cfg = config.services.sandhole;
+
   inherit (lib) types;
+
   name = "sandhole";
+
   stateDir = "/var/lib/${name}";
+
   sshPort = if cfg.settings.sshPort != null then cfg.settings.sshPort else 2222;
+
   httpPort =
     if cfg.settings.disableHttp then
       null
@@ -18,6 +23,7 @@ let
       80
     else
       cfg.settings.httpPort;
+
   httpsPort =
     if cfg.settings.disableHttps then
       null
@@ -25,6 +31,7 @@ let
       443
     else
       cfg.settings.httpsPort;
+
   needsPrivilegedPorts =
     sshPort < 1024 || (httpPort != null && httpPort < 1024) || (httpsPort != null && httpsPort < 1024);
 in
@@ -616,7 +623,7 @@ in
 
     systemd.services = {
       sandhole = {
-        description = "Expose HTTP/SSH/TCP services through SSH port forwarding.";
+        description = "Sandhole - Expose HTTP/SSH/TCP services through SSH port forwarding";
         wantedBy = [ "multi-user.target" ];
         after = [ "network.target" ];
         serviceConfig = {

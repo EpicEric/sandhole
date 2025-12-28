@@ -47,24 +47,24 @@ let
   # ...
 
   # Add admin keys to this directory
-  adminKeysDirectory = pkgs.symlinkJoin {
-    name = "sandhole-admin-keys";
-    paths = [
-      (pkgs.writeText "example-admin.pub" ''
+  adminKeysDirectory = pkgs.linkFarm "sandhole-admin-keys" [
+    {
+      name = "example-admin.pub";
+      path = pkgs.writeText "example-admin.pub" ''
         ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPH3e5SFdwLOuleypjfgauqEUAmgpm9r8lqfvc6G1o1D example-admin
-      '')
-    ];
-  };
+      '';
+    }
+  ];
 
   # Add user keys to this directory
-  userKeysDirectory = pkgs.symlinkJoin {
-    name = "sandhole-user-keys";
-    paths = [
-      (pkgs.writeText "example-user.pub" ''
+  userKeysDirectory = pkgs.linkFarm "sandhole-user-keys" [
+    {
+      name = "example-user.pub";
+      path = pkgs.writeText "example-user.pub" ''
         ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOtH7kS+q8/8TXWAp4OJvRh/7GNkQ6FR/QBOhGJuEwEC example-user
-      '')
-    ];
-  };
+      '';
+    }
+  ];
 
   certificatesDirectory = "/var/lib/sandhole/certificates";
 in
