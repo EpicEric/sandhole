@@ -6,4 +6,4 @@ filter = 'binary_id(sandhole::integration)'
 test-group = 'integration'
 
 [profile.nix]
-default-filter = 'not test(/login/) - binary_id(sandhole::integration)'
+default-filter = 'not test(/^login/) - binary_id(sandhole::integration)'

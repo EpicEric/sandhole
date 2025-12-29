@@ -124,7 +124,7 @@ in
 }
 ```
 
-You can then connect services with the provided keys. For example, to use a SearXNG NixOS container in the same machine:
+You can then connect services with the provided keys. For example, to use a Vaultwarden NixOS container in the same machine:
 
 ```nix
 {
@@ -142,39 +142,51 @@ You can then connect services with the provided keys. For example, to use a Sear
     enableIPv6 = true;
   };
 
-  # Example: Setting up SearXNG
-  containers.searxng = {
+  # Example: Setting up Vaultwarden
+  containers.vaultwarden = {
     autoStart = true;
     privateNetwork = true;
-    hostAddress = "192.168.100.2";
-    localAddress = "192.168.100.11";
-    hostAddress6 = "fc00::1";
-    localAddress6 = "fc00::2";
+    hostAddress = "192.168.102.1";
+    localAddress = "192.168.102.2";
+    hostAddress6 = "fc00::2:1";
+    localAddress6 = "fc00::2:2";
     extraFlags = [ "-U" ];
-    config = { lib, ... }: {
-      services.searx.enable = true;
+    config =
+      { lib, ... }:
+      {
+      services.vaultwarden = {
+        enable = true;
+        config = {
+          DOMAIN = "https://vaultwarden.sandhole.com.br";
+          SIGNUPS_ALLOWED = false;
+          ROCKET_ADDRESS = "::";
+          ROCKET_PORT = 8222;
+          ROCKET_LOG = "warning";
+        };
+      };
 
       networking = {
-        firewall.allowedTCPPorts = [ 8888 ];
+        firewall.allowedTCPPorts = [ 8222 ];
         useHostResolvConf = lib.mkForce false;
       };
-      
-      services.resolved.enable = true;
 
-      system.stateVersion = "25.11";
-    };
+        services.resolved.enable = true;
+
+        system.stateVersion = "25.11";
+      };
   };
 
-  # Proxy SearXNG to the local Sandhole instance
+  # Proxy Vaultwarden to the local Sandhole instance
   services.autossh.sessions = [
     {
-      name = "searxng";
+      name = "vaultwarden";
+      user = "root";
       # Change the arguments as necessary
       extraArguments = ''
         -i /path/to/ssh/key/example-user \
         -o StrictHostKeyChecking=accept-new \
         -o ServerAliveInterval=30 \
-        -R searxng.sandhole.com.br:80:192.168.100.11:8888 \
+        -R vaultwarden.sandhole.com.br:80:192.168.102.2:8222 \
         -p 2222 \
         127.0.0.1
       '';
