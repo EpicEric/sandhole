@@ -13,7 +13,10 @@ If you're using Nix Flakes for your system, you can install the NixOS service li
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     # ...
-    sandhole.url = "github:EpicEric/sandhole";
+    sandhole = {
+      url = "github:EpicEric/sandhole";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -170,10 +173,10 @@ You can then connect services with the provided keys. For example, to use a Vaul
         useHostResolvConf = lib.mkForce false;
       };
 
-        services.resolved.enable = true;
+      services.resolved.enable = true;
 
-        system.stateVersion = "25.11";
-      };
+      system.stateVersion = "25.11";
+    };
   };
 
   # Proxy Vaultwarden to the local Sandhole instance
