@@ -1,0 +1,36 @@
+on:
+  check_suite:
+    types: [completed]
+
+jobs:
+  build-nix-flake:
+    name: Build Nix flake (${{ matrix.platform.system }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - runner: ubuntu-24.04
+            system: x86_64-linux
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: true
+      - name: Install Nix
+        uses: cachix/install-nix-action@4e002c8ec80594ecd40e759629461e26c8abed15 # v31.9.0
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            system = ${{ matrix.platform.system }}
+      - name: Install cachix
+        run: |
+          nix-env -iA cachix -f https://cachix.org/api/v1/install
+      - name: Build and push to Cachix
+        env:
+          CACHIX_NAME: ${{ vars.CACHIX_NAME }}
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        run: |
+          nix build --no-link --print-out-paths | cachix push ${CACHIX_NAME}
