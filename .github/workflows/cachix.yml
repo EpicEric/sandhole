@@ -28,6 +28,11 @@ jobs:
       - name: Install cachix
         run: |
           nix-env -iA cachix -f https://cachix.org/api/v1/install
+      - name: Set up cache
+        env:
+          CACHIX_NAME: ${{ vars.CACHIX_NAME }}
+        run: |
+          cachix use ${CACHIX_NAME}
       - name: Build and push to Cachix
         env:
           CACHIX_NAME: ${{ vars.CACHIX_NAME }}
