@@ -151,8 +151,8 @@ async fn lib_configure_from_scratch() {
     )
     .await
     .expect("cannot copy key2");
-    // Wait for debounce on user pubkeys watcher (2s) + time to process the file
-    sleep(Duration::from_millis(3_000)).await;
+    // Wait for debounce on user pubkeys watcher (1s) + time to process the file
+    sleep(Duration::from_millis(2_500)).await;
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
         None,

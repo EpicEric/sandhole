@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Proper debouncing for certificates/keys file system watchers.
+
 ## 0.8.6 (2025-12-22)
 
 ### Fixed

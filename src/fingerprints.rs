@@ -129,22 +129,32 @@ impl FingerprintsValidator {
         let user_fingerprints = Arc::new(RwLock::new(BTreeMap::new()));
         let (user_watcher, mut user_rx) =
             watch_directory::<RecommendedWatcher>(user_keys_directory.as_path())?;
-        user_rx.mark_changed();
         if !admin_keys_directory.as_path().is_dir() {
             return Err(ServerError::MissingDirectory(admin_keys_directory).into());
         }
         let admin_fingerprints = Arc::new(RwLock::new(BTreeMap::new()));
         let (admin_watcher, mut admin_rx) =
             watch_directory::<RecommendedWatcher>(admin_keys_directory.as_path())?;
-        admin_rx.mark_changed();
         // Populate user keys
         let user_fingerprints_clone = Arc::clone(&user_fingerprints);
         let (user_init_tx, user_init_rx) = oneshot::channel::<()>();
         let user_join_handle = DroppableHandle(tokio::spawn(async move {
             let mut user_init_tx = Some(user_init_tx);
             loop {
-                if user_rx.changed().await.is_err() {
-                    break;
+                if user_init_tx.is_none() {
+                    // Wait and debounce
+                    loop {
+                        if user_rx.changed().await.is_err() {
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        let Ok(changed) = user_rx.has_changed() else {
+                            return;
+                        };
+                        if !changed {
+                            break;
+                        }
+                    }
                 }
                 load_fingerprints_data(
                     user_keys_directory.as_path(),
@@ -156,7 +166,6 @@ impl FingerprintsValidator {
                 if let Some(tx) = user_init_tx.take() {
                     let _ = tx.send(());
                 };
-                tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }));
         // Populate admin keys
@@ -165,8 +174,20 @@ impl FingerprintsValidator {
         let admin_join_handle = DroppableHandle(tokio::spawn(async move {
             let mut admin_init_tx = Some(admin_init_tx);
             loop {
-                if admin_rx.changed().await.is_err() {
-                    break;
+                if admin_init_tx.is_none() {
+                    // Wait and debounce
+                    loop {
+                        if admin_rx.changed().await.is_err() {
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        let Ok(changed) = admin_rx.has_changed() else {
+                            return;
+                        };
+                        if !changed {
+                            break;
+                        }
+                    }
                 }
                 load_fingerprints_data(
                     admin_keys_directory.as_path(),
@@ -178,7 +199,6 @@ impl FingerprintsValidator {
                 if let Some(tx) = admin_init_tx.take() {
                     let _ = tx.send(());
                 };
-                tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }));
         // Wait until the user and admin keys have been populated once

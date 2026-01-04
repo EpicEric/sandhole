@@ -2,6 +2,10 @@ on:
   check_suite:
     types: [completed]
 
+concurrency:
+  group: "cachix"
+  cancel-in-progress: false
+
 jobs:
   build-nix-flake:
     name: Build Nix flake (${{ matrix.platform.system }})

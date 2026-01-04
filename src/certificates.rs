@@ -68,12 +68,26 @@ impl CertificateResolver {
             Arc::new(RwLock::new(TrieBuilder::new().build()));
         let (watcher, mut certificates_rx) =
             watch_directory::<RecommendedWatcher>(directory.as_path())?;
-        certificates_rx.mark_changed();
         let certs_clone = Arc::clone(&certificates);
         let (init_tx, init_rx) = oneshot::channel::<()>();
         let join_handle = DroppableHandle(tokio::spawn(async move {
             let mut init_tx = Some(init_tx);
-            while certificates_rx.changed().await.is_ok() {
+            loop {
+                if init_tx.is_none() {
+                    // Wait and debounce
+                    loop {
+                        if certificates_rx.changed().await.is_err() {
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        let Ok(changed) = certificates_rx.has_changed() else {
+                            return;
+                        };
+                        if !changed {
+                            break;
+                        }
+                    }
+                }
                 let mut builder = TrieBuilder::new();
                 match read_dir(directory.as_path()).await {
                     Ok(mut read_dir) => {
@@ -161,7 +175,6 @@ impl CertificateResolver {
                 if let Some(tx) = init_tx.take() {
                     let _ = tx.send(());
                 }
-                tokio::time::sleep(Duration::from_secs(2)).await
             }
         }));
         // Wait until the certificates have been populated once
