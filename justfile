@@ -25,6 +25,17 @@ nixos-docs:
 flamegraph-test test:
     cargo flamegraph --dev --test {{ test }}
 
+minica:
+    minica -ca-cert tests/data/ca/rootCA.pem -ca-key tests/data/ca/rootCA-key.pem -domains 'localhost'
+    mv localhost/cert.pem tests/data/certificates/localhost/fullchain.pem
+    mv localhost/key.pem tests/data/certificates/localhost/privkey.pem
+    minica -ca-cert tests/data/ca/rootCA.pem -ca-key tests/data/ca/rootCA-key.pem -domains 'foobar.tld,*.foobar.tld'
+    mv foobar.tld/cert.pem tests/data/certificates/foobar.tld/fullchain.pem
+    mv foobar.tld/key.pem tests/data/certificates/foobar.tld/privkey.pem
+    minica -ca-cert tests/data/ca/rootCA.pem -ca-key tests/data/ca/rootCA-key.pem -domains 'sandhole.com.br'
+    mv sandhole.com.br/cert.pem tests/data/custom_certificate/fullchain.pem
+    mv sandhole.com.br/key.pem tests/data/custom_certificate/privkey.pem
+
 install-dev-deps: install-book-deps install-profiling-deps install-test-deps
 
 install-book-deps:

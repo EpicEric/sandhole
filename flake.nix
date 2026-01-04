@@ -196,6 +196,7 @@
               pkgs.just
               mdbook
               mdbook-mermaid
+              pkgs.minica
               pkgs.to-html
             ];
         };
