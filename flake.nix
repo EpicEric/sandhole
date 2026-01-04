@@ -158,14 +158,6 @@
               cargoNextestExtraArgs = "-P nix";
             }
           );
-
-          sandhole-nixos-test-basic = pkgs.callPackage ./nixos/tests/basic.nix {
-            inherit self;
-          };
-
-          sandhole-nixos-test-with-container = pkgs.callPackage ./nixos/tests/with-container.nix {
-            inherit self;
-          };
         };
 
         devShells.default = craneLib.devShell {

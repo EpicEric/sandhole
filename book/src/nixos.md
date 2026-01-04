@@ -8,10 +8,7 @@ If you're using Nix Flakes for your system, you can install the NixOS service li
 
 ```nix
 {
-  description = "My NixOS config";
-
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     # ...
     sandhole = {
       url = "github:EpicEric/sandhole";
@@ -29,7 +26,6 @@ If you're using Nix Flakes for your system, you can install the NixOS service li
       nixosConfigurations."your-hostname" = nixpkgs.lib.nixosSystem {
         specialArgs = { inherit inputs; };
         modules = [
-          ./configuration.nix
           # ...
           sandhole.nixosModules.sandhole
         ];
@@ -50,7 +46,7 @@ let
   # ...
 
   # Add admin keys to this directory
-  adminKeysDirectory = pkgs.linkFarm "sandhole-admin-keys" [
+  adminKeys = pkgs.linkFarm "sandhole-admin-keys" [
     {
       name = "example-admin.pub";
       path = pkgs.writeText "example-admin.pub" ''
@@ -60,7 +56,7 @@ let
   ];
 
   # Add user keys to this directory
-  userKeysDirectory = pkgs.linkFarm "sandhole-user-keys" [
+  userKeys = pkgs.linkFarm "sandhole-user-keys" [
     {
       name = "example-user.pub";
       path = pkgs.writeText "example-user.pub" ''
@@ -69,30 +65,39 @@ let
     }
   ];
 
-  certificatesDirectory = "/var/lib/sandhole/certificates";
+  admin-keys-directory = "/etc/sandhole/admin-keys";
+  user-keys-directory = "/etc/sandhole/user-keys";
+  certificates-directory = "/var/lib/sandhole/certificates";
 in
 
 {
   # ...
 
+  # By symlinking to /etc, Sandhole doesn't have to restart when modifying keys
+  environment.etc = {
+    "sandhole/admin-keys".source = adminKeys;
+    "sandhole/user-keys".source = userKeys;
+  };
+
+  # Configurations for Sandhole
   services.sandhole = {
     # Install the Sandhole package and enable the systemd service
     enable = true;
     # Let Sandhole manage the firewall and open ports from its configuration.
     # Note: If `disableTcp` is `false` (default), it will open all ports >= 1024
     openFirewall = true;
-    # These are the same CLI options from Sandhole, except in camelCase.
-    # See: http://sandhole.com.br/nixos_options.html
-    # Make sure to change at least `domain` and `acmeContactEmail` below
+    # These are the same CLI options from Sandhole, except without leading hyphens.
+    # See: http://sandhole.com.br/cli.html
+    # Make sure to change at least `domain` and `acme-contact-email` below
     settings = {
       domain = "sandhole.com.br";
-      acmeContactEmail = "admin@sandhole.com.br";
-      disableTcp = true;
-      forceHttps = true;
+      acme-contact-email = "admin@sandhole.com.br";
+      disable-tcp = true;
+      force-https = true;
       inherit
-        adminKeysDirectory
-        userKeysDirectory
-        certificatesDirectory
+        admin-keys-directory
+        user-keys-directory
+        certificates-directory
         ;
     };
   };
@@ -200,17 +205,17 @@ You can then connect services with the provided keys. For example, to use a Vaul
 
 ## Binary caching
 
-In order to avoid re-building Sandhole for each update, you can use the Sandhole binary cache. In `configuration.nix`:
+In order to avoid re-building Sandhole for each update, you can use either of the Sandhole binary caches. In `configuration.nix`:
 
 ```nix
   nix.settings = {
     substituters = [
-      "https://nix-community.cachix.org"
       "https://sandhole.cachix.org"
+      "https://cache.garnix.io"
     ];
     trusted-public-keys = [
-      "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
       "sandhole.cachix.org-1:cZadr6kgjQcRvsr++Nv9kgtMOrbLahiZBpuI9WpIXvA="
+      "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
     ];
   };
 ```

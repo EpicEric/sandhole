@@ -13,7 +13,7 @@ let
 
   optionsDoc = (
     pkgs.nixosOptionsDoc {
-      options = builtins.removeAttrs evalOptions.options [ "_module" ];
+      options = removeAttrs evalOptions.options [ "_module" ];
     }
   );
 in
