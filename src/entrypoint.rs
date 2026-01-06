@@ -877,11 +877,13 @@ async fn handle_https_connection(
     #[cfg(feature = "acme")]
     if alpn == [ACME_TLS_ALPN_NAME] {
         if let Some(challenge_config) = certificates.challenge_rustls_config() {
-            let mut tls = TlsAcceptor::from(challenge_config)
-                .accept(stream)
-                .await
-                .unwrap();
-            tls.shutdown().await.unwrap();
+            match TlsAcceptor::from(challenge_config).accept(stream).await {
+                Ok(mut tls) => tls.shutdown().await.unwrap(),
+                Err(error) => {
+                    #[cfg(not(coverage_nightly))]
+                    tracing::warn!(%error, %sni, "Error accepting ACME challenge TLS stream.");
+                }
+            }
         } else {
             #[cfg(not(coverage_nightly))]
             tracing::warn!("Unable to get ACME challenge TLS config.");
