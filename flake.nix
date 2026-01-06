@@ -72,8 +72,10 @@
           inherit src;
           strictDeps = true;
 
-          buildInputs = [ pkgs.cmake ];
-          nativeBuildInputs = [ pkgs.perl ];
+          nativeBuildInputs = [
+            pkgs.cmake
+            pkgs.perl
+          ];
         };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
