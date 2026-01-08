@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{directory::watch_directory, droppable_handle::DroppableHandle, error::ServerError};
-use notify::RecommendedWatcher;
+use notify::PollWatcher;
 use rustls::{
     ServerConfig,
     client::verify_server_name,
@@ -52,7 +52,7 @@ pub(crate) struct CertificateResolver {
     // Task that updates certificates data upon filesystem changes.
     _join_handle: DroppableHandle<()>,
     // Filesystem change watcher.
-    _watcher: RecommendedWatcher,
+    _watcher: PollWatcher,
 }
 
 impl CertificateResolver {
@@ -60,6 +60,7 @@ impl CertificateResolver {
     pub(crate) async fn watch(
         directory: PathBuf,
         alpn_resolver: RwLock<Box<dyn AlpnChallengeResolver>>,
+        directory_poll_interval: Duration,
     ) -> color_eyre::Result<Self> {
         if !directory.as_path().is_dir() {
             return Err(ServerError::MissingDirectory(directory).into());
@@ -67,26 +68,15 @@ impl CertificateResolver {
         let certificates: Arc<RwLock<Trie<String, Arc<CertifiedKey>>>> =
             Arc::new(RwLock::new(TrieBuilder::new().build()));
         let (watcher, mut certificates_rx) =
-            watch_directory::<RecommendedWatcher>(directory.as_path())?;
+            watch_directory::<PollWatcher>(directory.as_path(), directory_poll_interval)?;
+        certificates_rx.mark_changed();
         let certs_clone = Arc::clone(&certificates);
         let (init_tx, init_rx) = oneshot::channel::<()>();
         let join_handle = DroppableHandle(tokio::spawn(async move {
             let mut init_tx = Some(init_tx);
             loop {
-                if init_tx.is_none() {
-                    // Wait and debounce
-                    loop {
-                        if certificates_rx.changed().await.is_err() {
-                            return;
-                        }
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                        let Ok(changed) = certificates_rx.has_changed() else {
-                            return;
-                        };
-                        if !changed {
-                            break;
-                        }
-                    }
+                if certificates_rx.changed().await.is_err() {
+                    return;
                 }
                 let mut builder = TrieBuilder::new();
                 match read_dir(directory.as_path()).await {
@@ -243,7 +233,10 @@ impl ResolvesServerCert for CertificateResolver {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod certificate_resolver_tests {
-    use std::sync::{Arc, RwLock};
+    use std::{
+        sync::{Arc, RwLock},
+        time::Duration,
+    };
 
     use mockall::predicate::eq;
     use rand::{rng, seq::IndexedRandom};
@@ -265,6 +258,7 @@ mod certificate_resolver_tests {
         CertificateResolver::watch(
             std::env::temp_dir().join("invalid_directory_123"),
             RwLock::new(Box::new(DummyAlpnChallengeResolver)),
+            Duration::from_secs(30),
         )
         .await
         .unwrap();
@@ -275,6 +269,7 @@ mod certificate_resolver_tests {
         let resolver = CertificateResolver::watch(
             CERTIFICATES_DIRECTORY.parse().unwrap(),
             RwLock::new(Box::new(DummyAlpnChallengeResolver)),
+            Duration::from_secs(30),
         )
         .await
         .unwrap();
@@ -297,6 +292,7 @@ mod certificate_resolver_tests {
         let resolver = CertificateResolver::watch(
             CERTIFICATES_DIRECTORY.parse().unwrap(),
             RwLock::new(Box::new(DummyAlpnChallengeResolver)),
+            Duration::from_secs(30),
         )
         .await
         .unwrap();
@@ -335,10 +331,13 @@ mod certificate_resolver_tests {
         )
         .await
         .expect("unable to copy privkey.pem to tempdir");
-        let resolver =
-            CertificateResolver::watch(temp_dir, RwLock::new(Box::new(DummyAlpnChallengeResolver)))
-                .await
-                .unwrap();
+        let resolver = CertificateResolver::watch(
+            temp_dir,
+            RwLock::new(Box::new(DummyAlpnChallengeResolver)),
+            Duration::from_secs(30),
+        )
+        .await
+        .unwrap();
         assert!(
             resolver.resolve_server_name("test.foobar.tld").is_none(),
             "shouldn't have resolved invalid domain test.foobar.tld"
@@ -372,10 +371,13 @@ mod certificate_resolver_tests {
         )
         .await
         .expect("unable to copy fullchain.pem to tempdir");
-        let resolver =
-            CertificateResolver::watch(temp_dir, RwLock::new(Box::new(DummyAlpnChallengeResolver)))
-                .await
-                .unwrap();
+        let resolver = CertificateResolver::watch(
+            temp_dir,
+            RwLock::new(Box::new(DummyAlpnChallengeResolver)),
+            Duration::from_secs(30),
+        )
+        .await
+        .unwrap();
         assert!(
             resolver.resolve_server_name("test.foobar.tld").is_none(),
             "shouldn't have resolved invalid domain test.foobar.tld"
@@ -412,10 +414,13 @@ mod certificate_resolver_tests {
         )
         .await
         .expect("unable to copy privkey.pem to tempdir");
-        let resolver =
-            CertificateResolver::watch(temp_dir, RwLock::new(Box::new(DummyAlpnChallengeResolver)))
-                .await
-                .unwrap();
+        let resolver = CertificateResolver::watch(
+            temp_dir,
+            RwLock::new(Box::new(DummyAlpnChallengeResolver)),
+            Duration::from_secs(30),
+        )
+        .await
+        .unwrap();
         assert!(
             resolver.resolve_server_name("test.foobar.tld").is_none(),
             "shouldn't have resolved invalid domain test.foobar.tld"
@@ -452,10 +457,13 @@ mod certificate_resolver_tests {
         fs::write(certs_dir.join("privkey.pem"), b"invalid key")
             .await
             .expect("unable to write privkey.pem to tempdir");
-        let resolver =
-            CertificateResolver::watch(temp_dir, RwLock::new(Box::new(DummyAlpnChallengeResolver)))
-                .await
-                .unwrap();
+        let resolver = CertificateResolver::watch(
+            temp_dir,
+            RwLock::new(Box::new(DummyAlpnChallengeResolver)),
+            Duration::from_secs(30),
+        )
+        .await
+        .unwrap();
         assert!(
             resolver.resolve_server_name("test.foobar.tld").is_none(),
             "shouldn't have resolved invalid domain test.foobar.tld"
@@ -474,6 +482,7 @@ mod certificate_resolver_tests {
             CertificateResolver::watch(
                 CERTIFICATES_DIRECTORY.parse().unwrap(),
                 RwLock::new(Box::new(mock)),
+                Duration::from_secs(30),
             )
             .await
             .unwrap(),

@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{directory::watch_directory, droppable_handle::DroppableHandle, error::ServerError};
-use notify::RecommendedWatcher;
+use notify::PollWatcher;
 use russh::keys::{Algorithm, HashAlg, PublicKey, ssh_key::Fingerprint};
 use tokio::{
     fs::{read_dir, read_to_string},
@@ -60,7 +60,7 @@ pub(crate) struct FingerprintsValidator {
     // Task that updates admin keys data upon filesystem changes.
     _admin_join_handle: DroppableHandle<()>,
     // Filesystem change watchers.
-    _watchers: [RecommendedWatcher; 2],
+    _watchers: [PollWatcher; 2],
 }
 
 // Helper function with duplicated functionality for user and admin keys
@@ -122,39 +122,32 @@ impl FingerprintsValidator {
     pub(crate) async fn watch(
         user_keys_directory: PathBuf,
         admin_keys_directory: PathBuf,
+        directory_poll_interval: Duration,
     ) -> color_eyre::Result<Self> {
         if !user_keys_directory.as_path().is_dir() {
             return Err(ServerError::MissingDirectory(user_keys_directory).into());
         }
         let user_fingerprints = Arc::new(RwLock::new(BTreeMap::new()));
         let (user_watcher, mut user_rx) =
-            watch_directory::<RecommendedWatcher>(user_keys_directory.as_path())?;
+            watch_directory::<PollWatcher>(user_keys_directory.as_path(), directory_poll_interval)?;
+        user_rx.mark_changed();
         if !admin_keys_directory.as_path().is_dir() {
             return Err(ServerError::MissingDirectory(admin_keys_directory).into());
         }
         let admin_fingerprints = Arc::new(RwLock::new(BTreeMap::new()));
-        let (admin_watcher, mut admin_rx) =
-            watch_directory::<RecommendedWatcher>(admin_keys_directory.as_path())?;
+        let (admin_watcher, mut admin_rx) = watch_directory::<PollWatcher>(
+            admin_keys_directory.as_path(),
+            directory_poll_interval,
+        )?;
+        admin_rx.mark_changed();
         // Populate user keys
         let user_fingerprints_clone = Arc::clone(&user_fingerprints);
         let (user_init_tx, user_init_rx) = oneshot::channel::<()>();
         let user_join_handle = DroppableHandle(tokio::spawn(async move {
             let mut user_init_tx = Some(user_init_tx);
             loop {
-                if user_init_tx.is_none() {
-                    // Wait and debounce
-                    loop {
-                        if user_rx.changed().await.is_err() {
-                            return;
-                        }
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                        let Ok(changed) = user_rx.has_changed() else {
-                            return;
-                        };
-                        if !changed {
-                            break;
-                        }
-                    }
+                if user_rx.changed().await.is_err() {
+                    return;
                 }
                 load_fingerprints_data(
                     user_keys_directory.as_path(),
@@ -174,20 +167,8 @@ impl FingerprintsValidator {
         let admin_join_handle = DroppableHandle(tokio::spawn(async move {
             let mut admin_init_tx = Some(admin_init_tx);
             loop {
-                if admin_init_tx.is_none() {
-                    // Wait and debounce
-                    loop {
-                        if admin_rx.changed().await.is_err() {
-                            return;
-                        }
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                        let Ok(changed) = admin_rx.has_changed() else {
-                            return;
-                        };
-                        if !changed {
-                            break;
-                        }
-                    }
+                if admin_rx.changed().await.is_err() {
+                    return;
                 }
                 load_fingerprints_data(
                     admin_keys_directory.as_path(),
@@ -265,6 +246,8 @@ impl FingerprintsValidator {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod fingerprints_validator_tests {
+    use std::time::Duration;
+
     use russh::keys::{HashAlg, parse_public_key_base64};
 
     use super::{AuthenticationType, FingerprintsValidator};
@@ -278,6 +261,7 @@ mod fingerprints_validator_tests {
         let validator = FingerprintsValidator::watch(
             USER_KEYS_DIRECTORY.parse().unwrap(),
             ADMIN_KEYS_DIRECTORY.parse().unwrap(),
+            Duration::from_secs(30),
         )
         .await
         .unwrap();
@@ -322,6 +306,7 @@ mod fingerprints_validator_tests {
         let validator = FingerprintsValidator::watch(
             USER_KEYS_DIRECTORY.parse().unwrap(),
             ADMIN_KEYS_DIRECTORY.parse().unwrap(),
+            Duration::from_secs(30),
         )
         .await
         .unwrap();

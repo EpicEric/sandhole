@@ -370,6 +370,17 @@ pub struct ApplicationConfig {
     #[arg(long, default_value_t = 3, value_name = "VALUE")]
     pub ssh_keepalive_max: usize,
 
+    /// How long to poll certificates and keys directories for new changes.
+    ///
+    /// A low value may consume too many resources on large file trees.
+    #[arg(
+        long,
+        default_value = "30s",
+        value_parser = validate_duration,
+        value_name = "DURATION"
+    )]
+    pub directory_poll_interval: Duration,
+
     /// Grace period for dangling/unauthenticated connections before they are forcefully disconnected.
     ///
     /// A low value may cause valid connections to be erroneously removed.
@@ -511,6 +522,7 @@ mod application_config_tests {
                 buffer_size: 32_768,
                 ssh_keepalive_interval: Duration::from_secs(15),
                 ssh_keepalive_max: 3,
+                directory_poll_interval: Duration::from_secs(30),
                 idle_connection_timeout: Duration::from_secs(2),
                 unproxied_connection_timeout: None,
                 authentication_request_timeout: Duration::from_secs(5),
@@ -568,6 +580,7 @@ mod application_config_tests {
             "--buffer-size=4KB",
             "--ssh-keepalive-interval=10s",
             "--ssh-keepalive-max=2",
+            "--directory-poll-interval=10s",
             "--idle-connection-timeout=3s",
             "--unproxied-connection-timeout=4s",
             "--authentication-request-timeout=6s",
@@ -624,6 +637,7 @@ mod application_config_tests {
                 buffer_size: 4_000,
                 ssh_keepalive_interval: Duration::from_secs(10),
                 ssh_keepalive_max: 2,
+                directory_poll_interval: Duration::from_secs(10),
                 idle_connection_timeout: Duration::from_secs(3),
                 unproxied_connection_timeout: Some(Duration::from_secs(4)),
                 authentication_request_timeout: Duration::from_secs(6),

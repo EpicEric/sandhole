@@ -60,6 +60,7 @@ async fn lib_configure_from_scratch() {
         "--acme-use-staging",
         "--bind-hostnames=none",
         "--allow-requested-ports",
+        "--directory-poll-interval=500ms",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
@@ -152,7 +153,7 @@ async fn lib_configure_from_scratch() {
     .await
     .expect("cannot copy key2");
     // Wait for debounce on user pubkeys watcher (1s) + time to process the file
-    sleep(Duration::from_millis(2_500)).await;
+    sleep(Duration::from_millis(4_000)).await;
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
         None,

@@ -287,6 +287,13 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           [default: 3]
 
+      <b>--directory-poll-interval</b> &lt;DURATION&gt;
+          How long to poll certificates and keys directories for new changes.
+
+          A low value may consume too many resources on large file trees.
+
+          [default: 30s]
+
       <b>--idle-connection-timeout</b> &lt;DURATION&gt;
           Grace period for dangling/unauthenticated connections before they are
           forcefully disconnected.

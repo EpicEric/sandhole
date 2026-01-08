@@ -139,10 +139,13 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .with_context(|| "Error creating admin keys directory")?;
     }
     // Listen on the user_keys and admin_keys directories for new SSH public keys.
-    let fingerprints =
-        FingerprintsValidator::watch(config.user_keys_directory, config.admin_keys_directory)
-            .await
-            .with_context(|| "Error setting up public keys watcher")?;
+    let fingerprints = FingerprintsValidator::watch(
+        config.user_keys_directory,
+        config.admin_keys_directory,
+        config.directory_poll_interval,
+    )
+    .await
+    .with_context(|| "Error setting up public keys watcher")?;
     // Initialize the login API service if a URL has been set.
     #[cfg(feature = "login")]
     let api_login = config
@@ -181,9 +184,13 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     }
     // Listen on the certificates sub-directories for updates to Let's Encrypt certificates.
     let certificates = Arc::new(
-        CertificateResolver::watch(config.certificates_directory, RwLock::new(alpn_resolver))
-            .await
-            .with_context(|| "Error setting up certificates watcher")?,
+        CertificateResolver::watch(
+            config.certificates_directory,
+            RwLock::new(alpn_resolver),
+            config.directory_poll_interval,
+        )
+        .await
+        .with_context(|| "Error setting up certificates watcher")?,
     );
     // Initialize the IP address allowlist/blocklist service.
     let ip_filter = Arc::new(IpFilter::from(IpFilterConfig {
