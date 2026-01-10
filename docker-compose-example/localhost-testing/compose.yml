@@ -1,0 +1,29 @@
+services:
+  sandhole-localhost:
+    image: docker.io/epiceric/sandhole:main
+    container_name: sandhole-localhost
+    volumes:
+      - ./deploy:/deploy:rw
+    network_mode: host
+    # Add your public key to ./deploy/admin_keys/
+    #
+    # To expose a local HTTP service, run:
+    # `ssh -p 12222 -R <SUBDOMAIN>:80:localhost:<LOCAL_PORT> localhost`
+    # and access it at `http://<SUBDOMAIN>.127-0-0-1.sslip.io:18000`
+    #
+    # To access the admin interface, run:
+    # `ssh -t -p 12222 localhost admin`
+    command: |
+      --domain=127-0-0-1.sslip.io
+      --user-keys-directory=/deploy/user_keys/
+      --admin-keys-directory=/deploy/admin_keys/
+      --certificates-directory=/deploy/certificates/
+      --acme-cache-directory=/deploy/acme_cache/
+      --private-key-file=/deploy/server_keys/ssh
+      --ssh-port=12222
+      --http-port=18000
+      --disable-https
+      --allow-requested-subdomains
+      --allow-requested-ports
+      --bind-hostnames=none
+      --directory-poll-interval=5s
