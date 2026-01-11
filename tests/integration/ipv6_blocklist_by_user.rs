@@ -26,7 +26,7 @@ use crate::common::SandholeHandle;
 /// This test ensures that the user-provided `ip-allowlist` and `ip-blocklist`
 /// options work as advertised.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn ip_blocklist_by_user() {
+async fn ipv6_blocklist_by_user() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -108,7 +108,7 @@ async fn ip_blocklist_by_user() {
     assert_eq!(channel_id, channel.id());
 
     // 3. Connect to the HTTP port of our proxy and get blocked by IP
-    let tcp_stream = TcpStream::connect("[::]:18080")
+    let tcp_stream = TcpStream::connect("[::1]:18080")
         .await
         .expect("TCP connection failed");
     let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream))
@@ -176,7 +176,7 @@ async fn ip_blocklist_by_user() {
     )
     .expect("Missing file key2");
     let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "[::]:18022", ssh_client)
+    let mut session = russh::client::connect(Default::default(), "[::1]:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(

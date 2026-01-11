@@ -253,15 +253,17 @@ mod certificate_resolver_tests {
     static UNKNOWN_DOMAINS: &[&str] = &[".invalid.", "tld", "example.com", "too.nested.foobar.tld"];
 
     #[test_log::test(tokio::test)]
-    #[should_panic(expected = "Missing directory")]
     async fn errors_on_missing_directory() {
-        CertificateResolver::watch(
+        let Err(error) = CertificateResolver::watch(
             std::env::temp_dir().join("invalid_directory_123"),
             RwLock::new(Box::new(DummyAlpnChallengeResolver)),
             Duration::from_secs(30),
         )
         .await
-        .unwrap();
+        else {
+            panic!("should've raised error");
+        };
+        assert!(format!("{error:?}").contains("Missing directory"))
     }
 
     #[test_log::test(tokio::test)]

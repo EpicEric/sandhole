@@ -13,7 +13,7 @@ use crate::common::SandholeHandle;
 /// This test ensures that IPs in the blocklist are not allowed to connect to
 /// Sandhole.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn config_ip_blocklist() {
+async fn config_ipv6_blocklist() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -69,7 +69,7 @@ async fn config_ip_blocklist() {
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session = russh::client::connect(Default::default(), "[::]:18022", ssh_client)
+    let mut session = russh::client::connect(Default::default(), "[::1]:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(

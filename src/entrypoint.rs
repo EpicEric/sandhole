@@ -1058,9 +1058,21 @@ async fn wait_for_signal() {
     let mut signal_shutdown = windows::ctrl_shutdown().unwrap();
 
     tokio::select! {
-        _ = signal_c.recv() => #[cfg(not(coverage_nightly))] debug!("Received CTRL_C."),
-        _ = signal_break.recv() => #[cfg(not(coverage_nightly))] debug!("Received CTRL_BREAK."),
-        _ = signal_close.recv() => #[cfg(not(coverage_nightly))] debug!("Received CTRL_CLOSE."),
-        _ = signal_shutdown.recv() => #[cfg(not(coverage_nightly))] debug!("Received CTRL_SHUTDOWN."),
+        _ = signal_c.recv() => {
+            #[cfg(not(coverage_nightly))]
+            tracing::debug!("Received CTRL_C.");
+        },
+        _ = signal_break.recv() => {
+            #[cfg(not(coverage_nightly))]
+            tracing::debug!("Received CTRL_BREAK.");
+        },
+        _ = signal_close.recv() => {
+            #[cfg(not(coverage_nightly))]
+            tracing::debug!("Received CTRL_CLOSE.");
+        },
+        _ = signal_shutdown.recv() => {
+            #[cfg(not(coverage_nightly))]
+            tracing::debug!("Received CTRL_SHUTDOWN.");
+        },
     };
 }

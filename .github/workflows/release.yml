@@ -59,9 +59,6 @@ jobs:
           rustup toolchain install ${RUST_VERSION}
           rustup override set ${RUST_VERSION}
           rustup target add ${{ matrix.platform.target }}
-      - name: Install dependencies
-        run: |
-          brew install libressl
       - name: Build
         run: |
           cargo build --release --locked --target ${{ matrix.platform.target }}
@@ -73,11 +70,44 @@ jobs:
           name: sandhole-${{ matrix.platform.key }}
           path: dist
 
+  build-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            key: windows-amd64
+    name: Build for ${{ matrix.platform.key }}
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: true
+      - name: Fetch MSRV and add target
+        run: |
+          rustup toolchain install ${RUST_VERSION}
+          rustup override set ${RUST_VERSION}
+          rustup target add ${{ matrix.platform.target }}
+      - name: Build
+        shell: bash
+        run: |
+          cargo build --release --locked --target ${{ matrix.platform.target }}
+          mkdir dist
+          cp target/${{ matrix.platform.target }}/release/sandhole.exe dist/sandhole-${{ matrix.platform.key }}.exe
+      - name: Upload artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: sandhole-${{ matrix.platform.key }}
+          path: dist
+
   create-release-draft:
     name: Create release draft
     needs:
       - build-linux
       - build-macos
+      - build-windows
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -99,6 +129,11 @@ jobs:
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sandhole-macos-arm64
+          path: out/
+      - name: Download windows-amd64 artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: sandhole-windows-amd64
           path: out/
       - name: Create release draft with binary assets
         env:

@@ -45,7 +45,7 @@ async fn admin_remove_user() {
         "--acme-cache-directory",
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
         "--disable-directory-creation",
-        "--listen-address=::",
+        "--listen-address=127.0.0.1",
         "--ssh-port=18022",
         "--http-port=18080",
         "--https-port=18443",
@@ -77,7 +77,7 @@ async fn admin_remove_user() {
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session_1 = russh::client::connect(Default::default(), "[::1]:18022", ssh_client)
+    let mut session_1 = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
     assert!(
@@ -192,7 +192,7 @@ async fn admin_remove_user() {
             r"HTTP services",
             r"aaa\.foobar\.tld",
             r"SHA256:GehKyA\S*",
-            r"\[::1\]:\d{4,5}",
+            r"127.0.0.1:\d{4,5}",
             r"custom_user",
             r"127\.0\.0\.1:\d{4,5}",
         ]
@@ -326,7 +326,7 @@ async fn admin_remove_user() {
             r"TCP services",
             r"38080",
             r"SHA256:GehKyA\S*",
-            r"\[::1\]:\d{4,5}",
+            r"127.0.0.1:\d{4,5}",
         ]
         .into_iter()
         .map(|re| Regex::new(re).expect("Invalid regex"))

@@ -38,7 +38,7 @@ async fn ssh_client_timeout() {
         "--acme-cache-directory",
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
         "--disable-directory-creation",
-        "--listen-address=::",
+        "--listen-address=127.0.0.1",
         "--ssh-port=18022",
         "--http-port=18080",
         "--https-port=18443",

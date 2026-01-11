@@ -80,7 +80,7 @@ async fn tcp_reject_low_ports() {
         "authentication didn't succeed"
     );
     assert!(
-        session.tcpip_forward("localhost", 42000).await.is_ok(),
+        session.tcpip_forward("localhost", 20555).await.is_ok(),
         "should allow binding on high port"
     );
     assert!(
