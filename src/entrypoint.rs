@@ -310,7 +310,27 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .force_random_subdomains(!config.allow_requested_subdomains)
             .maybe_random_subdomain_seed(config.random_subdomain_seed)
             .random_subdomain_length(config.random_subdomain_length);
-        if let Some(seed) = config.random_subdomain_value {
+        let seed = {
+            if let Some(path) = config.random_subdomain_value_file {
+                if config.random_subdomain_value.is_some() {
+                    #[cfg(not(coverage_nightly))]
+                    tracing::warn!(
+                        "--random-subdomain-value-file is set; --random-subdomain-value will be ignored."
+                    );
+                }
+                let data = fs::read_to_string(path)
+                    .await
+                    .with_context(|| "Failed to read --random-subdomain-value-file")?;
+                let seed = data
+                    .trim()
+                    .parse()
+                    .with_context(|| "Unable to parse --random-subdomain-value-file as u64")?;
+                Some(seed)
+            } else {
+                config.random_subdomain_value
+            }
+        };
+        if let Some(seed) = seed {
             builder.seed(seed).build()
         } else {
             builder.build()

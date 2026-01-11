@@ -292,17 +292,30 @@ pub struct ApplicationConfig {
     #[arg(long, value_name = "RATE", value_parser = validate_byte_size_usize)]
     pub rate_limit_per_user: Option<usize>,
 
-    /// Set a value for random subdomains for use in conjunction with `--random-subdomain-seed` to allow binding to
-    /// the same random address between Sandhole restarts.
+    /// Set a U64 value for random subdomains for use in conjunction with
+    /// `--random-subdomain-seed` to allow binding to the same random address between
+    /// Sandhole restarts.
     ///
     /// Beware that this can lead to collisions if misused!
     ///
-    /// If unset, defaults to a random value.
+    /// If this and `--random-subdomain-value-file` are unset, defaults to a random value.
     #[arg(long, value_name = "VALUE")]
     pub random_subdomain_value: Option<u64>,
 
-    /// Which value to seed with when generating random subdomains, for determinism. This allows binding to the same
-    /// random address until Sandhole is restarted.
+    /// Set a file containing a U64 value for random subdomains for use in conjunction with
+    /// `--random-subdomain-seed` to allow binding to the same random address between
+    /// Sandhole restarts.
+    ///
+    /// Beware that this can lead to collisions if misused!
+    ///
+    /// If this and `--random-subdomain-value` are unset, defaults to a random value.
+    ///
+    /// This option takes priority over `--random-subdomain-value`.
+    #[arg(long, value_name = "FILE")]
+    pub random_subdomain_value_file: Option<PathBuf>,
+
+    /// Which value to seed with when generating random subdomains, for determinism.
+    /// This allows binding to the same random address until Sandhole is restarted.
     ///
     /// Beware that this can lead to collisions if misused!
     ///
@@ -512,6 +525,7 @@ mod application_config_tests {
                 quota_per_user: None,
                 rate_limit_per_user: None,
                 random_subdomain_value: None,
+                random_subdomain_value_file: None,
                 random_subdomain_seed: None,
                 random_subdomain_length: 6.try_into().unwrap(),
                 random_subdomain_filter_profanities: false,
@@ -570,6 +584,7 @@ mod application_config_tests {
             "--quota-per-user=10",
             "--rate-limit-per-user=1MB",
             "--random-subdomain-value=1337",
+            "--random-subdomain-value-file=/file/seed",
             "--random-subdomain-seed=ip-and-user",
             "--random-subdomain-length=8",
             "--random-subdomain-filter-profanities",
@@ -624,6 +639,7 @@ mod application_config_tests {
                 quota_per_user: Some(10.try_into().unwrap()),
                 rate_limit_per_user: Some(1_000_000),
                 random_subdomain_value: Some(1337),
+                random_subdomain_value_file: Some("/file/seed".into()),
                 random_subdomain_seed: Some(RandomSubdomainSeed::IpAndUser),
                 random_subdomain_length: 8.try_into().unwrap(),
                 random_subdomain_filter_profanities: true,

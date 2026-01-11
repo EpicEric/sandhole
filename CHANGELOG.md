@@ -5,6 +5,7 @@
 ### Added
 
 - Add `--directory-poll-interval` CLI flag.
+- Add `--random-subdomain-value-file` CLI flag.
 
 ### Fixed
 
