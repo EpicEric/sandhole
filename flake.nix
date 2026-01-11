@@ -110,11 +110,32 @@
         optionsDoc = pkgs.nixosOptionsDoc {
           options = removeAttrs evalOptions.options [ "_module" ];
         };
+
+        sandhole-book = pkgs.stdenv.mkDerivation {
+          name = "sandhole-book";
+          src = lib.fileset.toSource {
+            root = ./.;
+            fileset = lib.fileset.unions [
+              (lib.fileset.fileFilter (file: file.hasExt "js") ./book)
+              ./book/book.toml
+              ./book/src
+              ./book/theme
+            ];
+          };
+          buildInputs = [
+            pkgs.mdbook
+            pkgs.mdbook-mermaid
+          ];
+          buildPhase = ''
+            ${pkgs.mdbook}/bin/mdbook build book --dest-dir $out
+          '';
+        };
       in
       {
         packages = {
           inherit sandhole;
           default = sandhole;
+          _book = sandhole-book;
           _docs = optionsDoc.optionsCommonMark;
         };
 
@@ -167,40 +188,14 @@
 
           inputsFrom = [ sandhole ];
 
-          packages =
-            let
-              mdbook = craneLib.buildPackage rec {
-                pname = "mdbook";
-                version = "0.5.2";
-                src = pkgs.fetchFromGitHub {
-                  owner = "rust-lang";
-                  repo = "mdBook";
-                  tag = "v${version}";
-                  hash = "sha256-gyjD47ZR9o2lIxipzesyJ6mxb9J9W+WS77TNWhKHP6U=";
-                };
-                doCheck = false;
-              };
-
-              mdbook-mermaid = craneLib.buildPackage rec {
-                pname = "mdbook-mermaid";
-                version = "0.17.0";
-                src = pkgs.fetchFromGitHub {
-                  owner = "badboy";
-                  repo = "mdbook-mermaid";
-                  tag = "v${version}";
-                  hash = "sha256-9aiu3mQaRgVVhtX/v2hMPzclnVQIhUz4gVy0Xc84zO8=";
-                };
-                doCheck = false;
-              };
-            in
-            [
-              pkgs.cargo-flamegraph
-              pkgs.just
-              mdbook
-              mdbook-mermaid
-              pkgs.minica
-              pkgs.to-html
-            ];
+          packages = [
+            pkgs.cargo-flamegraph
+            pkgs.just
+            pkgs.mdbook
+            pkgs.mdbook-mermaid
+            pkgs.minica
+            pkgs.to-html
+          ];
         };
       }
     );
