@@ -212,13 +212,26 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           multiple of `--buffer-size`.
 
       <b>--random-subdomain-value</b> &lt;VALUE&gt;
-          Set a value for random subdomains for use in conjunction with
+          Set a U64 value for random subdomains for use in conjunction with
           `--random-subdomain-seed` to allow binding to the same random address
           between Sandhole restarts.
 
           Beware that this can lead to collisions if misused!
 
-          If unset, defaults to a random value.
+          If this and `--random-subdomain-value-file` are unset, defaults to a
+          random value.
+
+      <b>--random-subdomain-value-file</b> &lt;FILE&gt;
+          Set a file containing a U64 value for random subdomains for use in
+          conjunction with `--random-subdomain-seed` to allow binding to the same
+          random address between Sandhole restarts.
+
+          Beware that this can lead to collisions if misused!
+
+          If this and `--random-subdomain-value` are unset, defaults to a random
+          value.
+
+          This option takes priority over `--random-subdomain-value`.
 
       <b>--random-subdomain-seed</b> &lt;SEED&gt;
           Which value to seed with when generating random subdomains, for

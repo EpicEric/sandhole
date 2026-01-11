@@ -13,6 +13,10 @@
 - Switch directory watcher strategy in order to follow symlinks.
 - Accept configured ports for SSH/HTTP/HTTPS on `remote_forwarding`.
 
+### Changed
+
+- Update dependencies.
+
 ## 0.8.6 (2025-12-22)
 
 ### Fixed

@@ -76,7 +76,7 @@ impl<C: Configurer> ApiLogin<C> {
                 .with_context(|| "Unable to build HTTP client")?
         } else if scheme == Scheme::HTTPS {
             client_builder
-                .use_preconfigured_tls(
+                .tls_backend_preconfigured(
                     configurer
                         .get_client_config(rustls::crypto::aws_lc_rs::default_provider())
                         .with_context(|| "Unable to get TLS client configuration")?,
