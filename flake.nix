@@ -2,7 +2,7 @@
   description = "Expose HTTP/SSH/TCP services through SSH port forwarding";
 
   inputs = {
-    nixpkgs.url = "nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     crane.url = "github:ipetkov/crane";
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay = {
@@ -113,7 +113,7 @@
 
         sandhole-cli = pkgs.stdenv.mkDerivation {
           name = "sandhole-cli";
-          buildInputs = [
+          nativeBuildInputs = [
             pkgs.which
             pkgs.unixtools.script
           ];
@@ -134,7 +134,7 @@
               ./book/theme
             ];
           };
-          buildInputs = [
+          nativeBuildInputs = [
             pkgs.mdbook-mermaid
           ];
           buildPhase = ''

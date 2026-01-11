@@ -90,29 +90,31 @@ impl Forwarder {
         context: &mut RemoteForwardingContext<'_>,
         address: &str,
         port: &mut u32,
+        ssh_port: u16,
+        http_port: Option<u16>,
+        https_port: Option<u16>,
         handle: Handle,
     ) -> Result<bool, russh::Error> {
-        match port {
-            22 => {
-                SshForwardingHandler
-                    .remote_forwarding(context, address, port, handle)
-                    .await
-            }
-            80 | 443 => {
-                HttpForwardingHandler
-                    .remote_forwarding(context, address, port, handle)
-                    .await
-            }
-            _ if context.server.is_alias(address) => {
-                AliasForwardingHandler
-                    .remote_forwarding(context, address, port, handle)
-                    .await
-            }
-            _ => {
-                TcpForwardingHandler
-                    .remote_forwarding(context, address, port, handle)
-                    .await
-            }
+        if *port == 22 || *port == u32::from(ssh_port) {
+            SshForwardingHandler
+                .remote_forwarding(context, address, port, handle)
+                .await
+        } else if *port == 80
+            || *port == 443
+            || http_port.is_some_and(|http_port| *port == u32::from(http_port))
+            || https_port.is_some_and(|https_port| *port == u32::from(https_port))
+        {
+            HttpForwardingHandler
+                .remote_forwarding(context, address, port, handle)
+                .await
+        } else if context.server.is_alias(address) {
+            AliasForwardingHandler
+                .remote_forwarding(context, address, port, handle)
+                .await
+        } else {
+            TcpForwardingHandler
+                .remote_forwarding(context, address, port, handle)
+                .await
         }
     }
 
