@@ -87,6 +87,8 @@ jobs:
             target: x86_64-apple-darwin
           - runner: macos-15
             target: aarch64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -101,10 +103,17 @@ jobs:
           rustup toolchain install nightly-${{ matrix.platform.target }}
           rustup override set nightly-${{ matrix.platform.target }}
       - name: Test
+        if: matrix.platform.runner != 'windows-latest'
         env:
           RUSTFLAGS: -A dead_code -A unused_variables
         run: |
           cargo nextest run --no-fail-fast --verbose --locked
+      - name: Test without IPv6
+        if: matrix.platform.runner == 'windows-latest'
+        env:
+          RUSTFLAGS: -A dead_code -A unused_variables
+        run: |
+          cargo nextest run --no-fail-fast --verbose --locked --profile ipv4
   coverage-nightly:
     name: Test coverage on nightly (ubuntu-24.04)
     runs-on: ubuntu-24.04

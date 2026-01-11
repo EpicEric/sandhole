@@ -6,6 +6,7 @@
 
 - Add `--directory-poll-interval` CLI flag.
 - Add `--random-subdomain-value-file` CLI flag.
+- Official Windows support (x64 only).
 
 ### Fixed
 
@@ -18,6 +19,10 @@
 - Update dependencies.
 
 ## 0.8.6 (2025-12-22)
+
+### Added
+
+- Official macOS support (x64 + ARM).
 
 ### Fixed
 

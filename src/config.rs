@@ -664,37 +664,51 @@ mod application_config_tests {
     }
 
     #[test_log::test]
-    #[should_panic(expected = "invalid dns name")]
     fn fails_to_parse_if_invalid_domain() {
-        ApplicationConfig::try_parse_from(["sandhole", "--domain=.foobar.tld"]).unwrap();
+        let Err(error) = ApplicationConfig::try_parse_from(["sandhole", "--domain=.foobar.tld"])
+        else {
+            panic!("should've raised error");
+        };
+        assert!(format!("{error:?}").contains("invalid domain"))
     }
 
     #[test_log::test]
-    #[should_panic(expected = "prefix cannot contain period")]
     fn fails_to_parse_if_invalid_txt_record_prefix() {
-        ApplicationConfig::try_parse_from([
+        let Err(error) = ApplicationConfig::try_parse_from([
             "sandhole",
             "--domain=foobar.tld",
             "--txt-record-prefix=hello.world",
-        ])
-        .unwrap();
+        ]) else {
+            panic!("should've raised error");
+        };
+        assert!(
+            format!("{error:?}")
+                .to_string()
+                .contains("prefix cannot contain period")
+        )
     }
 
     #[test_log::test]
-    #[should_panic(expected = "time unit needed, for example 42sec or 42ms")]
     fn fails_to_parse_if_invalid_duration() {
-        ApplicationConfig::try_parse_from([
+        let Err(error) = ApplicationConfig::try_parse_from([
             "sandhole",
             "--domain=foobar.tld",
             "--idle-connection-timeout=42",
-        ])
-        .unwrap();
+        ]) else {
+            panic!("should've raised error");
+        };
+        assert!(format!("{error:?}").contains("time unit needed, for example 42sec or 42ms"))
     }
 
     #[test_log::test]
-    #[should_panic(expected = "couldn't parse \"abc\" into a ByteSize")]
     fn fails_to_parse_if_invalid_byte_size() {
-        ApplicationConfig::try_parse_from(["sandhole", "--domain=foobar.tld", "--buffer-size=abc"])
-            .unwrap();
+        let Err(error) = ApplicationConfig::try_parse_from([
+            "sandhole",
+            "--domain=foobar.tld",
+            "--buffer-size=abc",
+        ]) else {
+            panic!("should've raised error");
+        };
+        assert!(format!("{error:?}").contains("couldn't parse \"abc\" into a ByteSize"))
     }
 }

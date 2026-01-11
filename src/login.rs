@@ -111,6 +111,8 @@ impl<C: Configurer> ApiLogin<C> {
 mod api_login_tests {
     use std::{
         net::{IpAddr, Ipv4Addr, SocketAddr},
+        path::PathBuf,
+        str::FromStr,
         sync::Arc,
     };
 
@@ -350,73 +352,95 @@ mod api_login_tests {
     }
 
     #[test_log::test]
-    #[should_panic(expected = "Invalid endpoint for API login")]
     fn fails_on_empty_url() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        ApiLogin::from(mock, "".into(), None).unwrap();
+        let Err(error) = ApiLogin::from(mock, "".into(), None) else {
+            panic!("should've raised error");
+        };
+        assert!(error.to_string().contains("Invalid endpoint for API login"))
     }
 
     #[test_log::test]
-    #[should_panic(expected = "Invalid endpoint for API login")]
     fn fails_on_invalid_url() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        ApiLogin::from(mock, "https://should.fail/\x00".into(), None).unwrap();
+        let Err(error) = ApiLogin::from(mock, "https://should.fail/\x00".into(), None) else {
+            panic!("should've raised error");
+        };
+        assert!(error.to_string().contains("Invalid endpoint for API login"))
     }
 
     #[test_log::test]
-    #[should_panic(expected = "Invalid endpoint for API login")]
     fn fails_on_missing_host() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        ApiLogin::from(mock, "https:///invalid".into(), None).unwrap();
+        let Err(error) = ApiLogin::from(mock, "https:///invalid".into(), None) else {
+            panic!("should've raised error");
+        };
+        assert!(error.to_string().contains("Invalid endpoint for API login"))
     }
 
     #[test_log::test]
-    #[should_panic(expected = "Invalid endpoint for API login")]
     fn fails_on_invalid_host() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        ApiLogin::from(mock, "https://should\x00fail".into(), None).unwrap();
+        let Err(error) = ApiLogin::from(mock, "https://should\x00fail".into(), None) else {
+            panic!("should've raised error");
+        };
+        assert!(error.to_string().contains("Invalid endpoint for API login"))
     }
 
     #[test_log::test]
-    #[should_panic(expected = "API login URL has no scheme")]
     fn fails_on_missing_scheme() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        ApiLogin::from(mock, "should.fail".into(), None).unwrap();
+        let Err(error) = ApiLogin::from(mock, "should.fail".into(), None) else {
+            panic!("should've raised error");
+        };
+        assert!(error.to_string().contains("API login URL has no scheme"))
     }
 
     #[test_log::test]
-    #[should_panic(expected = "Invalid API login URL")]
     fn fails_on_unknown_scheme() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        ApiLogin::from(mock, "unknown://should.fail".into(), None).unwrap();
+        let Err(error) = ApiLogin::from(mock, "unknown://should.fail".into(), None) else {
+            panic!("should've raised error");
+        };
+        assert!(error.to_string().contains("Invalid API login URL"))
     }
 
     #[test_log::test(tokio::test)]
-    #[should_panic(expected = "Connection refused")]
     async fn errors_when_unable_to_connect_to_socket() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
 
         let api_login =
             ApiLogin::from(mock, "http://localhost:28015/authentication".into(), None).unwrap();
-        api_login
+        let Err(error) = api_login
             .authenticate(&AuthenticationRequest {
                 user: "eric",
                 password: "sandhole",
                 remote_address: &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345),
             })
             .await
-            .unwrap();
+        else {
+            panic!("should've raised error");
+        };
+        assert!(format!("{error:?}").to_string().contains({
+            #[cfg(unix)]
+            {
+                "Connection refused"
+            }
+            #[cfg(windows)]
+            {
+                "No connection could be made because the target machine actively refused it"
+            }
+        }));
     }
 
     #[test_log::test(tokio::test)]
-    #[should_panic(expected = "connection closed before message completed")]
     async fn errors_when_unable_to_complete_http_handshake() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -430,18 +454,20 @@ mod api_login_tests {
 
         let api_login =
             ApiLogin::from(mock, "http://localhost:28016/authentication".into(), None).unwrap();
-        api_login
+        let Err(error) = api_login
             .authenticate(&AuthenticationRequest {
                 user: "eric",
                 password: "sandhole",
                 remote_address: &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345),
             })
             .await
-            .unwrap();
+        else {
+            panic!("should've raised error");
+        };
+        assert!(format!("{error:?}").contains("connection closed before message completed"));
     }
 
     #[test_log::test(tokio::test)]
-    #[should_panic(expected = "connection closed before message completed")]
     async fn errors_when_http_request_fails() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
@@ -463,26 +489,29 @@ mod api_login_tests {
 
         let api_login =
             ApiLogin::from(mock, "http://localhost:28017/authentication".into(), None).unwrap();
-        api_login
+        let Err(error) = api_login
             .authenticate(&AuthenticationRequest {
                 user: "eric",
                 password: "sandhole",
                 remote_address: &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345),
             })
             .await
-            .unwrap();
+        else {
+            panic!("should've raised error");
+        };
+        assert!(format!("{error:?}").contains("connection closed before message completed"));
     }
 
     #[test_log::test(tokio::test)]
-    #[should_panic(expected = "Connection reset by peer")]
     async fn errors_when_unable_to_complete_https_handshake() {
         let mut mock = MockConfigurer::new();
         let mut root_store = RootCertStore::empty();
         root_store.add_parsable_certificates(
-            CertificateDer::pem_file_iter(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/data/ca/rootCA.pem"
-            ))
+            CertificateDer::pem_file_iter(
+                PathBuf::from_str(env!("CARGO_MANIFEST_DIR"))
+                    .unwrap()
+                    .join("tests/data/ca/rootCA.pem"),
+            )
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
             .expect("Failed to parse client certificates"),
         );
@@ -509,26 +538,38 @@ mod api_login_tests {
             None,
         )
         .unwrap();
-        api_login
+        let Err(error) = api_login
             .authenticate(&AuthenticationRequest {
                 user: "eric",
                 password: "sandhole",
                 remote_address: &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345),
             })
             .await
-            .unwrap();
+        else {
+            panic!("should've raised error");
+        };
+        assert!(format!("{error:?}").contains({
+            #[cfg(unix)]
+            {
+                "Connection reset by peer"
+            }
+            #[cfg(windows)]
+            {
+                "An existing connection was forcibly closed by the remote host"
+            }
+        }));
     }
 
     #[test_log::test(tokio::test)]
-    #[should_panic(expected = "peer closed connection without sending TLS close_notify")]
     async fn errors_when_https_request_fails() {
         let mut mock = MockConfigurer::new();
         let mut root_store = RootCertStore::empty();
         root_store.add_parsable_certificates(
-            CertificateDer::pem_file_iter(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/data/ca/rootCA.pem"
-            ))
+            CertificateDer::pem_file_iter(
+                PathBuf::from_str(env!("CARGO_MANIFEST_DIR"))
+                    .unwrap()
+                    .join("tests/data/ca/rootCA.pem"),
+            )
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
             .expect("Failed to parse client certificates"),
         );
@@ -551,16 +592,18 @@ mod api_login_tests {
             .unwrap()
             .with_no_client_auth()
             .with_single_cert(
-                CertificateDer::pem_file_iter(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/tests/data/certificates/localhost/fullchain.pem"
-                ))
+                CertificateDer::pem_file_iter(
+                    PathBuf::from_str(env!("CARGO_MANIFEST_DIR"))
+                        .unwrap()
+                        .join("tests/data/certificates/localhost/fullchain.pem"),
+                )
                 .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
                 .expect("Failed to parse server certificates"),
-                PrivateKeyDer::from_pem_file(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/tests/data/certificates/localhost/privkey.pem"
-                ))
+                PrivateKeyDer::from_pem_file(
+                    PathBuf::from_str(env!("CARGO_MANIFEST_DIR"))
+                        .unwrap()
+                        .join("tests/data/certificates/localhost/privkey.pem"),
+                )
                 .expect("Failed to parse server key"),
             )
             .expect("Failed to build server config"),
@@ -590,13 +633,19 @@ mod api_login_tests {
             None,
         )
         .unwrap();
-        api_login
+        let Err(error) = api_login
             .authenticate(&AuthenticationRequest {
                 user: "eric",
                 password: "sandhole",
                 remote_address: &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345),
             })
             .await
-            .unwrap();
+        else {
+            panic!("should've raised error");
+        };
+        assert!(
+            format!("{error:?}")
+                .contains("peer closed connection without sending TLS close_notify")
+        );
     }
 }
