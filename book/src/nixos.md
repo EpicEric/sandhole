@@ -10,10 +10,7 @@ If you're using Nix Flakes for your system, you can install the NixOS service li
 {
   inputs = {
     # ...
-    sandhole = {
-      url = "github:EpicEric/sandhole";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    sandhole.url = "github:EpicEric/sandhole";
   };
 
   outputs =
