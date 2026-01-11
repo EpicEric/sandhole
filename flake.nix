@@ -111,6 +111,18 @@
           options = removeAttrs evalOptions.options [ "_module" ];
         };
 
+        sandhole-cli = pkgs.stdenv.mkDerivation {
+          name = "sandhole-cli";
+          buildInputs = [
+            pkgs.which
+            pkgs.unixtools.script
+          ];
+          buildCommand = ''
+            mkdir $out
+            ${pkgs.to-html}/bin/to-html --no-prompt "${sandhole}/bin/sandhole --help" > $out/cli.html
+          '';
+        };
+
         sandhole-book = pkgs.stdenv.mkDerivation {
           name = "sandhole-book";
           src = lib.fileset.toSource {
@@ -123,7 +135,6 @@
             ];
           };
           buildInputs = [
-            pkgs.mdbook
             pkgs.mdbook-mermaid
           ];
           buildPhase = ''
@@ -136,6 +147,7 @@
           inherit sandhole;
           default = sandhole;
           _book = sandhole-book;
+          _cli = sandhole-cli;
           _docs = optionsDoc.optionsCommonMark;
         };
 
