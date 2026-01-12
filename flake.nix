@@ -20,27 +20,26 @@
       rust-overlay,
       ...
     }:
-    {
+    flake-utils.lib.eachDefaultSystemPassThrough (system: {
       nixosModules = {
         default = self.nixosModules.sandhole;
         sandhole =
           {
-            pkgs,
             lib,
             ...
           }:
           {
             imports = [ ./nixos/module.nix ];
-            services.sandhole.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+            services.sandhole.package = lib.mkDefault self.packages.${system}.default;
           };
       };
       overlays = {
         default = self.overlays.sandhole;
         sandhole = final: prev: {
-          sandhole = self.packages.${prev.stdenv.hostPlatform.system}.default;
+          sandhole = self.packages.${system}.default;
         };
       };
-    }
+    })
     // flake-utils.lib.eachDefaultSystem (
       system:
       let

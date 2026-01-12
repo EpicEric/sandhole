@@ -7,6 +7,7 @@ use crate::{
     ip::IpFilter,
     reactor::TcpReactor,
     ssh::connection_handler::SshTunnelHandler,
+    tcp_listener::get_tcp_listener,
     telemetry::{TELEMETRY_COUNTER_TCP_CONNECTIONS, TELEMETRY_KEY_PORT},
 };
 use ahash::RandomState;
@@ -14,7 +15,7 @@ use bon::Builder;
 use color_eyre::eyre::Context;
 use dashmap::DashMap;
 use metrics::counter;
-use tokio::{io::copy_bidirectional_with_sizes, net::TcpListener, time::timeout};
+use tokio::{io::copy_bidirectional_with_sizes, time::timeout};
 
 // Service that handles creating TCP sockets for reverse forwarding connections.
 #[derive(Builder)]
@@ -49,7 +50,7 @@ impl PortHandler for Arc<TcpHandler> {
             return Ok(port);
         }
         // Check if we're able to bind to the given address and port.
-        let listener = TcpListener::bind((self.listen_address, port)).await?;
+        let listener = get_tcp_listener((self.listen_address, port))?;
         let port = listener
             .local_addr()
             .with_context(|| "Missing local address when binding port")?
@@ -65,10 +66,6 @@ impl PortHandler for Arc<TcpHandler> {
                             #[cfg(not(coverage_nightly))]
                             tracing::info!(%address, "Rejecting TCP connection: IP not allowed.");
                             continue;
-                        }
-                        if let Err(error) = stream.set_nodelay(true) {
-                            #[cfg(not(coverage_nightly))]
-                            tracing::warn!(%address, %error, "Error setting nodelay.");
                         }
                         // Get the handler for this port
                         let ip = address.ip().to_canonical();
