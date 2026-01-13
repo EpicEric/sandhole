@@ -32,7 +32,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::{
     fs,
     io::copy_bidirectional_with_sizes,
-    net::{TcpListener, TcpStream},
+    net::TcpStream,
     pin,
     time::{sleep, timeout},
 };
@@ -63,6 +63,7 @@ use crate::{
     reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
     ssh::Server,
     tcp::TcpHandler,
+    tcp_listener::get_tcp_listener,
     telemetry::{
         TELEMETRY_COUNTER_NETWORK_RX, TELEMETRY_COUNTER_NETWORK_TX,
         TELEMETRY_COUNTER_SNI_CONNECTIONS, TELEMETRY_COUNTER_TOTAL_MEMORY,
@@ -653,8 +654,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     let mut join_handle_http = if config.disable_http {
         DroppableHandle(tokio::spawn(future::pending()))
     } else {
-        let http_listener = TcpListener::bind((config.listen_address, config.http_port.into()))
-            .await
+        let http_listener = get_tcp_listener((config.listen_address, config.http_port.into()))
             .with_context(|| "Error listening to HTTP port")?;
         #[cfg(not(coverage_nightly))]
         tracing::info!(
@@ -701,10 +701,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                     tracing::info!(%address, "Rejecting HTTP connection: IP not allowed.");
                     continue;
                 }
-                if let Err(error) = stream.set_nodelay(true) {
-                    #[cfg(not(coverage_nightly))]
-                    tracing::warn!(%error, %address, "Error setting nodelay.");
-                }
                 // Create a Hyper service and serve over the accepted TCP connection.
                 let service = service_fn(move |req: Request<Incoming>| {
                     proxy_handler(req, address, None, Arc::clone(&proxy_data))
@@ -730,8 +726,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     let mut join_handle_https = if config.disable_http || config.disable_https {
         DroppableHandle(tokio::spawn(future::pending()))
     } else {
-        let https_listener = TcpListener::bind((config.listen_address, config.https_port.into()))
-            .await
+        let https_listener = get_tcp_listener((config.listen_address, config.https_port.into()))
             .with_context(|| "Error listening to HTTPS port")?;
         #[cfg(not(coverage_nightly))]
         tracing::info!(
@@ -784,10 +779,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                     tracing::info!(%address, "Rejecting HTTPS connection: IP not allowed.");
                     continue;
                 }
-                if let Err(error) = stream.set_nodelay(true) {
-                    #[cfg(not(coverage_nightly))]
-                    tracing::warn!(%error, %address, "Error setting nodelay.");
-                }
                 let config = HandleHttpsConnectionConfig {
                     stream,
                     address,
@@ -805,8 +796,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     };
 
     // Start Sandhole on SSH port
-    let ssh_listener = TcpListener::bind((config.listen_address, config.ssh_port.into()))
-        .await
+    let ssh_listener = get_tcp_listener((config.listen_address, config.ssh_port.into()))
         .with_context(|| "Error listening to SSH port")?;
     #[cfg(not(coverage_nightly))]
     tracing::info!("Listening for SSH connections on port {}.", config.ssh_port);
@@ -830,10 +820,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                     #[cfg(not(coverage_nightly))]
                     tracing::info!(%address, "Rejecting SSH connection: IP not allowed.");
                     continue;
-                }
-                if let Err(error) = stream.set_nodelay(true) {
-                    #[cfg(not(coverage_nightly))]
-                    tracing::warn!(%error, %address, "Error setting nodelay.");
                 }
                 handle_ssh_connection(HandleSshConnectionConfig {
                     stream,

@@ -103,17 +103,10 @@ jobs:
           rustup toolchain install nightly-${{ matrix.platform.target }}
           rustup override set nightly-${{ matrix.platform.target }}
       - name: Test
-        if: matrix.platform.runner != 'windows-latest'
         env:
           RUSTFLAGS: -A dead_code -A unused_variables
         run: |
           cargo nextest run --no-fail-fast --verbose --locked
-      - name: Test without IPv6
-        if: matrix.platform.runner == 'windows-latest'
-        env:
-          RUSTFLAGS: -A dead_code -A unused_variables
-        run: |
-          cargo nextest run --no-fail-fast --verbose --locked --profile ipv4
   coverage-nightly:
     name: Test coverage on nightly (ubuntu-24.04)
     runs-on: ubuntu-24.04

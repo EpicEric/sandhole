@@ -81,6 +81,7 @@ serde = { version = "1.0.228", default-features = false, features = [
   "serde_derive",
 ] }
 serde_json = "1.0.149"
+socket2 = "0.6.1"
 sysinfo = "0.37.2"
 thiserror = "2.0.17"
 tokio = { version = "1.49.0", features = ["full"] }
