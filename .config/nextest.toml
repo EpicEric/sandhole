@@ -7,6 +7,3 @@ test-group = 'integration'
 
 [profile.nix]
 default-filter = 'not test(/^login/) - binary_id(sandhole::integration)'
-
-[profile.ipv4]
-default-filter = 'not test(/.*ipv6.*/)'
