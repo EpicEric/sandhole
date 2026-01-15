@@ -13,6 +13,7 @@
 - Don't unwrap ACME challenge TLS stream acceptor.
 - Switch directory watcher strategy in order to follow symlinks.
 - Accept configured ports for SSH/HTTP/HTTPS on `remote_forwarding`.
+- Fix log for HTTPS forwarding.
 
 ### Changed
 

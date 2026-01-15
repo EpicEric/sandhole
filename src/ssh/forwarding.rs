@@ -729,8 +729,8 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                                 "{} {:>14} on {} for {}\r\n",
                                 Utc::now().to_rfc3339().dimmed(),
                                 "Starting HTTPS".green().bold(),
-                                match context.server.http_port {
-                                    80 => format!("https://{assigned_host}"),
+                                match context.server.https_port {
+                                    443 => format!("https://{assigned_host}"),
                                     port => format!("https://{assigned_host}:{port}"),
                                 }
                                 .underline(),
