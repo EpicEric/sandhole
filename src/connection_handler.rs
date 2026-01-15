@@ -9,8 +9,12 @@ use crate::ssh::ServerHandlerSender;
 pub(crate) struct ConnectionHttpData {
     // Port to redirect HTTP requests to. If missing, do not redirect.
     pub(crate) redirect_http_to_https_port: Option<u16>,
+    // Whether this is an aliasing connection.
     pub(crate) is_aliasing: bool,
+    // Whether this connection accepts HTTP/2.
     pub(crate) http2: bool,
+    // Optional host to replace in proxied requests.
+    pub(crate) host: Option<String>,
 }
 
 // Trait for creating tunneling or aliasing channels (via an underlying SSH session).

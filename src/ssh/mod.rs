@@ -24,8 +24,8 @@ use crate::{
         auth::{AdminData, AuthenticatedData, ProxyAutoCancellation, UserData},
         exec::{
             AdminCommand, AllowedFingerprintsCommand, ExecCommandFlag, ForceHttpsCommand,
-            Http2Command, IpAllowlistCommand, IpBlocklistCommand, SniProxyCommand, SshCommand,
-            SshCommandContext, TcpAliasCommand,
+            HostCommand, Http2Command, IpAllowlistCommand, IpBlocklistCommand, SniProxyCommand,
+            SshCommand, SshCommandContext, TcpAliasCommand,
         },
         forwarding::{Forwarder, LocalForwardingContext, RemoteForwardingContext},
     },
@@ -636,6 +636,33 @@ impl Handler for ServerHandler {
                             let _ = self
                                 .tx
                                 .send(format!("'ip-blocklist' command failed: {error}\r\n").into());
+                            success = false;
+                            self.cancellation_token.cancel();
+                            break;
+                        }
+                    }
+                }
+                // - `host` changes the Host header of HTTP requests
+                command if command.starts_with("host=") => {
+                    let host = command.trim_start_matches("host=").to_string();
+                    let mut command = HostCommand(host);
+                    match command
+                        .execute(&mut SshCommandContext {
+                            server: &self.server,
+                            auth_data: &mut self.auth_data,
+                            peer: &self.peer,
+                            commands: &mut self.commands,
+                            tx: &self.tx,
+                        })
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(error) => {
+                            #[cfg(not(coverage_nightly))]
+                            tracing::debug!(peer = %self.peer, %error, "'host' command failed.");
+                            let _ = self
+                                .tx
+                                .send(format!("'host' command failed: {error}\r\n").into());
                             success = false;
                             self.cancellation_token.cancel();
                             break;

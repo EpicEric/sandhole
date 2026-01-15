@@ -106,6 +106,7 @@ impl UserData {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                host: None,
             })),
             ip_filter: Arc::new(RwLock::new(None)),
             session_restriction: UserSessionRestriction::None,

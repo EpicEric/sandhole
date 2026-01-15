@@ -6,6 +6,7 @@
 
 - Add `--directory-poll-interval` CLI flag.
 - Add `--random-subdomain-value-file` CLI flag.
+- Add `host` option for remote forwarding connections.
 - Official Windows support (x64 only).
 
 ### Fixed

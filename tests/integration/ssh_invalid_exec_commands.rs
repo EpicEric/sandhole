@@ -104,6 +104,13 @@ async fn ssh_invalid_exec_commands() {
         // `ip-blocklist` twice
         vec!["ip-blocklist=192.168.0.0/16 ip-blocklist=dead:beef::/32"],
         vec!["ip-blocklist=192.168.0.0/16", "ip-blocklist=dead:beef::/32"],
+        // Invalid `host`
+        vec!["host=?/:"],
+        // No `host`
+        vec!["host="],
+        // `host` twice
+        vec!["host=hello.world host=goodbye.world"],
+        vec!["host=hello.world", "host=goodbye.world"],
         // Unknown command
         vec!["unknown"],
     ] {

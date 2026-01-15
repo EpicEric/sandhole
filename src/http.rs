@@ -23,8 +23,11 @@ use axum::{
     response::{IntoResponse, Redirect},
 };
 use bon::Builder;
-use http::header::COOKIE;
-use http::{HeaderMap, HeaderName, HeaderValue, Uri, Version};
+use http::{
+    HeaderMap, HeaderName, HeaderValue, Uri, Version,
+    uri::{Authority, InvalidUri},
+};
+use http::{header::COOKIE, uri::InvalidUriParts};
 use hyper::{
     Request, Response, StatusCode,
     body::Body,
@@ -218,6 +221,10 @@ pub(crate) enum HttpError {
     InvalidHostHeader,
     #[error("Invalid HTTP version {0:?}")]
     InvalidHttpVersion(Version),
+    #[error("Invalid URI: {0:?}")]
+    InvalidUri(#[from] InvalidUri),
+    #[error("Invalid URI parts: {0:?}")]
+    InvalidUriParts(#[from] InvalidUriParts),
     #[error("Missing Upgrade header")]
     MissingUpgradeHeader,
     #[error("Request timeout")]
@@ -234,6 +241,8 @@ impl IntoResponse for HttpError {
             | HttpError::MissingHostHeader
             | HttpError::InvalidHostHeader
             | HttpError::InvalidHttpVersion(_)
+            | HttpError::InvalidUri(_)
+            | HttpError::InvalidUriParts(_)
             | HttpError::MissingUpgradeHeader => StatusCode::BAD_REQUEST,
             HttpError::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
             HttpError::HandlerNotFound | HttpError::ChannelRequestDenied => StatusCode::NOT_FOUND,
@@ -451,9 +460,22 @@ where
     };
     let tx = handler.log_channel();
     let is_http2 = http_data.as_ref().map(|data| data.http2).unwrap_or(false);
+    let request_host = http_data
+        .as_ref()
+        .and_then(|data| data.host.clone())
+        .unwrap_or(host);
     match request.version() {
         Version::HTTP_2 if is_http2 => {
             // Create an HTTP/2 handshake over the selected channel
+            let mut uri_parts = request.uri().clone().into_parts();
+            let authority = uri_parts.authority.as_mut().expect("Host has been checked");
+            *authority = Authority::from_maybe_shared(
+                authority
+                    .as_str()
+                    .replace(authority.host(), &request_host)
+                    .into_bytes(),
+            )?;
+            *request.uri_mut() = Uri::from_parts(uri_parts)?;
             let (mut sender, conn) =
                 hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(io))
                     .await?;
@@ -500,8 +522,7 @@ where
             // -> Add host header if missing
             request
                 .headers_mut()
-                .entry(HOST)
-                .or_insert_with(|| host.try_into().unwrap());
+                .insert(HOST, request_host.try_into().unwrap());
             // -> Change URI to only include path and query
             *request.uri_mut() = request
                 .uri()
@@ -688,6 +709,7 @@ mod proxy_handler_tests {
     use axum::{
         Router,
         extract::{WebSocketUpgrade, ws},
+        http::Uri,
         routing::{any, delete, get, post, put},
     };
     use bytes::Bytes;
@@ -870,6 +892,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                host: None,
             })
         });
         conn_manager
@@ -936,6 +959,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                host: None,
             })
         });
         conn_manager
@@ -1003,6 +1027,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: Some(443),
                 is_aliasing: false,
                 http2: false,
+                host: None,
             })
         });
         conn_manager
@@ -1069,6 +1094,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: Some(8443),
                 is_aliasing: false,
                 http2: false,
+                host: None,
             })
         });
         conn_manager
@@ -1142,6 +1168,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                host: None,
             })
         });
         conn_manager
@@ -1235,6 +1262,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                host: None,
             })
         });
         conn_manager
@@ -1341,6 +1369,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: true,
+                host: None,
             })
         });
         conn_manager
@@ -1433,6 +1462,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                host: None,
             })
         });
         conn_manager
@@ -1530,6 +1560,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                host: None,
             })
         });
         conn_manager
@@ -1553,6 +1584,105 @@ mod proxy_handler_tests {
             post(|headers: HeaderMap, body: String| async move {
                 if headers.get("X-Forwarded-For").unwrap() == "10.15.0.1, 127.0.0.1"
                     && headers.get("X-Forwarded-Host").unwrap() == "sand.hole, with.handler"
+                    && body == "Hello world"
+                {
+                    "Success."
+                } else {
+                    "Failure."
+                }
+            }),
+        );
+        let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
+        let jh = tokio::spawn(async move {
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection(TokioIo::new(server), router_service)
+                .await
+                .expect("Invalid request");
+        });
+        assert!(
+            logging_rx.is_empty(),
+            "shouldn't log before handling request"
+        );
+        let response = proxy_handler(
+            request,
+            "127.0.0.1:12345".parse().unwrap(),
+            None,
+            Arc::new(
+                ProxyData::builder()
+                    .conn_manager(Arc::clone(&conn_manager))
+                    .domain_redirect(Arc::new(DomainRedirect {
+                        from: "main.domain".into(),
+                        to: "https://example.com".into(),
+                    }))
+                    .protocol(Protocol::Https { port: 443 })
+                    .proxy_type(ProxyType::Tunneling)
+                    .buffer_size(8_000)
+                    .disable_http_logs(false)
+                    .build(),
+            ),
+        )
+        .await;
+        let response = response.expect("should return response after proxy");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().frame().await.unwrap().unwrap();
+        assert_eq!(body.data_ref(), Some(&Bytes::copy_from_slice(b"Success.")));
+        drop(body);
+        assert!(!logging_rx.is_empty(), "should log after proxying request");
+        jh.abort();
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn returns_response_for_existing_handler_with_custom_host() {
+        let conn_manager: Arc<
+            ConnectionMap<
+                String,
+                Arc<MockConnectionHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
+        > = Arc::new(
+            ConnectionMap::builder()
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
+                .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
+                .build(),
+        );
+        let (server, handler) = tokio::io::duplex(1024);
+        let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let mut mock = MockConnectionHandler::new();
+        mock.expect_log_channel()
+            .once()
+            .return_once(move || ServerHandlerSender(Some(logging_tx)));
+        mock.expect_tunneling_channel()
+            .once()
+            .return_once(move |_, _| Ok(handler));
+        mock.expect_http_data().once().return_once(move || {
+            Some(ConnectionHttpData {
+                redirect_http_to_https_port: None,
+                is_aliasing: false,
+                http2: false,
+                host: Some("other.host".into()),
+            })
+        });
+        conn_manager
+            .insert(
+                "with.handler".into(),
+                "127.0.0.1:12345".parse().unwrap(),
+                TokenHolder::User(UserIdentification::Username("a".into())),
+                Arc::new(mock),
+            )
+            .unwrap();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/endpoint")
+            .header(HOST, "with.handler")
+            .body(String::from("Hello world"))
+            .unwrap();
+        let router = Router::new().route(
+            "/api/endpoint",
+            post(|headers: HeaderMap, body: String| async move {
+                if headers.get("X-Forwarded-For").unwrap() == "127.0.0.1"
+                    && headers.get("X-Forwarded-Host").unwrap() == "with.handler"
+                    && headers.get("Host").unwrap() == "other.host"
                     && body == "Hello world"
                 {
                     "Success."
@@ -1629,6 +1759,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: Some(443),
                 is_aliasing: false,
                 http2: false,
+                host: None,
             })
         });
         conn_manager
@@ -1727,6 +1858,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                host: None,
             })
         });
         conn_manager
@@ -1825,6 +1957,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                host: None,
             })
         });
         conn_manager
@@ -1947,6 +2080,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: false,
+                host: None,
             })
         });
         conn_manager
@@ -2047,6 +2181,7 @@ mod proxy_handler_tests {
                 redirect_http_to_https_port: None,
                 is_aliasing: false,
                 http2: true,
+                host: None,
             })
         });
         conn_manager
@@ -2064,6 +2199,131 @@ mod proxy_handler_tests {
                 if headers.get("X-Forwarded-For").unwrap() == "127.0.0.1"
                     && headers.get("X-Forwarded-Host").unwrap() == "http2.handler"
                     && body == "The future of HTTP!"
+                {
+                    "Success."
+                } else {
+                    "Failure."
+                }
+            }),
+        );
+        let router_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
+        let jh = tokio::spawn(async move {
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection(TokioIo::new(server), router_service)
+                .await
+                .expect("Invalid request");
+        });
+        assert!(
+            logging_rx.is_empty(),
+            "shouldn't log before handling request"
+        );
+        let proxy_service = service_fn(move |request| {
+            proxy_handler(
+                request,
+                "127.0.0.1:12345".parse().unwrap(),
+                None,
+                Arc::new(
+                    ProxyData::builder()
+                        .conn_manager(Arc::clone(&conn_manager))
+                        .domain_redirect(Arc::new(DomainRedirect {
+                            from: "main.domain".into(),
+                            to: "https://example.com".into(),
+                        }))
+                        .protocol(Protocol::Https { port: 443 })
+                        .proxy_type(ProxyType::Tunneling)
+                        .buffer_size(8_000)
+                        .disable_http_logs(false)
+                        .build(),
+                ),
+            )
+        });
+        let jh2 = tokio::spawn(async move {
+            hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection_with_upgrades(TokioIo::new(socket), proxy_service)
+                .await
+                .expect("Invalid request");
+        });
+        let (mut sender, conn) =
+            hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(stream))
+                .await
+                .unwrap();
+        let jh3 = tokio::spawn(conn);
+        let request = Request::builder()
+            .method("PUT")
+            .uri("https://http2.handler/http2")
+            .body(String::from("The future of HTTP!"))
+            .unwrap();
+        let response = sender
+            .send_request(request)
+            .await
+            .expect("should return response after proxy");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = String::from_utf8(
+            response
+                .into_body()
+                .collect()
+                .await
+                .expect("Error collecting response")
+                .to_bytes()
+                .into(),
+        )
+        .unwrap();
+        assert_eq!(body, "Success.");
+        drop(body);
+        assert!(!logging_rx.is_empty(), "should log after proxying request");
+        jh.abort();
+        jh2.abort();
+        jh3.abort();
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn returns_http2_response_for_existing_handler_with_custom_host() {
+        let conn_manager: Arc<
+            ConnectionMap<
+                String,
+                Arc<MockConnectionHandler<DuplexStream>>,
+                MockConnectionMapReactor<String>,
+            >,
+        > = Arc::new(
+            ConnectionMap::builder()
+                .strategy(LoadBalancingStrategy::Allow)
+                .algorithm(crate::LoadBalancingAlgorithm::RoundRobin)
+                .quota_handler(Arc::new(Box::new(DummyQuotaHandler)))
+                .build(),
+        );
+        let (server, handler) = tokio::io::duplex(1024);
+        let (logging_tx, logging_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let mut mock = MockConnectionHandler::new();
+        mock.expect_log_channel()
+            .once()
+            .return_once(move || ServerHandlerSender(Some(logging_tx)));
+        mock.expect_tunneling_channel()
+            .once()
+            .return_once(move |_, _| Ok(handler));
+        mock.expect_http_data().once().return_once(move || {
+            Some(ConnectionHttpData {
+                redirect_http_to_https_port: None,
+                is_aliasing: false,
+                http2: true,
+                host: Some("other.host".into()),
+            })
+        });
+        conn_manager
+            .insert(
+                "http2.handler".into(),
+                "127.0.0.1:12345".parse().unwrap(),
+                TokenHolder::User(UserIdentification::Username("a".into())),
+                Arc::new(mock),
+            )
+            .unwrap();
+        let (socket, stream) = tokio::io::duplex(1024);
+        let router = Router::new().route(
+            "/http2",
+            put(|uri: Uri, headers: HeaderMap, body: String| async move {
+                if headers.get("X-Forwarded-For").unwrap() == "127.0.0.1"
+                    && headers.get("X-Forwarded-Host").unwrap() == "http2.handler"
+                    && uri.host().unwrap() == "other.host"
+                    && &body == "The future of HTTP!"
                 {
                     "Success."
                 } else {

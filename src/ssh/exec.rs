@@ -3,6 +3,7 @@ use std::{collections::BTreeSet, mem, net::SocketAddr, sync::Arc};
 use color_eyre::eyre::eyre;
 use enumflags2::{BitFlags, bitflags};
 use russh::keys::ssh_key;
+use rustls_pki_types::DnsName;
 
 use crate::{
     SandholeServer,
@@ -23,6 +24,7 @@ pub(crate) enum ExecCommandFlag {
     SniProxy,
     IpAllowlist,
     IpBlocklist,
+    Host,
 }
 
 pub(crate) struct SshCommandContext<'a> {
@@ -342,6 +344,30 @@ impl SshCommand for IpBlocklistCommand {
                     return Err(eyre!("no blocklist networks provided"));
                 }
                 user_data.blocklist = Some(list);
+                context.commands.insert(self.flag());
+                Ok(())
+            }
+            _ => Err(eyre!("not authenticated as user")),
+        }
+    }
+}
+
+pub(crate) struct HostCommand(pub(crate) String);
+
+impl SshCommand for HostCommand {
+    fn flag(&self) -> ExecCommandFlag {
+        ExecCommandFlag::Host
+    }
+
+    async fn execute(&mut self, context: &mut SshCommandContext<'_>) -> color_eyre::Result<()> {
+        if context.commands.contains(self.flag()) {
+            return Err(eyre!("duplicated command"));
+        }
+        match context.auth_data {
+            AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
+                let host = mem::take(&mut self.0);
+                DnsName::try_from_str(&host).map_err(|_| eyre!("invalid host"))?;
+                user_data.http_data.write().unwrap().host = Some(host);
                 context.commands.insert(self.flag());
                 Ok(())
             }
