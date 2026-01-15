@@ -1,6 +1,6 @@
 [package]
 name = "sandhole"
-version = "0.8.6"
+version = "0.8.7"
 edition = "2024"
 rust-version = "1.88.0"
 description = "Expose HTTP/SSH/TCP services through SSH port forwarding."
@@ -118,6 +118,10 @@ openssl = { version = "0.10.75", features = ["vendored"] }
 
 [profile.release]
 strip = true
+lto = true
+
+[profile.bench]
+strip = false
 lto = true
 
 [lints.rust]

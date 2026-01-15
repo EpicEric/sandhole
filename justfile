@@ -23,7 +23,7 @@ nixos-docs:
     cat result >> book/src/nixos_options.md
 
 flamegraph-test test:
-    cargo flamegraph --dev --test {{ test }}
+    cargo flamegraph --profile bench --test integration -- {{ test }}
 
 minica:
     minica -ca-cert tests/data/ca/rootCA.pem -ca-key tests/data/ca/rootCA-key.pem -domains 'localhost'
