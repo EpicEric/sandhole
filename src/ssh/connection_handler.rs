@@ -66,7 +66,7 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
         let tunneling_allowed = self
             .ip_filter
             .read()
-            .unwrap()
+            .expect("not poisoned")
             .as_ref()
             .is_none_or(|filter| filter.is_allowed(ip));
         if tunneling_allowed {
@@ -90,11 +90,11 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
         // Check if this IP is not blocked for the alias
         self.ip_filter
             .read()
-            .unwrap()
+            .expect("not poisoned")
             .as_ref()
             .is_none_or(|filter| filter.is_allowed(ip))
             // Check if the given fingerprint is allowed to local-forward this alias
-            && (self.allow_fingerprint.read().unwrap())(fingerprint)
+            && (self.allow_fingerprint.read().expect("not poisoned"))(fingerprint)
     }
 
     async fn aliasing_channel(
@@ -121,6 +121,12 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
     }
 
     fn http_data(&self) -> Option<ConnectionHttpData> {
-        Some(self.http_data.as_ref()?.read().unwrap().clone())
+        Some(
+            self.http_data
+                .as_ref()?
+                .read()
+                .expect("not poisoned")
+                .clone(),
+        )
     }
 }

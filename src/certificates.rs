@@ -151,7 +151,7 @@ impl CertificateResolver {
                             }
                         }
                         let trie = builder.build();
-                        *certs_clone.write().unwrap() = trie;
+                        *certs_clone.write().expect("not poisoned") = trie;
                     }
                     Err(error) => {
                         #[cfg(not(coverage_nightly))]
@@ -168,7 +168,7 @@ impl CertificateResolver {
             }
         }));
         // Wait until the certificates have been populated once
-        init_rx.await.unwrap();
+        init_rx.await.expect("sender not dropped");
         Ok(CertificateResolver {
             certificates,
             alpn_resolver,
@@ -185,7 +185,7 @@ impl CertificateResolver {
         };
         self.certificates
             .read()
-            .unwrap()
+            .expect("not poisoned")
             // Return all certificates whose prefix match the server name
             .common_prefix_search(
                 server_name
@@ -207,7 +207,10 @@ impl CertificateResolver {
     // Return the config for TLS-ALPN-01 challenges
     #[cfg_attr(not(feature = "acme"), expect(dead_code))]
     pub(crate) fn challenge_rustls_config(&self) -> Option<Arc<ServerConfig>> {
-        self.alpn_resolver.read().unwrap().challenge_rustls_config()
+        self.alpn_resolver
+            .read()
+            .expect("not poisoned")
+            .challenge_rustls_config()
     }
 
     // Find the list of domains that don't have a certificate associated with them, and request ACME challenges for them.
@@ -217,7 +220,10 @@ impl CertificateResolver {
             .filter(|domain| self.resolve_server_name(domain).is_none())
             .cloned()
             .collect();
-        self.alpn_resolver.write().unwrap().update_domains(domains);
+        self.alpn_resolver
+            .write()
+            .expect("not poisoned")
+            .update_domains(domains);
     }
 }
 
@@ -226,7 +232,12 @@ impl ResolvesServerCert for CertificateResolver {
         client_hello
             .server_name()
             .and_then(|server_name| self.resolve_server_name(server_name))
-            .or_else(|| self.alpn_resolver.read().unwrap().resolve(client_hello))
+            .or_else(|| {
+                self.alpn_resolver
+                    .read()
+                    .expect("not poisoned")
+                    .resolve(client_hello)
+            })
     }
 }
 

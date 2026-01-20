@@ -113,8 +113,8 @@ in
   config = lib.mkIf cfg.enable {
     assertions = [
       {
-        assertion = (cfg.settings.domain or null) != null;
-        message = "Sandhole requires services.sandhole.settings.domain to be set";
+        assertion = ((cfg.settings.domain or null) != null) != (cfg.settings.no-domain or false);
+        message = "Sandhole requires exactly one of `services.sandhole.settings.domain` or `services.sandhole.settings.no-domain` to be set";
       }
     ];
 

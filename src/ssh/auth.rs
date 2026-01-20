@@ -34,16 +34,17 @@ pub(crate) struct ProxyAutoCancellation {
 impl ProxyAutoCancellation {
     pub(crate) fn start_timeout(&mut self, timeout: Duration) {
         let cancellation_token = self.cancellation_token.clone();
-        *self.timeout_handle.lock().unwrap() = Some(DroppableHandle(tokio::spawn(async move {
-            sleep(timeout).await;
-            cancellation_token.cancel();
-        })));
+        *self.timeout_handle.lock().expect("not poisoned") =
+            Some(DroppableHandle(tokio::spawn(async move {
+                sleep(timeout).await;
+                cancellation_token.cancel();
+            })));
     }
 }
 
 impl Clone for ProxyAutoCancellation {
     fn clone(&self) -> Self {
-        self.timeout_handle.lock().unwrap().take();
+        self.timeout_handle.lock().expect("not poisoned").take();
         self.proxy_count.fetch_add(1, Ordering::Release);
         Self {
             unproxied_connection_timeout: self.unproxied_connection_timeout,

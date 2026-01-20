@@ -227,7 +227,7 @@ impl Handler for ServerHandler {
                             // Add this session to the password sessions, allowing it to be canceled via the admin TUI.
                             let limiter = {
                                 let mut user_sessions =
-                                    self.server.sessions_password.lock().unwrap();
+                                    self.server.sessions_password.lock().expect("not poisoned");
                                 let entry = user_sessions.entry(user.into()).or_insert((
                                     Limiter::new(self.server.rate_limit),
                                     HashMap::default(),
@@ -308,7 +308,8 @@ impl Handler for ServerHandler {
             AuthenticationType::User => {
                 // Add this session to the public key sessions, allowing it to be canceled via the admin TUI.
                 let limiter = {
-                    let mut user_sessions = self.server.sessions_publickey.lock().unwrap();
+                    let mut user_sessions =
+                        self.server.sessions_publickey.lock().expect("not poisoned");
                     let entry = user_sessions
                         .entry(fingerprint)
                         .or_insert((Limiter::new(self.server.rate_limit), HashMap::default()));
@@ -695,9 +696,12 @@ impl Handler for ServerHandler {
         };
         let allowlist = user_data.as_ref().map(|data| &data.allowlist);
         let blocklist = user_data.as_ref().map(|data| &data.blocklist);
-        if success && (allowlist.is_some() || blocklist.is_some()) {
-            let allowlist = allowlist.unwrap().clone();
-            let blocklist = blocklist.unwrap().clone();
+        if success
+            && let Some(allowlist) = allowlist
+            && let Some(blocklist) = blocklist
+        {
+            let allowlist = allowlist.clone();
+            let blocklist = blocklist.clone();
             match &mut self.auth_data {
                 AuthenticatedData::User { user_data, .. }
                 | AuthenticatedData::Admin { user_data, .. } => {
@@ -706,7 +710,7 @@ impl Handler for ServerHandler {
                         blocklist,
                     }) {
                         Ok(ip_filter) => {
-                            *user_data.ip_filter.write().unwrap() = Some(ip_filter);
+                            *user_data.ip_filter.write().expect("not poisoned") = Some(ip_filter);
                         }
                         Err(error) => {
                             let _ = self.tx.send(
@@ -980,7 +984,7 @@ impl Drop for ServerHandler {
                     server
                         .sessions_password
                         .lock()
-                        .unwrap()
+                        .expect("not poisoned")
                         .retain(|_, (_, session)| {
                             session.remove(&id);
                             !session.is_empty()
@@ -988,7 +992,7 @@ impl Drop for ServerHandler {
                     server
                         .sessions_publickey
                         .lock()
-                        .unwrap()
+                        .expect("not poisoned")
                         .retain(|_, (_, session)| {
                             session.remove(&id);
                             !session.is_empty()

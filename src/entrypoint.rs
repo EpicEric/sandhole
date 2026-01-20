@@ -1,5 +1,3 @@
-#[cfg_attr(not(feature = "acme"), expect(unused_imports))]
-use std::num::NonZero;
 use std::{
     future,
     net::SocketAddr,
@@ -48,7 +46,7 @@ use crate::login::{ApiLogin, WebpkiVerifierConfigurer};
 #[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
 use crate::quota::TokenHolder;
 use crate::{
-    SandholeServer, SystemData, TunnelingProxyData,
+    BindHostnames, SandholeServer, SystemData, TunnelingProxyData,
     addressing::{AddressDelegator, DnsResolver},
     certificates::{AlpnChallengeResolver, CertificateResolver, DummyAlpnChallengeResolver},
     config::ApplicationConfig,
@@ -89,6 +87,35 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             "One of HTTP, TCP, or aliasing must be enabled".into(),
         )
         .into());
+    }
+    if config.domain.no_domain {
+        if config.allow_requested_subdomains {
+            #[cfg(not(coverage_nightly))]
+            tracing::warn!("--allow-requested-subdomains has no effect with --no-domain");
+        }
+        #[cfg(feature = "rustrict")]
+        if config.random_subdomain_filter_profanities {
+            #[cfg(not(coverage_nightly))]
+            tracing::warn!("--random-subdomain-filter-profanities has no effect with --no-domain");
+        }
+        if config.random_subdomain_seed.is_some() {
+            #[cfg(not(coverage_nightly))]
+            tracing::warn!("--random-subdomain-seed has no effect with --no-domain");
+        }
+        if config.random_subdomain_value.is_some() {
+            #[cfg(not(coverage_nightly))]
+            tracing::warn!("--random-subdomain-value has no effect with --no-domain");
+        }
+        if config.random_subdomain_value_file.is_some() {
+            #[cfg(not(coverage_nightly))]
+            tracing::warn!("--random-subdomain-value-file has no effect with --no-domain");
+        }
+        if config.bind_hostnames == BindHostnames::Cname {
+            return Err(ServerError::InvalidConfig(
+                "Cannot set --bind-hostnames=cname without --domain".into(),
+            )
+            .into());
+        }
     }
     let http_request_timeout = config.http_request_timeout;
     let tcp_connection_timeout = config.tcp_connection_timeout;
@@ -158,14 +185,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     #[cfg(feature = "acme")]
     let alpn_resolver: Box<dyn AlpnChallengeResolver> = match config.acme_contact_email {
         _ if config.disable_https => Box::new(DummyAlpnChallengeResolver),
-        Some(contact) if config.https_port == NonZero::new(443).unwrap() => {
-            Box::new(AcmeResolver::new(
-                AlpnAcmeResolver,
-                config.acme_cache_directory,
-                contact,
-                config.acme_use_staging,
-            ))
-        }
+        Some(contact) if u16::from(config.https_port) == 443 => Box::new(AcmeResolver::new(
+            AlpnAcmeResolver,
+            config.acme_cache_directory,
+            contact,
+            config.acme_use_staging,
+        )),
         Some(_) => {
             #[cfg(not(coverage_nightly))]
             tracing::warn!(
@@ -294,7 +319,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let builder = AddressDelegator::builder()
             .resolver(DnsResolver::new())
             .txt_record_prefix(config.txt_record_prefix)
-            .root_domain(config.domain.clone())
+            .maybe_root_domain(config.domain.domain.clone())
             .bind_hostnames(config.bind_hostnames)
             .force_random_subdomains(!config.allow_requested_subdomains)
             .maybe_random_subdomain_seed(config.random_subdomain_seed)
@@ -306,7 +331,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let builder = AddressDelegator::builder()
             .resolver(DnsResolver::new())
             .txt_record_prefix(config.txt_record_prefix)
-            .root_domain(config.domain.clone())
+            .maybe_root_domain(config.domain.domain.clone())
             .bind_hostnames(config.bind_hostnames)
             .force_random_subdomains(!config.allow_requested_subdomains)
             .maybe_random_subdomain_seed(config.random_subdomain_seed)
@@ -338,9 +363,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         }
     });
     // Configure the default domain redirect for Sandhole.
-    let domain_redirect = Arc::new(DomainRedirect {
-        from: config.domain.clone(),
-        to: config.domain_redirect,
+    let domain_redirect = config.domain.domain.clone().map(|from| {
+        Arc::new(DomainRedirect {
+            from,
+            to: config.domain_redirect,
+        })
     });
 
     // Telemetry tasks
@@ -371,7 +398,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                         )
                     })
                     .collect();
-                *data_clone.lock().unwrap() = data;
+                *data_clone.lock().expect("not poisoned") = data;
             }
         });
     }
@@ -395,7 +422,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                         (hostname, (addresses, requests_per_minute))
                     })
                     .collect();
-                *data_clone.lock().unwrap() = data;
+                *data_clone.lock().expect("not poisoned") = data;
             }
         });
         if !config.disable_sni {
@@ -426,7 +453,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                             )
                         })
                         .collect();
-                    *data_clone.lock().unwrap() = data;
+                    *data_clone.lock().expect("not poisoned") = data;
                 }
             });
         }
@@ -456,7 +483,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                         )
                     })
                     .collect();
-                *data_clone.lock().unwrap() = data;
+                *data_clone.lock().expect("not poisoned") = data;
             }
         });
     }
@@ -509,7 +536,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                         )
                     }))
                     .collect();
-                *data_clone.lock().unwrap() = data;
+                *data_clone.lock().expect("not poisoned") = data;
             }
         });
     }
@@ -549,7 +576,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 network_tx,
                 network_rx,
             };
-            *data_clone.lock().unwrap() = data;
+            *data_clone.lock().expect("not poisoned") = data;
         }
     });
 
@@ -573,7 +600,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                     .alias(Arc::clone(&alias_connections))
                     .build(),
             ))
-            .domain_redirect(Arc::clone(&domain_redirect))
+            .maybe_domain_redirect(domain_redirect.as_ref().map(Arc::clone))
             // HTTP only.
             .protocol(Protocol::Http {
                 port: config.http_port.into(),
@@ -608,7 +635,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         api_login,
         address_delegator: addressing,
         tcp_handler,
-        domain: config.domain,
+        domain: config.domain.domain,
         http_port: config.http_port.into(),
         https_port: config.https_port.into(),
         ssh_port: config.ssh_port.into(),
@@ -665,7 +692,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let http_proxy_data = Arc::new(
             ProxyData::builder()
                 .conn_manager(Arc::clone(&http_connections))
-                .domain_redirect(Arc::clone(&domain_redirect))
+                .maybe_domain_redirect(domain_redirect.as_ref().map(Arc::clone))
                 // Use TLS redirect if --force-https is set, otherwise allow HTTP.
                 .protocol(if config.force_https {
                     Protocol::TlsRedirect {
@@ -750,7 +777,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let https_proxy_data = Arc::new(
             ProxyData::builder()
                 .conn_manager(Arc::clone(&http_connections))
-                .domain_redirect(Arc::clone(&domain_redirect))
+                .maybe_domain_redirect(domain_redirect.as_ref().map(Arc::clone))
                 .protocol(Protocol::Https {
                     port: config.https_port.into(),
                 })
@@ -891,7 +918,9 @@ async fn handle_https_connection(
     if alpn == [ACME_TLS_ALPN_NAME] {
         if let Some(challenge_config) = certificates.challenge_rustls_config() {
             match TlsAcceptor::from(challenge_config).accept(stream).await {
-                Ok(mut tls) => tls.shutdown().await.unwrap(),
+                Ok(mut tls) => {
+                    let _ = tls.shutdown().await;
+                }
                 Err(error) => {
                     #[cfg(not(coverage_nightly))]
                     tracing::warn!(%error, %sni, "Error accepting ACME challenge TLS stream.");
@@ -1019,8 +1048,8 @@ fn handle_ssh_connection(
 async fn wait_for_signal() {
     use tokio::signal::unix::{SignalKind, signal};
 
-    let mut signal_terminate = signal(SignalKind::terminate()).unwrap();
-    let mut signal_interrupt = signal(SignalKind::interrupt()).unwrap();
+    let mut signal_terminate = signal(SignalKind::terminate()).expect("valid signal");
+    let mut signal_interrupt = signal(SignalKind::interrupt()).expect("valid signal");
 
     tokio::select! {
         _ = signal_terminate.recv() => {
@@ -1038,10 +1067,10 @@ async fn wait_for_signal() {
 async fn wait_for_signal() {
     use tokio::signal::windows;
 
-    let mut signal_c = windows::ctrl_c().unwrap();
-    let mut signal_break = windows::ctrl_break().unwrap();
-    let mut signal_close = windows::ctrl_close().unwrap();
-    let mut signal_shutdown = windows::ctrl_shutdown().unwrap();
+    let mut signal_c = windows::ctrl_c().expect("valid signal");
+    let mut signal_break = windows::ctrl_break().expect("valid signal");
+    let mut signal_close = windows::ctrl_close().expect("valid signal");
+    let mut signal_shutdown = windows::ctrl_shutdown().expect("valid signal");
 
     tokio::select! {
         _ = signal_c.recv() => {

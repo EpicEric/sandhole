@@ -165,11 +165,11 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
 }
 
 fn append_to_header(headers: &mut HeaderMap, new_header_name: &str, new_value: String) {
-    let header_name: HeaderName = HeaderName::from_str(new_header_name).unwrap();
+    let header_name: HeaderName = HeaderName::from_str(new_header_name).expect("valid header name");
 
     match headers.entry(header_name) {
         http::header::Entry::Vacant(entry) => {
-            entry.insert(HeaderValue::from_str(new_value.as_str()).unwrap());
+            entry.insert(HeaderValue::from_str(new_value.as_str()).expect("valid header value"));
         }
         http::header::Entry::Occupied(mut entry) => {
             let existing = entry.get().as_bytes();
@@ -263,7 +263,7 @@ where
     // An HTTP connection manager (usually ConnectionMap) that returns a tunneling/aliasing handler.
     conn_manager: M,
     // Tuple containing where to redirect requests from the main domain to.
-    domain_redirect: Arc<DomainRedirect>,
+    domain_redirect: Option<Arc<DomainRedirect>>,
     // The HTTP protocol for the current connection.
     protocol: Protocol,
     // Configuration on which type of channel to retrieve from the handler.
@@ -363,9 +363,11 @@ where
     // Find the HTTP handler for the given host
     let Some(handler) = conn_manager.get_by_http_host(&host, ip) else {
         // If no handler was found, check if this is a request to the root domain
-        if domain_redirect.from == host {
+        if let Some(redirect) = domain_redirect
+            && redirect.from == host
+        {
             // If so, redirect to the configured URL
-            let response = Redirect::to(&domain_redirect.to).into_response();
+            let response = Redirect::to(&redirect.to).into_response();
             let http_log_builder = http_log_builder.status(response.status().as_u16());
             return Ok(TimedResponse {
                 response,
@@ -429,9 +431,9 @@ where
     };
     // Add proxied info to the proper headers, but don't overwrite any existing proxy headers
     let headers = request.headers_mut();
-    append_to_header(headers, X_FORWARDED_FOR, ip_string.parse().unwrap());
-    append_to_header(headers, X_FORWARDED_HOST, host.parse().unwrap());
-    append_to_header(headers, X_FORWARDED_PROTO, proto.parse().unwrap());
+    append_to_header(headers, X_FORWARDED_FOR, ip_string.clone());
+    append_to_header(headers, X_FORWARDED_HOST, host.clone());
+    append_to_header(headers, X_FORWARDED_PROTO, proto.to_string());
     append_to_header(headers, X_FORWARDED_PORT, port.to_string());
     // Add this request to the telemetry for the host
     if http_data.as_ref().is_some_and(|data| data.is_aliasing) {
@@ -522,12 +524,12 @@ where
             // -> Add host header if missing
             request
                 .headers_mut()
-                .insert(HOST, request_host.try_into().unwrap());
+                .insert(HOST, request_host.try_into().expect("valid host"));
             // -> Change URI to only include path and query
             *request.uri_mut() = request
                 .uri()
                 .path_and_query()
-                .map(|path| Uri::from_str(path.as_str()).unwrap())
+                .map(|path| Uri::from_str(path.as_str()).expect("valid URI"))
                 .unwrap_or_default();
             // -> Decompress cookies: https://www.rfc-editor.org/rfc/rfc7540#section-8.1.2.5
             if let http::header::Entry::Occupied(occupied_entry) =
@@ -543,7 +545,7 @@ where
                 }
                 request
                     .headers_mut()
-                    .insert(header, value.try_into().unwrap());
+                    .insert(header, value.try_into().expect("valid header value"));
             }
 
             // Create an HTTP/1.1 handshake over the selected channel
@@ -599,8 +601,9 @@ where
                             let buffer_size = proxy_data.buffer_size;
                             // Start a task to copy data between the two Upgraded parts
                             tokio::spawn(async move {
-                                let mut upgraded_request =
-                                    TokioIo::new(upgraded_request.await.unwrap());
+                                let mut upgraded_request = TokioIo::new(
+                                    upgraded_request.await.expect("upgradable request"),
+                                );
                                 let mut upgraded_response = TokioIo::new(upgraded_response);
                                 match websocket_timeout {
                                     // If there is a Websocket timeout, copy until the deadline is reached.

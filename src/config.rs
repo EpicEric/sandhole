@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use clap::{Parser, ValueEnum};
+use clap::{Args, Parser, ValueEnum};
 use color_eyre::eyre::{Context, eyre};
 use ipnet::IpNet;
 use rustls_pki_types::DnsName;
@@ -64,17 +64,31 @@ pub enum LoadBalancingAlgorithm {
     IpHash,
 }
 
+#[derive(Debug, Args, PartialEq)]
+#[group(required = true, multiple = false)]
+pub struct Domain {
+    /// The root domain of the application.
+    #[arg(
+        long,
+        value_parser = validate_domain,
+        group = "sandhole_domain"
+    )]
+    pub domain: Option<String>,
+
+    /// Whether to run Sandhole without a root domain.
+    ///
+    /// This option disables subdomains.
+    #[arg(long, default_value_t = false, group = "sandhole_domain")]
+    pub no_domain: bool,
+}
+
 // CLI configuration for Sandhole.
 #[doc(hidden)]
 #[derive(Debug, Parser, PartialEq)]
 #[command(version, about, long_about = None)]
 pub struct ApplicationConfig {
-    /// The root domain of the application.
-    #[arg(
-        long,
-        value_parser = validate_domain
-    )]
-    pub domain: String,
+    #[command(flatten)]
+    pub domain: Domain,
 
     /// Where to redirect requests to the root domain.
     #[arg(
@@ -146,15 +160,15 @@ pub struct ApplicationConfig {
     pub listen_address: IpAddr,
 
     /// Port to listen for SSH connections.
-    #[arg(long, default_value_t = NonZero::new(2222).unwrap(), value_name = "PORT")]
+    #[arg(long, default_value_t = NonZero::new(2222).expect("non-zero port"), value_name = "PORT")]
     pub ssh_port: NonZero<u16>,
 
     /// Port to listen for HTTP connections.
-    #[arg(long, default_value_t = NonZero::new(80).unwrap(), value_name = "PORT")]
+    #[arg(long, default_value_t = NonZero::new(80).expect("non-zero port"), value_name = "PORT")]
     pub http_port: NonZero<u16>,
 
     /// Port to listen for HTTPS connections.
-    #[arg(long, default_value_t = NonZero::new(443).unwrap(), value_name = "PORT")]
+    #[arg(long, default_value_t = NonZero::new(443).expect("non-zero port"), value_name = "PORT")]
     pub https_port: NonZero<u16>,
 
     /// Allow connecting to SSH via the HTTPS port as well.
@@ -327,7 +341,7 @@ pub struct ApplicationConfig {
     #[arg(
         long,
         value_name = "LENGTH",
-        default_value_t = NonZero::new(6).unwrap()
+        default_value_t = NonZero::new(6).expect("non-zero length")
     )]
     pub random_subdomain_length: NonZero<u8>,
 
@@ -481,7 +495,7 @@ mod application_config_tests {
     use clap::Parser;
     use ipnet::IpNet;
 
-    use crate::config::LoadBalancingAlgorithm;
+    use crate::config::{Domain, LoadBalancingAlgorithm};
 
     use super::{ApplicationConfig, BindHostnames, LoadBalancingStrategy, RandomSubdomainSeed};
 
@@ -491,7 +505,10 @@ mod application_config_tests {
         assert_eq!(
             config,
             ApplicationConfig {
-                domain: "foobar.tld".into(),
+                domain: Domain {
+                    domain: Some("foobar.tld".into()),
+                    no_domain: false,
+                },
                 domain_redirect: "https://github.com/EpicEric/sandhole".into(),
                 user_keys_directory: "./deploy/user_keys/".into(),
                 admin_keys_directory: "./deploy/admin_keys/".into(),
@@ -550,7 +567,7 @@ mod application_config_tests {
     fn parses_full_args() {
         let config = ApplicationConfig::parse_from([
             "sandhole",
-            "--domain=server.com",
+            "--no-domain",
             "--domain-redirect=https://sandhole.eric.dev.br",
             "--user-keys-directory=/etc/user_keys/",
             "--admin-keys-directory=/etc/admin_keys/",
@@ -605,7 +622,10 @@ mod application_config_tests {
         assert_eq!(
             config,
             ApplicationConfig {
-                domain: "server.com".into(),
+                domain: Domain {
+                    domain: None,
+                    no_domain: true,
+                },
                 domain_redirect: "https://sandhole.eric.dev.br".into(),
                 user_keys_directory: "/etc/user_keys/".into(),
                 admin_keys_directory: "/etc/admin_keys/".into(),
@@ -670,6 +690,24 @@ mod application_config_tests {
             panic!("should've raised error");
         };
         assert!(format!("{error:?}").contains("invalid domain"))
+    }
+
+    #[test_log::test]
+    fn fails_to_parse_if_missing_domain_options() {
+        let Err(error) = ApplicationConfig::try_parse_from(["sandhole"]) else {
+            panic!("should've raised error");
+        };
+        assert!(format!("{error:?}").contains("MissingRequiredArgument"))
+    }
+
+    #[test_log::test]
+    fn fails_to_parse_if_conflicting_domain_options() {
+        let Err(error) =
+            ApplicationConfig::try_parse_from(["sandhole", "--domain=foobar.tld", "--no-domain"])
+        else {
+            panic!("should've raised error");
+        };
+        assert!(format!("{error:?}").contains("ArgumentConflict"))
     }
 
     #[test_log::test]

@@ -292,11 +292,23 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                         context.server.ssh_port,
                         "  = hint: connect with ".dimmed(),
                         if context.server.ssh_port == 22 {
-                            format!(" ssh -J {} {} ", context.server.domain, address)
+                            format!(
+                                " ssh -J {} {} ",
+                                context
+                                    .server
+                                    .domain
+                                    .as_deref()
+                                    .unwrap_or("<Sandhole's IP>"),
+                                address
+                            )
                         } else {
                             format!(
                                 " ssh -J {}:{} {} -p {} ",
-                                context.server.domain,
+                                context
+                                    .server
+                                    .domain
+                                    .as_deref()
+                                    .unwrap_or("<Sandhole's IP>"),
                                 context.server.ssh_port,
                                 address,
                                 context.server.ssh_port
@@ -569,30 +581,75 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
             UserSessionRestriction::SniProxyOnly
         ) {
             // Assign an HTTP address according to server policies
-            let assigned_host = context
+            match context
                 .server
                 .address_delegator
                 .get_http_address(address, context.user, context.key_fingerprint, context.peer)
-                .await;
-            // Add handler to TCP connection map
-            match context.server.sni.insert(
-                assigned_host.clone(),
-                *context.peer,
-                context.user_data.quota_key.clone(),
-                Arc::new(SshTunnelHandler {
-                    allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
-                    http_data: Some(Arc::clone(&context.user_data.http_data)),
-                    ip_filter: Arc::clone(&context.user_data.ip_filter),
-                    handle,
-                    tx: context.tx.clone(),
-                    peer: *context.peer,
-                    address: address.into(),
-                    port: *port,
-                    limiter: context.user_data.limiter.clone(),
-                }),
-            ) {
+                .await
+            {
+                Ok(assigned_host) => {
+                    // Add handler to TCP connection map
+                    match context.server.sni.insert(
+                        assigned_host.clone(),
+                        *context.peer,
+                        context.user_data.quota_key.clone(),
+                        Arc::new(SshTunnelHandler {
+                            allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
+                            http_data: Some(Arc::clone(&context.user_data.http_data)),
+                            ip_filter: Arc::clone(&context.user_data.ip_filter),
+                            handle,
+                            tx: context.tx.clone(),
+                            peer: *context.peer,
+                            address: address.into(),
+                            port: *port,
+                            limiter: context.user_data.limiter.clone(),
+                        }),
+                    ) {
+                        Err(error) => {
+                            // Adding to connection map failed.
+                            #[cfg(not(coverage_nightly))]
+                            tracing::info!(
+                                peer = %context.peer, %error, host = %address,
+                                "Rejecting SNI proxy.",
+                            );
+                            let _ = context.tx.send(
+                                format!(
+                                    "{} {} Failed to bind SNI proxy '{}' ({})\r\n",
+                                    Utc::now().to_rfc3339().dimmed(),
+                                    " Error ".black().on_red().bold(),
+                                    address,
+                                    error,
+                                )
+                                .into_bytes(),
+                            );
+                            Ok(false)
+                        }
+                        _ => {
+                            // Adding to connection map succeeded.
+                            #[cfg(not(coverage_nightly))]
+                            tracing::info!(peer = %context.peer, host = %address, "Serving SNI proxy...",);
+                            let _ = context.tx.send(
+                                format!(
+                                    "{} {:>14} proxy for {}\r\n",
+                                    Utc::now().to_rfc3339().dimmed(),
+                                    "Starting SNI".green().bold(),
+                                    match context.server.https_port {
+                                        443 => format!("https://{address}"),
+                                        port => format!("https://{address}:{port}"),
+                                    }
+                                    .underline(),
+                                )
+                                .into_bytes(),
+                            );
+                            context
+                                .user_data
+                                .host_addressing
+                                .insert(TcpAlias(address.into(), *port as u16), assigned_host);
+                            Ok(true)
+                        }
+                    }
+                }
                 Err(error) => {
-                    // Adding to connection map failed.
                     #[cfg(not(coverage_nightly))]
                     tracing::info!(
                         peer = %context.peer, %error, host = %address,
@@ -609,29 +666,6 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                         .into_bytes(),
                     );
                     Ok(false)
-                }
-                _ => {
-                    // Adding to connection map succeeded.
-                    #[cfg(not(coverage_nightly))]
-                    tracing::info!(peer = %context.peer, host = %address, "Serving SNI proxy...",);
-                    let _ = context.tx.send(
-                        format!(
-                            "{} {:>14} proxy for {}\r\n",
-                            Utc::now().to_rfc3339().dimmed(),
-                            "Starting SNI".green().bold(),
-                            match context.server.https_port {
-                                443 => format!("https://{address}"),
-                                port => format!("https://{address}:{port}"),
-                            }
-                            .underline(),
-                        )
-                        .into_bytes(),
-                    );
-                    context
-                        .user_data
-                        .host_addressing
-                        .insert(TcpAlias(address.into(), *port as u16), assigned_host);
-                    Ok(true)
                 }
             }
         // Reject when HTTP is disabled
@@ -656,98 +690,121 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
         // Handle regular tunneling for HTTP services
         } else {
             // Assign an HTTP address according to server policies
-            let assigned_host = context
+            match context
                 .server
                 .address_delegator
                 .get_http_address(address, context.user, context.key_fingerprint, context.peer)
-                .await;
-            // Add handler to HTTP connection map
-            match context.server.http.insert(
-                assigned_host.clone(),
-                *context.peer,
-                context.user_data.quota_key.clone(),
-                Arc::new(SshTunnelHandler {
-                    allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
-                    http_data: Some(Arc::clone(&context.user_data.http_data)),
-                    ip_filter: Arc::clone(&context.user_data.ip_filter),
-                    handle,
-                    tx: context.tx.clone(),
-                    peer: *context.peer,
-                    address: address.to_string(),
-                    port: *port,
-                    limiter: context.user_data.limiter.clone(),
-                }),
-            ) {
+                .await
+            {
+                Ok(assigned_host) => {
+                    // Add handler to HTTP connection map
+                    match context.server.http.insert(
+                        assigned_host.clone(),
+                        *context.peer,
+                        context.user_data.quota_key.clone(),
+                        Arc::new(SshTunnelHandler {
+                            allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
+                            http_data: Some(Arc::clone(&context.user_data.http_data)),
+                            ip_filter: Arc::clone(&context.user_data.ip_filter),
+                            handle,
+                            tx: context.tx.clone(),
+                            peer: *context.peer,
+                            address: address.to_string(),
+                            port: *port,
+                            limiter: context.user_data.limiter.clone(),
+                        }),
+                    ) {
+                        Err(error) => {
+                            // Adding to connection map failed.
+                            #[cfg(not(coverage_nightly))]
+                            tracing::info!(
+                                peer = %context.peer, host = %assigned_host, %error,
+                                "Rejecting HTTP.",
+                            );
+                            let _ = context.tx.send(
+                                format!(
+                                    "{} {} Cannot listen to HTTP on http://{} for {} ({})\r\n",
+                                    Utc::now().to_rfc3339().dimmed(),
+                                    " Error ".black().on_red().bold(),
+                                    match context.server.http_port {
+                                        80 => assigned_host.clone(),
+                                        port => format!("{assigned_host}:{port}"),
+                                    },
+                                    address,
+                                    error,
+                                )
+                                .into_bytes(),
+                            );
+                            Ok(false)
+                        }
+                        _ => {
+                            // Adding to connection map succeeded.
+                            #[cfg(not(coverage_nightly))]
+                            tracing::info!(peer = %context.peer, host = %assigned_host, "Serving HTTP...");
+                            let _ = context.tx.send(
+                                format!(
+                                    "{} {:>14} on {} for {}\r\n",
+                                    Utc::now().to_rfc3339().dimmed(),
+                                    "Starting HTTP".green().bold(),
+                                    match context.server.http_port {
+                                        80 => format!("http://{assigned_host}"),
+                                        port => format!("http://{assigned_host}:{port}"),
+                                    }
+                                    .underline(),
+                                    if address.is_empty() {
+                                        "unspecified address".into()
+                                    } else {
+                                        format!("address {address}")
+                                    },
+                                )
+                                .into_bytes(),
+                            );
+                            if !context.server.disable_https {
+                                let _ = context.tx.send(
+                                    format!(
+                                        "{} {:>14} on {} for {}\r\n",
+                                        Utc::now().to_rfc3339().dimmed(),
+                                        "Starting HTTPS".green().bold(),
+                                        match context.server.https_port {
+                                            443 => format!("https://{assigned_host}"),
+                                            port => format!("https://{assigned_host}:{port}"),
+                                        }
+                                        .underline(),
+                                        if address.is_empty() {
+                                            "unspecified address".into()
+                                        } else {
+                                            format!("address {address}")
+                                        },
+                                    )
+                                    .into_bytes(),
+                                );
+                            }
+                            context
+                                .user_data
+                                .host_addressing
+                                .insert(TcpAlias(address.to_string(), *port as u16), assigned_host);
+                            Ok(true)
+                        }
+                    }
+                }
                 Err(error) => {
-                    // Adding to connection map failed.
+                    // Assigning a host failed.
                     #[cfg(not(coverage_nightly))]
                     tracing::info!(
-                        peer = %context.peer, host = %assigned_host, %error,
+                        peer = %context.peer, %address, %error,
                         "Rejecting HTTP.",
                     );
                     let _ = context.tx.send(
                         format!(
-                            "{} {} Cannot listen to HTTP on http://{} for {} ({})\r\n",
+                            "{} {} Cannot listen to HTTP for {} ({})\r\n",
                             Utc::now().to_rfc3339().dimmed(),
                             " Error ".black().on_red().bold(),
-                            match context.server.http_port {
-                                80 => assigned_host.clone(),
-                                port => format!("{assigned_host}:{port}"),
-                            },
                             address,
                             error,
                         )
                         .into_bytes(),
                     );
                     Ok(false)
-                }
-                _ => {
-                    // Adding to connection map succeeded.
-                    #[cfg(not(coverage_nightly))]
-                    tracing::info!(peer = %context.peer, host = %assigned_host, "Serving HTTP...");
-                    let _ = context.tx.send(
-                        format!(
-                            "{} {:>14} on {} for {}\r\n",
-                            Utc::now().to_rfc3339().dimmed(),
-                            "Starting HTTP".green().bold(),
-                            match context.server.http_port {
-                                80 => format!("http://{assigned_host}"),
-                                port => format!("http://{assigned_host}:{port}"),
-                            }
-                            .underline(),
-                            if address.is_empty() {
-                                "unspecified address".into()
-                            } else {
-                                format!("address {address}")
-                            },
-                        )
-                        .into_bytes(),
-                    );
-                    if !context.server.disable_https {
-                        let _ = context.tx.send(
-                            format!(
-                                "{} {:>14} on {} for {}\r\n",
-                                Utc::now().to_rfc3339().dimmed(),
-                                "Starting HTTPS".green().bold(),
-                                match context.server.https_port {
-                                    443 => format!("https://{assigned_host}"),
-                                    port => format!("https://{assigned_host}:{port}"),
-                                }
-                                .underline(),
-                                if address.is_empty() {
-                                    "unspecified address".into()
-                                } else {
-                                    format!("address {address}")
-                                },
-                            )
-                            .into_bytes(),
-                        );
-                    }
-                    context
-                        .user_data
-                        .host_addressing
-                        .insert(TcpAlias(address.to_string(), *port as u16), assigned_host);
-                    Ok(true)
                 }
             }
         }
@@ -922,7 +979,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
             let service = service_fn(move |mut req: Request<Incoming>| {
                 // Set HTTP host via header
                 req.headers_mut()
-                    .insert("host", address.clone().try_into().unwrap());
+                    .insert("host", address.clone().try_into().expect("valid address"));
                 proxy_handler(req, peer, fingerprint, Arc::clone(&proxy_data))
             });
             let io = TokioIo::new(channel.into_stream());
@@ -1342,7 +1399,11 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                     "{} {} Cannot listen to TCP on port {}:{} ({})\r\n",
                     Utc::now().to_rfc3339().dimmed(),
                     " Error ".black().on_red().bold(),
-                    &context.server.domain,
+                    context
+                        .server
+                        .domain
+                        .as_deref()
+                        .unwrap_or("<Sandhole's IP>"),
                     port,
                     error,
                 )
@@ -1365,7 +1426,11 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                     "{} {} Cannot listen to TCP on port {}:{} ({})\r\n",
                     Utc::now().to_rfc3339().dimmed(),
                     " Error ".black().on_red().bold(),
-                    &context.server.domain,
+                    context
+                        .server
+                        .domain
+                        .as_deref()
+                        .unwrap_or("<Sandhole's IP>"),
                     port,
                     error,
                 )
@@ -1385,7 +1450,11 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                     "{} {} Cannot listen to TCP on port {}:{} ({})\r\n",
                     Utc::now().to_rfc3339().dimmed(),
                     " Error ".black().on_red().bold(),
-                    &context.server.domain,
+                    context
+                        .server
+                        .domain
+                        .as_deref()
+                        .unwrap_or("<Sandhole's IP>"),
                     port,
                     error,
                 )
@@ -1463,7 +1532,11 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                                 "{} {} Cannot listen to TCP on {}:{} ({})\r\n",
                                 Utc::now().to_rfc3339().dimmed(),
                                 " Error ".black().on_red().bold(),
-                                context.server.domain,
+                                context
+                                    .server
+                                    .domain
+                                    .as_deref()
+                                    .unwrap_or("<Sandhole's IP>"),
                                 &port,
                                 error,
                             )
@@ -1503,7 +1576,11 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                             "{} {} Cannot listen to TCP on {}:{} ({})\r\n",
                             Utc::now().to_rfc3339().dimmed(),
                             " Error ".black().on_red().bold(),
-                            context.server.domain,
+                            context
+                                .server
+                                .domain
+                                .as_deref()
+                                .unwrap_or("<Sandhole's IP>"),
                             &assigned_port,
                             error,
                         )
@@ -1527,7 +1604,11 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                             "{} {:>14} port on {}:{}\r\n",
                             Utc::now().to_rfc3339().dimmed(),
                             "Starting TCP".green().bold(),
-                            context.server.domain,
+                            context
+                                .server
+                                .domain
+                                .as_deref()
+                                .unwrap_or("<Sandhole's IP>"),
                             &assigned_port,
                         )
                         .into_bytes(),
@@ -1561,7 +1642,11 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                     "{} {:>14} port on {}:{}\r\n",
                     Utc::now().to_rfc3339().dimmed(),
                     "Stopping TCP".yellow().bold(),
-                    context.server.domain,
+                    context
+                        .server
+                        .domain
+                        .as_deref()
+                        .unwrap_or("<Sandhole's IP>"),
                     &assigned_port,
                 )
                 .into_bytes(),

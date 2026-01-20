@@ -7,11 +7,16 @@ Sandhole exposes several options, which you can see by running `sandhole --help`
 <pre class="terminal">
 Expose HTTP/SSH/TCP services through SSH port forwarding.
 
-<b><u>Usage:</u></b> <b>sandhole</b> [OPTIONS] <b>--domain</b> &lt;DOMAIN&gt;
+<b><u>Usage:</u></b> <b>sandhole</b> [OPTIONS] &lt;--domain &lt;DOMAIN&gt;|--no-domain&gt;
 
 <b><u>Options:</u></b>
       <b>--domain</b> &lt;DOMAIN&gt;
           The root domain of the application
+
+      <b>--no-domain</b>
+          Whether to run Sandhole without a root domain.
+
+          This option disables subdomains.
 
       <b>--domain-redirect</b> &lt;URL&gt;
           Where to redirect requests to the root domain

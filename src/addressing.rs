@@ -1,4 +1,4 @@
-use std::{hash::Hash, net::SocketAddr, sync::Mutex};
+use std::{fmt::Display, hash::Hash, net::SocketAddr, sync::Mutex};
 
 use block_id::{Alphabet, BlockId};
 use bon::Builder;
@@ -102,6 +102,22 @@ impl Resolver for DnsResolver {
     }
 }
 
+// Errors raised inside of address delegator (only if root_domain is None).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum AddressDelegatorError {
+    InvalidAddress,
+    ProfaneAddress,
+}
+
+impl Display for AddressDelegatorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AddressDelegatorError::InvalidAddress => f.write_str("invalid address requested"),
+            AddressDelegatorError::ProfaneAddress => f.write_str("profane address requested"),
+        }
+    }
+}
+
 // Service that assigns addresses to HTTP proxies.
 #[derive(Builder)]
 pub(crate) struct AddressDelegator<R> {
@@ -116,7 +132,7 @@ pub(crate) struct AddressDelegator<R> {
     // Prefix to add for TXT records.
     txt_record_prefix: String,
     // Root domain for Sandhole.
-    root_domain: String,
+    root_domain: Option<String>,
     // Policy on how to allow binding hostnames.
     bind_hostnames: BindHostnames,
     // Whether subdomains should be random or not.
@@ -171,44 +187,96 @@ impl<R: Resolver> AddressDelegator<R> {
         user: &Option<String>,
         fingerprint: &Option<Fingerprint>,
         socket_address: &SocketAddr,
-    ) -> String {
-        // Only consider valid DNS addresses
-        if DnsName::try_from(requested_address).is_ok() {
-            let subdomain = requested_address.trim_end_matches(&format!(".{}", self.root_domain));
-            let is_subdomain = !subdomain.is_empty() && !subdomain.contains('.');
-            // Ensure that the domain/subdomain passes the profanity filter(s) if set
+    ) -> Result<String, AddressDelegatorError> {
+        if let Some(root_domain) = self.root_domain.as_ref() {
+            // Only consider valid DNS addresses
+            if DnsName::try_from(requested_address).is_ok() {
+                let subdomain = requested_address.trim_end_matches(&format!(".{root_domain}"));
+                let is_subdomain = !subdomain.is_empty() && !subdomain.contains('.');
+                // Ensure that the domain/subdomain passes the profanity filter(s) if set
+                #[cfg(feature = "rustrict")]
+                let filter = (is_subdomain
+                    && self.requested_subdomain_filter_profanities
+                    && subdomain.is_inappropriate())
+                    || (!is_subdomain
+                        && self.requested_domain_filter_profanities
+                        && requested_address.is_inappropriate());
+                #[cfg(not(feature = "rustrict"))]
+                let filter = false;
+                if filter {
+                    #[cfg(not(coverage_nightly))]
+                    tracing::warn!(%requested_address, "Profane address requested, defaulting to random.");
+                } else {
+                    // If we bind all hostnames, return the provided address
+                    if matches!(self.bind_hostnames, BindHostnames::All) {
+                        return Ok(requested_address.to_string());
+                    }
+                    // If we bind by CNAME records, check that this address points to Sandhole's root domain
+                    if matches!(self.bind_hostnames, BindHostnames::Cname)
+                        && requested_address != root_domain
+                        && self
+                            .resolver
+                            .has_cname_record_for_domain(requested_address, root_domain)
+                            .await
+                    {
+                        return Ok(requested_address.to_string());
+                    }
+                    // If we bind by TXT or CNAME records, check that the public key's fingerprint is among the TXT records
+                    if matches!(
+                        self.bind_hostnames,
+                        BindHostnames::Cname | BindHostnames::Txt
+                    ) && let Some(fingerprint) = fingerprint
+                        && self
+                            .resolver
+                            .has_txt_record_for_fingerprint(
+                                &self.txt_record_prefix,
+                                requested_address,
+                                fingerprint,
+                            )
+                            .await
+                    {
+                        return Ok(requested_address.to_string());
+                    }
+                    // If subdomains aren't random, check if user provided a valid one
+                    if !self.force_random_subdomains {
+                        if is_subdomain {
+                            // Assign specified subdomain under the root domain
+                            return Ok(format!("{subdomain}.{root_domain}"));
+                        } else {
+                            #[cfg(not(coverage_nightly))]
+                            tracing::warn!(
+                                %requested_address, "Invalid address requested, defaulting to random."
+                            );
+                        }
+                    }
+                }
+            } else {
+                #[cfg(not(coverage_nightly))]
+                tracing::warn!(%requested_address, "Invalid address requested, defaulting to random.");
+            }
+            // Assign random subdomain under the root domain
+            return Ok(format!(
+                "{}.{}",
+                self.get_random_subdomain(requested_address, user, fingerprint, socket_address),
+                root_domain
+            ));
+        } else if DnsName::try_from(requested_address).is_ok() {
+            // Ensure that the domain passes the profanity filter(s) if set
             #[cfg(feature = "rustrict")]
-            let filter = (is_subdomain
-                && self.requested_subdomain_filter_profanities
-                && subdomain.is_inappropriate())
-                || (!is_subdomain
-                    && self.requested_domain_filter_profanities
-                    && requested_address.is_inappropriate());
+            let filter =
+                self.requested_domain_filter_profanities && requested_address.is_inappropriate();
             #[cfg(not(feature = "rustrict"))]
             let filter = false;
             if filter {
-                #[cfg(not(coverage_nightly))]
-                tracing::warn!(%requested_address, "Profane address requested, defaulting to random.");
+                return Err(AddressDelegatorError::ProfaneAddress);
             } else {
                 // If we bind all hostnames, return the provided address
                 if matches!(self.bind_hostnames, BindHostnames::All) {
-                    return requested_address.to_string();
+                    return Ok(requested_address.to_string());
                 }
-                // If we bind by CNAME records, check that this address points to Sandhole's root domain
-                if matches!(self.bind_hostnames, BindHostnames::Cname)
-                    && requested_address != self.root_domain
-                    && self
-                        .resolver
-                        .has_cname_record_for_domain(requested_address, &self.root_domain)
-                        .await
-                {
-                    return requested_address.to_string();
-                }
-                // If we bind by TXT or CNAME records, check that the public key's fingerprint is among the TXT records
-                if matches!(
-                    self.bind_hostnames,
-                    BindHostnames::Cname | BindHostnames::Txt
-                ) && let Some(fingerprint) = fingerprint
+                // If we bind by TXT, check that the public key's fingerprint is among the TXT records
+                if matches!(self.bind_hostnames, BindHostnames::Txt)
+                    && let Some(fingerprint) = fingerprint
                     && self
                         .resolver
                         .has_txt_record_for_fingerprint(
@@ -218,31 +286,11 @@ impl<R: Resolver> AddressDelegator<R> {
                         )
                         .await
                 {
-                    return requested_address.to_string();
-                }
-                // If subdomains aren't random, check if user provided a valid one
-                if !self.force_random_subdomains {
-                    if is_subdomain {
-                        // Assign specified subdomain under the root domain
-                        return format!("{}.{}", subdomain, self.root_domain);
-                    } else {
-                        #[cfg(not(coverage_nightly))]
-                        tracing::warn!(
-                            %requested_address, "Invalid address requested, defaulting to random."
-                        );
-                    }
+                    return Ok(requested_address.to_string());
                 }
             }
-        } else {
-            #[cfg(not(coverage_nightly))]
-            tracing::warn!(%requested_address, "Invalid address requested, defaulting to random.");
         }
-        // Assign random subdomain under the root domain
-        format!(
-            "{}.{}",
-            self.get_random_subdomain(requested_address, user, fingerprint, socket_address),
-            self.root_domain
-        )
+        Err(AddressDelegatorError::InvalidAddress)
     }
 
     // Generate a random subdomain based on the configured strategy
@@ -328,7 +376,7 @@ impl<R: Resolver> AddressDelegator<R> {
                         })
                         .collect(),
                 )
-                .unwrap();
+                .expect("valid UTF-8");
                 #[cfg(feature = "rustrict")]
                 {
                     if !self.random_subdomain_filter_profanities || !result.is_inappropriate() {
@@ -401,7 +449,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert_eq!(address, "some.address");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
@@ -431,7 +480,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert_eq!(address, "root.tld");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
@@ -464,7 +514,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert_eq!(address, "some.address");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
@@ -503,7 +554,8 @@ mod address_delegator_tests {
                 &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert_eq!(address, "some.address");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
@@ -539,7 +591,8 @@ mod address_delegator_tests {
                 &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert_eq!(address, "some.address");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
@@ -571,7 +624,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert_eq!(address, "subdomain.root.tld");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
@@ -607,7 +661,8 @@ mod address_delegator_tests {
                 &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert_eq!(address, "something.root.tld");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
@@ -637,7 +692,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert_eq!(address, "prefix.root.tld");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
@@ -673,7 +729,8 @@ mod address_delegator_tests {
                 &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert_eq!(address, "root.tld");
         assert!(
             DnsName::try_from(address.clone()).is_ok(),
@@ -709,7 +766,8 @@ mod address_delegator_tests {
                 &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert!(
             Regex::new(r"^[0-9a-z]{6}\.root\.tld$")
                 .unwrap()
@@ -750,7 +808,8 @@ mod address_delegator_tests {
                 &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert!(
             Regex::new(r"^[0-9a-z]{6}\.root\.tld$")
                 .unwrap()
@@ -789,7 +848,8 @@ mod address_delegator_tests {
                 &Some(fingerprint),
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert!(
             Regex::new(r"^[0-9a-z]{6}\.root\.tld$")
                 .unwrap()
@@ -834,7 +894,8 @@ mod address_delegator_tests {
                     &Some(fingerprint),
                     &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
                 )
-                .await;
+                .await
+                .unwrap();
             assert!(regex.is_match(&address), "invalid address {address}");
             assert!(
                 DnsName::try_from(address.clone()).is_ok(),
@@ -882,7 +943,8 @@ mod address_delegator_tests {
                     &Some(fingerprint),
                     &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
                 )
-                .await;
+                .await
+                .unwrap();
             assert!(regex.is_match(&address), "invalid address {address}");
             assert!(
                 DnsName::try_from(address.clone()).is_ok(),
@@ -923,7 +985,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert!(
             Regex::new(r"^[0-9a-z]{8}\.root\.tld$")
                 .unwrap()
@@ -962,7 +1025,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert!(
             Regex::new(r"^[0-9a-z]{8}\.root\.tld$")
                 .unwrap()
@@ -1002,7 +1066,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12301".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address2_u1_a1 = delegator
             .get_http_address(
                 "a1",
@@ -1010,7 +1075,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12302".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address3_u2_a1 = delegator
             .get_http_address(
                 "a1",
@@ -1018,7 +1084,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12303".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address4_u1_a2 = delegator
             .get_http_address(
                 "a2",
@@ -1026,7 +1093,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12304".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert_eq!(address1_u1_a1, address2_u1_a1);
         assert_ne!(address1_u1_a1, address3_u2_a1);
         assert_ne!(address1_u1_a1, address4_u1_a2);
@@ -1080,7 +1148,8 @@ mod address_delegator_tests {
                 &Some(f1),
                 &"127.0.0.1:12301".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address2_f1_a1_u0 = delegator
             .get_http_address(
                 "a1",
@@ -1088,7 +1157,8 @@ mod address_delegator_tests {
                 &Some(f1),
                 &"127.0.0.1:12302".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address3_f2_a1_u0 = delegator
             .get_http_address(
                 "a1",
@@ -1096,7 +1166,8 @@ mod address_delegator_tests {
                 &Some(f2),
                 &"127.0.0.1:12303".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address4_f1_a2_u0 = delegator
             .get_http_address(
                 "a2",
@@ -1104,7 +1175,8 @@ mod address_delegator_tests {
                 &Some(f1),
                 &"127.0.0.1:12304".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address5_f1_a1_u1 = delegator
             .get_http_address(
                 "a1",
@@ -1112,7 +1184,8 @@ mod address_delegator_tests {
                 &Some(f1),
                 &"127.0.0.1:12305".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address6_f1_a1_u1 = delegator
             .get_http_address(
                 "a1",
@@ -1120,7 +1193,8 @@ mod address_delegator_tests {
                 &Some(f1),
                 &"127.0.0.1:12306".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address7_f2_a1_u1 = delegator
             .get_http_address(
                 "a1",
@@ -1128,7 +1202,8 @@ mod address_delegator_tests {
                 &Some(f2),
                 &"127.0.0.1:12307".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address8_f1_a2_u1 = delegator
             .get_http_address(
                 "a2",
@@ -1136,7 +1211,8 @@ mod address_delegator_tests {
                 &Some(f1),
                 &"127.0.0.1:12308".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address9_f1_a1_u2 = delegator
             .get_http_address(
                 "a1",
@@ -1144,7 +1220,8 @@ mod address_delegator_tests {
                 &Some(f1),
                 &"127.0.0.1:12309".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address10_f1_a1_u2 = delegator
             .get_http_address(
                 "a1",
@@ -1152,7 +1229,8 @@ mod address_delegator_tests {
                 &Some(f1),
                 &"127.0.0.1:12310".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address11_f2_a1_u2 = delegator
             .get_http_address(
                 "a1",
@@ -1160,7 +1238,8 @@ mod address_delegator_tests {
                 &Some(f2),
                 &"127.0.0.1:12311".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address12_f1_a2_u2 = delegator
             .get_http_address(
                 "a2",
@@ -1168,7 +1247,8 @@ mod address_delegator_tests {
                 &Some(f1),
                 &"127.0.0.1:12312".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
 
         assert_eq!(address1_f1_a1_u0, address2_f1_a1_u0);
         assert_ne!(address1_f1_a1_u0, address3_f2_a1_u0);
@@ -1262,7 +1342,8 @@ mod address_delegator_tests {
                 &None,
                 &"192.168.0.1:12301".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address2_u1_i1 = delegator
             .get_http_address(
                 "a1",
@@ -1270,7 +1351,8 @@ mod address_delegator_tests {
                 &None,
                 &"192.168.0.1:12302".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address3_u2_i1 = delegator
             .get_http_address(
                 "a1",
@@ -1278,7 +1360,8 @@ mod address_delegator_tests {
                 &None,
                 &"192.168.0.1:12303".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address4_u1_i2 = delegator
             .get_http_address(
                 "a1",
@@ -1286,7 +1369,8 @@ mod address_delegator_tests {
                 &None,
                 &"192.168.0.2:12304".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert_eq!(address1_u1_i1, address2_u1_i1);
         assert_ne!(address1_u1_i1, address3_u2_i1);
         assert_ne!(address1_u1_i1, address4_u1_i2);
@@ -1332,7 +1416,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12301".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address2_s1_a1 = delegator
             .get_http_address(
                 "a1",
@@ -1340,7 +1425,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12301".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address3_s2_a1 = delegator
             .get_http_address(
                 "a1",
@@ -1348,7 +1434,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12302".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let address4_s1_a2 = delegator
             .get_http_address(
                 "a2",
@@ -1356,7 +1443,8 @@ mod address_delegator_tests {
                 &None,
                 &"127.0.0.1:12301".parse::<SocketAddr>().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert_eq!(address1_s1_a1, address2_s1_a1);
         assert_ne!(address1_s1_a1, address3_s2_a1);
         assert_ne!(address1_s1_a1, address4_s1_a2);
@@ -1404,7 +1492,8 @@ mod address_delegator_tests {
                     &None,
                     &"127.0.0.1:12345".parse().unwrap()
                 )
-                .await,
+                .await
+                .unwrap(),
             "2z4fd6.root.tld"
         );
     }
@@ -1434,7 +1523,8 @@ mod address_delegator_tests {
                     &None,
                     &"127.0.0.1:12345".parse().unwrap()
                 )
-                .await,
+                .await
+                .unwrap(),
             "aec4bv.root.tld"
         );
     }
@@ -1459,7 +1549,8 @@ mod address_delegator_tests {
         assert_eq!(
             delegator
                 .get_http_address("address", &None, &None, &"127.0.0.1:12345".parse().unwrap())
-                .await,
+                .await
+                .unwrap(),
             "c95czw.root.tld"
         );
     }
@@ -1493,7 +1584,8 @@ mod address_delegator_tests {
                     &Some(fingerprint),
                     &"127.0.0.1:12345".parse().unwrap()
                 )
-                .await,
+                .await
+                .unwrap(),
             "3g68u5.root.tld"
         );
         assert_eq!(
@@ -1504,7 +1596,8 @@ mod address_delegator_tests {
                     &Some(fingerprint),
                     &"127.0.0.1:12345".parse().unwrap()
                 )
-                .await,
+                .await
+                .unwrap(),
             "zsgmqb.root.tld"
         );
     }
@@ -1537,7 +1630,8 @@ mod address_delegator_tests {
                 &Some(fingerprint),
                 &"127.0.0.1:12345".parse().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         let second_address = delegator
             .get_http_address(
                 "address",
@@ -1545,7 +1639,8 @@ mod address_delegator_tests {
                 &Some(fingerprint),
                 &"127.0.0.1:12345".parse().unwrap(),
             )
-            .await;
+            .await
+            .unwrap();
         assert_ne!(first_address, second_address);
     }
 
@@ -1568,10 +1663,12 @@ mod address_delegator_tests {
             .build();
         let first_address = delegator
             .get_http_address("address", &None, &None, &"127.0.0.1:12345".parse().unwrap())
-            .await;
+            .await
+            .unwrap();
         let second_address = delegator
             .get_http_address("address", &None, &None, &"127.0.0.1:12345".parse().unwrap())
-            .await;
+            .await
+            .unwrap();
         assert_ne!(first_address, second_address);
     }
 }

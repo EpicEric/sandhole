@@ -130,7 +130,7 @@ pub(crate) struct SandholeServer {
     // Service for handling opening and closing TCP sockets for non-aliased services.
     pub(crate) tcp_handler: Arc<TcpHandler>,
     // The base domain of Sandhole.
-    pub(crate) domain: String,
+    pub(crate) domain: Option<String>,
     // Which port Sandhole listens to for HTTP connections.
     pub(crate) http_port: u16,
     // Which port Sandhole listens to for HTTPS connections.
@@ -167,6 +167,9 @@ pub(crate) struct SandholeServer {
 impl SandholeServer {
     // Returns true if the address is an alias and not localhost/empty/*
     pub(crate) fn is_alias(&self, address: &str) -> bool {
-        address != "localhost" && !address.is_empty() && address != "*" && address != self.domain
+        address != "localhost"
+            && !address.is_empty()
+            && address != "*"
+            && self.domain.as_ref().is_some_and(|domain| address != domain)
     }
 }

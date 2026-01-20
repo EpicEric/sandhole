@@ -108,7 +108,7 @@ async fn load_fingerprints_data(
                     }
                 }
             }
-            *fingerprints_data.write().unwrap() = fingerprints_map;
+            *fingerprints_data.write().expect("not poisoned") = fingerprints_map;
         }
         Err(error) => {
             #[cfg(not(coverage_nightly))]
@@ -199,7 +199,7 @@ impl FingerprintsValidator {
         if self
             .admin_fingerprints
             .read()
-            .unwrap()
+            .expect("not poisoned")
             .contains_key(fingerprint)
         {
             AuthenticationType::Admin
@@ -207,7 +207,7 @@ impl FingerprintsValidator {
         } else if self
             .user_fingerprints
             .read()
-            .unwrap()
+            .expect("not poisoned")
             .contains_key(fingerprint)
         {
             AuthenticationType::User
@@ -220,7 +220,12 @@ impl FingerprintsValidator {
     // Return the key data related to a given fingerprint
     pub(crate) fn get_data_for_fingerprint(&self, fingerprint: &Fingerprint) -> Option<KeyData> {
         // Check admin keys first
-        match self.admin_fingerprints.read().unwrap().get(fingerprint) {
+        match self
+            .admin_fingerprints
+            .read()
+            .expect("not poisoned")
+            .get(fingerprint)
+        {
             Some(key_data) => {
                 Some(key_data.clone())
                 // Check user keys next
@@ -228,7 +233,7 @@ impl FingerprintsValidator {
             _ => self
                 .user_fingerprints
                 .read()
-                .unwrap()
+                .expect("not poisoned")
                 .get(fingerprint)
                 .cloned(),
         }
@@ -236,7 +241,12 @@ impl FingerprintsValidator {
 
     // Delete a user key from the fingerprints matcher and the filesystem
     pub(crate) fn remove_user_key(&self, fingerprint: &Fingerprint) -> color_eyre::Result<()> {
-        match self.user_fingerprints.write().unwrap().remove(fingerprint) {
+        match self
+            .user_fingerprints
+            .write()
+            .expect("not poisoned")
+            .remove(fingerprint)
+        {
             Some(KeyData { file, .. }) => Ok(remove_file(file)?),
             _ => Err(ServerError::NoMatchingUserKey.into()),
         }

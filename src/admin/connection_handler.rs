@@ -74,7 +74,7 @@ pub(crate) fn get_prometheus_service(
                 let mut response = Response::new(Full::new(Bytes::from(
                     tokio::task::spawn_blocking(move || handle_clone.render())
                         .await
-                        .unwrap(),
+                        .expect("task runs to completion"),
                 )));
                 response
                     .headers_mut()
