@@ -24,7 +24,7 @@ use tower::Service;
 use crate::common::SandholeHandle;
 
 /// This test ensures that profanities are not allowed when using the
-/// `--requested-subdomain-filter-profanities` options, except if the profanity
+/// `--requested-subdomain-filter-profanities` option, except if the profanity
 /// happens to be part of the root domain.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn http_addressing_profanities_subdomain() {

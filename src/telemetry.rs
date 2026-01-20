@@ -62,7 +62,7 @@ impl SlidingWindowCounter {
     }
 
     fn clean(&self) {
-        let mut history = self.history.lock().unwrap();
+        let mut history = self.history.lock().expect("not poisoned");
         loop {
             let Some(element) = history.front() else {
                 break;
@@ -73,7 +73,7 @@ impl SlidingWindowCounter {
                 // Instead, update its instant.
                 // This ensures that the first call to add is counted.
                 if history.len() == 1 {
-                    history.front_mut().unwrap().0 = Instant::now();
+                    history.front_mut().expect("length check").0 = Instant::now();
                     break;
                 } else {
                     history.pop_front();
@@ -87,7 +87,7 @@ impl SlidingWindowCounter {
     // Measure the counter, taking the period and window into account.
     fn measure(&self) -> u64 {
         let count = self.count.load(Ordering::Acquire);
-        let mut history = self.history.lock().unwrap();
+        let mut history = self.history.lock().expect("not poisoned");
         let measurement = loop {
             // If there are no elements in the history, return the current count.
             let Some(element) = history.front() else {
@@ -129,17 +129,17 @@ struct TelemetryGauge {
 impl GaugeFn for TelemetryGauge {
     fn increment(&self, value: f64) {
         self.inner.increment(value);
-        *self.value.lock().unwrap() += value;
+        *self.value.lock().expect("not poisoned") += value;
     }
 
     fn decrement(&self, value: f64) {
         self.inner.decrement(value);
-        *self.value.lock().unwrap() -= value;
+        *self.value.lock().expect("not poisoned") -= value;
     }
 
     fn set(&self, value: f64) {
         self.inner.set(value);
-        *self.value.lock().unwrap() = value;
+        *self.value.lock().expect("not poisoned") = value;
     }
 }
 
@@ -153,7 +153,7 @@ impl TelemetryGauge {
 
     // Measure the counter, taking the period and window into account.
     fn measure(&self) -> f64 {
-        *self.value.lock().unwrap()
+        *self.value.lock().expect("not poisoned")
     }
 }
 

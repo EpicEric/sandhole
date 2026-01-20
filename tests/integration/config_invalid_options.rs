@@ -46,7 +46,36 @@ async fn config_invalid_options() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2a. Fail to initialize ACME ALPN resolver if HTTPS port is not 443
+    // 2. Fail to initialize with --bind-hostnames=cname if --no-domain is set
+    let config = ApplicationConfig::parse_from([
+        "sandhole",
+        "--no-domain",
+        "--user-keys-directory",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
+        "--admin-keys-directory",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys"),
+        "--certificates-directory",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates"),
+        "--private-key-file",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh"),
+        "--acme-cache-directory",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
+        "--listen-address=127.0.0.1",
+        "--ssh-port=18022",
+        "--http-port=18080",
+        "--https-port=18443",
+        "--bind-hostnames=cname",
+    ]);
+    if timeout(Duration::from_secs(5), async {
+        assert!(entrypoint(config).await.is_err());
+    })
+    .await
+    .is_err()
+    {
+        panic!("Timeout waiting for Sandhole to start.")
+    };
+
+    // 3a. Fail to initialize ACME ALPN resolver if HTTPS port is not 443
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
@@ -79,7 +108,7 @@ async fn config_invalid_options() {
     {
         panic!("Timeout waiting for Sandhole to start.")
     };
-    // 2b. Fail to connect with fake TLS-ALPN-01 challenge verifier
+    // 3b. Fail to connect with fake TLS-ALPN-01 challenge verifier
     let mut tls_config = ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(SkipServerVerification))

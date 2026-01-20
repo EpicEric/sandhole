@@ -2,26 +2,23 @@ use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use russh::{
-    Channel,
-    client::{Msg, Session},
-};
 use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
-    io::AsyncReadExt,
     net::TcpStream,
     time::{sleep, timeout},
 };
 
 use crate::common::SandholeHandle;
 
-/// This test ensures that random ports work for TCP connections.
+/// This test ensures that profanities are not allowed when using the
+/// `--requested-domain-filter-profanities` option, resulting in an
+/// error if there is no root domain.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn tcp_bind_random_ports() {
+async fn http_addressing_profanities_no_root_domain() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
-        "--domain=foobar.tld",
+        "--no-domain",
         "--user-keys-directory",
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
         "--admin-keys-directory",
@@ -38,7 +35,8 @@ async fn tcp_bind_random_ports() {
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
-        "--bind-hostnames=none",
+        "--bind-hostnames=all",
+        "--requested-domain-filter-profanities",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
@@ -55,7 +53,7 @@ async fn tcp_bind_random_ports() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied
+    // 2. Start SSH client that will fail to proxied with a profane name
     let key = load_secret_key(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
         None,
@@ -79,57 +77,7 @@ async fn tcp_bind_random_ports() {
             .success(),
         "authentication didn't succeed"
     );
-    let mut channel = session
-        .channel_open_session()
-        .await
-        .expect("channel_open_session failed");
-    session
-        .tcpip_forward("", 12345)
-        .await
-        .expect("tcpip_forward failed");
-    let regex = regex::Regex::new(r"foobar\.tld:(\d+)").expect("Invalid regex");
-    let Ok(port) = timeout(Duration::from_secs(3), async move {
-        while let Some(message) = channel.wait().await {
-            match message {
-                russh::ChannelMsg::Data { data } => {
-                    let data =
-                        String::from_utf8(data.to_vec()).expect("Invalid UTF-8 from message");
-                    if let Some(captures) = regex.captures(&data) {
-                        let port = captures
-                            .get(1)
-                            .expect("Missing port capture group")
-                            .as_str()
-                            .to_string();
-                        return port;
-                    }
-                }
-                message => panic!("Unexpected message {message:?}"),
-            }
-        }
-        panic!("Unexpected end of channel");
-    })
-    .await
-    else {
-        panic!("Timed out waiting for port allocation.");
-    };
-    assert!(
-        port.parse::<u16>().expect("should be a valid port number") >= 1024,
-        "random port must be greater than or equal to 1024"
-    );
-
-    // 3. Connect to the TCP port of our proxy
-    let mut tcp_stream = TcpStream::connect(format!("127.0.0.1:{port}"))
-        .await
-        .expect("TCP connection failed");
-    let mut buf = String::with_capacity(13);
-    tcp_stream.read_to_string(&mut buf).await.unwrap();
-    assert_eq!(buf, "Hello, world!");
-
-    // 4. Attempt to close TCP forwarding
-    session
-        .cancel_tcpip_forward("", 12345)
-        .await
-        .expect("cancel_tcpip_forward failed");
+    assert!(session.tcpip_forward("shitty.com", 80).await.is_err());
 }
 
 struct SshClient;
@@ -142,21 +90,5 @@ impl russh::client::Handler for SshClient {
         _key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
-    }
-
-    async fn server_channel_open_forwarded_tcpip(
-        &mut self,
-        channel: Channel<Msg>,
-        _connected_address: &str,
-        _connected_port: u32,
-        _originator_address: &str,
-        _originator_port: u32,
-        _session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        tokio::spawn(async move {
-            channel.data(&b"Hello, world!"[..]).await.unwrap();
-            channel.eof().await.unwrap();
-        });
-        Ok(())
     }
 }

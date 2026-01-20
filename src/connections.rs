@@ -135,7 +135,7 @@ where
         }
         // If the entry count increased, notify the reactor.
         if self.map.len() > len
-            && let Some(reactor) = self.reactor.read().unwrap().as_ref()
+            && let Some(reactor) = self.reactor.read().expect("not poisoned").as_ref()
         {
             reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
         }
@@ -195,7 +195,7 @@ where
         });
         // If the entry was removed, notify the reactor.
         if self.map.len() < len
-            && let Some(reactor) = self.reactor.read().unwrap().as_ref()
+            && let Some(reactor) = self.reactor.read().expect("not poisoned").as_ref()
         {
             reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
         }
@@ -222,7 +222,7 @@ where
         });
         // If one or more entries were removed, notify the reactor.
         if self.map.len() < len
-            && let Some(reactor) = self.reactor.read().unwrap().as_ref()
+            && let Some(reactor) = self.reactor.read().expect("not poisoned").as_ref()
         {
             reactor.call(self.map.iter().map(|entry| entry.key().clone()).collect())
         }
@@ -232,7 +232,7 @@ where
     // Update the reactor value.
     // This should only be called near the connection map's initialization, not during its lifetime.
     pub(crate) fn update_reactor(&self, reactor: Option<R>) {
-        *self.reactor.write().unwrap() = reactor;
+        *self.reactor.write().expect("not poisoned") = reactor;
     }
 
     // Return tabular data from all the existing connections.

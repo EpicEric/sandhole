@@ -343,7 +343,7 @@ impl AdminState {
         let table = match self.tab.current_tab() {
             Tab::Http => {
                 // Get data for HTTP
-                let data = self.server.http_data.lock().unwrap().clone();
+                let data = self.server.http_data.lock().expect("not poisoned").clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each host
                 let rows: Vec<Row<'_>> = data
@@ -378,7 +378,7 @@ impl AdminState {
             }
             Tab::Sni => {
                 // Get data for aliases
-                let data = self.server.sni_data.lock().unwrap().clone();
+                let data = self.server.sni_data.lock().expect("not poisoned").clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
@@ -415,7 +415,7 @@ impl AdminState {
             }
             Tab::Ssh => {
                 // Get data for SSH
-                let data = self.server.ssh_data.lock().unwrap().clone();
+                let data = self.server.ssh_data.lock().expect("not poisoned").clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each alias
                 let rows: Vec<Row<'_>> = data
@@ -452,7 +452,7 @@ impl AdminState {
             }
             Tab::Tcp => {
                 // Get data for TCP
-                let data = self.server.tcp_data.lock().unwrap().clone();
+                let data = self.server.tcp_data.lock().expect("not poisoned").clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
@@ -489,7 +489,7 @@ impl AdminState {
             }
             Tab::Alias => {
                 // Get data for aliases
-                let data = self.server.alias_data.lock().unwrap().clone();
+                let data = self.server.alias_data.lock().expect("not poisoned").clone();
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
@@ -544,7 +544,12 @@ impl AdminState {
             network_tx,
             network_rx,
             cpu_usage,
-        } = self.server.system_data.lock().unwrap().clone();
+        } = self
+            .server
+            .system_data
+            .lock()
+            .expect("not poisoned")
+            .clone();
         let block = Block::bordered().title("System information");
         // Break into four areas, first horizontally then vertically
         let [left_area, right_area] =
@@ -631,7 +636,7 @@ impl AdminInterface {
         }
         let _ = backend.execute(crossterm::terminal::EnterAlternateScreen);
         let interface = Arc::new(Mutex::new(AdminTerminal {
-            terminal: Terminal::with_options(backend, options).unwrap(),
+            terminal: Terminal::with_options(backend, options).expect("valid terminal options"),
             state: AdminState {
                 server,
                 enabled: true,
@@ -647,7 +652,7 @@ impl AdminInterface {
         let join_handle = DroppableHandle(tokio::spawn(async move {
             loop {
                 {
-                    let mut interface = interface.lock().unwrap();
+                    let mut interface = interface.lock().expect("not poisoned");
                     let AdminTerminal { terminal, state } = interface.deref_mut();
                     if !state.enabled
                         || terminal
@@ -683,7 +688,7 @@ impl AdminInterface {
             height,
         };
         {
-            let mut interface = self.interface.lock().unwrap();
+            let mut interface = self.interface.lock().expect("not poisoned");
             interface.terminal.resize(rect)?;
             interface.state.is_pty = true;
         }
@@ -694,7 +699,7 @@ impl AdminInterface {
     // Advance one tab
     pub(crate) fn next_tab(&mut self) {
         {
-            let mut interface = self.interface.lock().unwrap();
+            let mut interface = self.interface.lock().expect("not poisoned");
             interface.state.tab.next();
             interface.state.table_state = Default::default();
             interface.state.vertical_scroll = Default::default();
@@ -705,7 +710,7 @@ impl AdminInterface {
     // Go back one tab
     pub(crate) fn previous_tab(&mut self) {
         {
-            let mut interface = self.interface.lock().unwrap();
+            let mut interface = self.interface.lock().expect("not poisoned");
             interface.state.tab.previous();
             interface.state.table_state = Default::default();
             interface.state.vertical_scroll = Default::default();
@@ -716,7 +721,7 @@ impl AdminInterface {
     // Move down in the prompt or selected tab's table
     pub(crate) fn move_down(&mut self) {
         let notify = {
-            let mut interface = self.interface.lock().unwrap();
+            let mut interface = self.interface.lock().expect("not poisoned");
             match interface.state.prompt {
                 Some(AdminPrompt::SelectUser(_, ref mut state)) => {
                     state.select_next();
@@ -728,7 +733,7 @@ impl AdminInterface {
                     interface.state.vertical_scroll = interface
                         .state
                         .vertical_scroll
-                        .position(interface.state.table_state.selected().unwrap());
+                        .position(interface.state.table_state.selected().unwrap_or(0));
                     true
                 }
             }
@@ -741,7 +746,7 @@ impl AdminInterface {
     // Move up in the prompt or selected tab's table
     pub(crate) fn move_up(&mut self) {
         let notify = {
-            let mut interface = self.interface.lock().unwrap();
+            let mut interface = self.interface.lock().expect("not poisoned");
             match interface.state.prompt {
                 Some(AdminPrompt::SelectUser(_, ref mut state)) => {
                     state.select_previous();
@@ -753,7 +758,7 @@ impl AdminInterface {
                     interface.state.vertical_scroll = interface
                         .state
                         .vertical_scroll
-                        .position(interface.state.table_state.selected().unwrap());
+                        .position(interface.state.table_state.selected().unwrap_or(usize::MAX));
                     true
                 }
             }
@@ -766,7 +771,7 @@ impl AdminInterface {
     // Cancel current selection in the prompt or table
     pub(crate) fn cancel(&mut self) {
         let notify = {
-            let mut interface = self.interface.lock().unwrap();
+            let mut interface = self.interface.lock().expect("not poisoned");
             match interface.state.prompt {
                 Some(_) => {
                     interface.state.prompt = None;
@@ -791,7 +796,7 @@ impl AdminInterface {
     // Confirm current selection, which might be an entry in a table or a prompt
     pub(crate) fn enter(&mut self) {
         let notify = {
-            let mut interface = self.interface.lock().unwrap();
+            let mut interface = self.interface.lock().expect("not poisoned");
             match interface.state.prompt.take() {
                 // Close the infobox
                 Some(AdminPrompt::Infobox(_)) => {
@@ -815,7 +820,7 @@ impl AdminInterface {
                             .server
                             .sessions_publickey
                             .lock()
-                            .unwrap()
+                            .expect("not poisoned")
                             .remove(&fingerprint)
                         {
                             sessions.values().for_each(|cancellation_token| {
@@ -828,7 +833,7 @@ impl AdminInterface {
                             .server
                             .sessions_password
                             .lock()
-                            .unwrap()
+                            .expect("not poisoned")
                             .remove(&username)
                     {
                         sessions.values().for_each(|cancellation_token| {
@@ -882,7 +887,7 @@ impl AdminInterface {
                                     .server
                                     .http_data
                                     .lock()
-                                    .unwrap()
+                                    .expect("not poisoned")
                                     .values()
                                     .nth(row)
                                     .map(|value| value.0.values().cloned().collect()),
@@ -891,7 +896,7 @@ impl AdminInterface {
                                     .server
                                     .sni_data
                                     .lock()
-                                    .unwrap()
+                                    .expect("not poisoned")
                                     .values()
                                     .nth(row)
                                     .map(|value| value.0.values().cloned().collect()),
@@ -900,7 +905,7 @@ impl AdminInterface {
                                     .server
                                     .ssh_data
                                     .lock()
-                                    .unwrap()
+                                    .expect("not poisoned")
                                     .values()
                                     .nth(row)
                                     .map(|value| value.0.values().cloned().collect()),
@@ -909,7 +914,7 @@ impl AdminInterface {
                                     .server
                                     .tcp_data
                                     .lock()
-                                    .unwrap()
+                                    .expect("not poisoned")
                                     .values()
                                     .nth(row)
                                     .map(|value| value.0.values().cloned().collect()),
@@ -918,7 +923,7 @@ impl AdminInterface {
                                     .server
                                     .alias_data
                                     .lock()
-                                    .unwrap()
+                                    .expect("not poisoned")
                                     .values()
                                     .nth(row)
                                     .map(|value| value.0.values().cloned().collect()),
@@ -976,7 +981,7 @@ impl AdminInterface {
     // Mark user to prompt for deletion
     pub(crate) fn delete(&mut self) {
         let notify = {
-            let mut interface = self.interface.lock().unwrap();
+            let mut interface = self.interface.lock().expect("not poisoned");
             match interface.state.prompt.take() {
                 Some(AdminPrompt::UserDetails(user, data)) => match data {
                     UserData::Password => {
@@ -1012,7 +1017,7 @@ impl AdminInterface {
 
     // Disable updates to the terminal for shutdown
     pub(crate) fn disable(&mut self) {
-        let mut interface = self.interface.lock().unwrap();
+        let mut interface = self.interface.lock().expect("not poisoned");
         let _ = interface.terminal.show_cursor();
         let _ = interface
             .terminal

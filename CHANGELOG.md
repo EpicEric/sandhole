@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add `--no-domain` CLI flag.
+
 ## 0.8.7 (2026-01-15)
 
 ### Added

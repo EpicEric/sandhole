@@ -96,6 +96,12 @@ async fn tcp_assign_random_port_0() {
     let mut buf = String::with_capacity(25);
     tcp_stream.read_to_string(&mut buf).await.unwrap();
     assert_eq!(buf, "Hello from a random port!");
+
+    // 4. Attempt to close TCP forwarding
+    session
+        .cancel_tcpip_forward("*", port)
+        .await
+        .expect("cancel_tcpip_forward failed");
 }
 
 struct SshClient;
