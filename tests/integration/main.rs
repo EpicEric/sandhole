@@ -38,6 +38,7 @@ mod config_no_write_permissions_for_users_dir;
 mod connection_deny_load_balancing;
 mod connection_load_balancing;
 mod http_addressing_profanities_domain;
+mod http_addressing_profanities_no_root_domain;
 mod http_addressing_profanities_subdomain;
 mod http_force_https_by_user;
 mod http_redirects;

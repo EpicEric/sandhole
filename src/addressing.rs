@@ -1671,4 +1671,206 @@ mod address_delegator_tests {
             .unwrap();
         assert_ne!(first_address, second_address);
     }
+
+    #[test_log::test(tokio::test)]
+    async fn errors_on_invalid_domain_without_root_domain() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::builder()
+            .resolver(mock)
+            .txt_record_prefix("_some_prefix".into())
+            .bind_hostnames(BindHostnames::None)
+            .force_random_subdomains(true)
+            .random_subdomain_seed(RandomSubdomainSeed::Fingerprint)
+            .random_subdomain_length(6)
+            .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(false)
+            .requested_subdomain_filter_profanities(false)
+            .seed(42)
+            .build();
+        assert!(
+            format!(
+                "{}",
+                delegator
+                    .get_http_address("?,./", &None, &None, &"127.0.0.1:12345".parse().unwrap())
+                    .await
+                    .unwrap_err()
+            )
+            .contains("invalid address requested")
+        );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn errors_on_profane_domain_without_root_domain() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::builder()
+            .resolver(mock)
+            .txt_record_prefix("_some_prefix".into())
+            .bind_hostnames(BindHostnames::None)
+            .force_random_subdomains(true)
+            .random_subdomain_seed(RandomSubdomainSeed::Fingerprint)
+            .random_subdomain_length(6)
+            .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(true)
+            .requested_subdomain_filter_profanities(false)
+            .seed(42)
+            .build();
+        assert!(
+            format!(
+                "{}",
+                delegator
+                    .get_http_address(
+                        "fuck.com",
+                        &None,
+                        &None,
+                        &"127.0.0.1:12345".parse().unwrap()
+                    )
+                    .await
+                    .unwrap_err()
+            )
+            .contains("profane address requested")
+        );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn returns_domain_when_binding_all_without_root_domain() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::builder()
+            .resolver(mock)
+            .txt_record_prefix("_some_prefix".into())
+            .bind_hostnames(BindHostnames::All)
+            .force_random_subdomains(true)
+            .random_subdomain_seed(RandomSubdomainSeed::Fingerprint)
+            .random_subdomain_length(6)
+            .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(true)
+            .requested_subdomain_filter_profanities(false)
+            .seed(42)
+            .build();
+        assert_eq!(
+            format!(
+                "{}",
+                delegator
+                    .get_http_address(
+                        "my-own-domain.com",
+                        &None,
+                        &None,
+                        &"127.0.0.1:12345".parse().unwrap()
+                    )
+                    .await
+                    .unwrap()
+            ),
+            "my-own-domain.com"
+        );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn returns_domain_when_binding_valid_txt_without_root_domain() {
+        let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &ChaCha20Rng::from_os_rng().random(),
+        ))
+        .fingerprint(HashAlg::Sha256);
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint()
+            .with(eq("_some_prefix"), eq("txt-domain.com"), eq(fingerprint))
+            .return_const(true);
+        let delegator = AddressDelegator::builder()
+            .resolver(mock)
+            .txt_record_prefix("_some_prefix".into())
+            .bind_hostnames(BindHostnames::Txt)
+            .force_random_subdomains(true)
+            .random_subdomain_seed(RandomSubdomainSeed::Fingerprint)
+            .random_subdomain_length(6)
+            .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(true)
+            .requested_subdomain_filter_profanities(false)
+            .seed(42)
+            .build();
+        assert_eq!(
+            delegator
+                .get_http_address(
+                    "txt-domain.com",
+                    &None,
+                    &Some(fingerprint),
+                    &"127.0.0.1:12345".parse().unwrap()
+                )
+                .await
+                .unwrap(),
+            "txt-domain.com"
+        );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn errors_on_domain_with_missing_fingerprint_without_root_domain() {
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint().never();
+        let delegator = AddressDelegator::builder()
+            .resolver(mock)
+            .txt_record_prefix("_some_prefix".into())
+            .bind_hostnames(BindHostnames::Txt)
+            .force_random_subdomains(true)
+            .random_subdomain_seed(RandomSubdomainSeed::Fingerprint)
+            .random_subdomain_length(6)
+            .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(true)
+            .requested_subdomain_filter_profanities(false)
+            .seed(42)
+            .build();
+        assert!(
+            format!(
+                "{}",
+                delegator
+                    .get_http_address(
+                        "invalid.com",
+                        &None,
+                        &None,
+                        &"127.0.0.1:12345".parse().unwrap()
+                    )
+                    .await
+                    .unwrap_err()
+            )
+            .contains("invalid address requested")
+        );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn errors_on_domain_with_invalid_txt_without_root_domain() {
+        let fingerprint = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &ChaCha20Rng::from_os_rng().random(),
+        ))
+        .fingerprint(HashAlg::Sha256);
+        let mut mock = MockResolver::new();
+        mock.expect_has_txt_record_for_fingerprint()
+            .once()
+            .return_const(false);
+        let delegator = AddressDelegator::builder()
+            .resolver(mock)
+            .txt_record_prefix("_some_prefix".into())
+            .bind_hostnames(BindHostnames::Txt)
+            .force_random_subdomains(true)
+            .random_subdomain_seed(RandomSubdomainSeed::Fingerprint)
+            .random_subdomain_length(6)
+            .random_subdomain_filter_profanities(false)
+            .requested_domain_filter_profanities(true)
+            .requested_subdomain_filter_profanities(false)
+            .seed(42)
+            .build();
+        assert!(
+            format!(
+                "{}",
+                delegator
+                    .get_http_address(
+                        "invalid.com",
+                        &None,
+                        &Some(fingerprint),
+                        &"127.0.0.1:12345".parse().unwrap()
+                    )
+                    .await
+                    .unwrap_err()
+            )
+            .contains("invalid address requested")
+        );
+    }
 }
