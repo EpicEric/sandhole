@@ -6,9 +6,3 @@ title = "The Sandhole Book"
 
 [output.html]
 git-repository-url = "https://github.com/EpicEric/sandhole"
-additional-js = ["mermaid.min.js", "mermaid-init.js"]
-
-[preprocessor]
-
-[preprocessor.mermaid]
-command = "mdbook-mermaid"

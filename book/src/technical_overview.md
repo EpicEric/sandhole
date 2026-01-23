@@ -51,24 +51,4 @@ To client A, requests arrive normally at the socket, despite only having an outb
 
 Here's the same flux in a sequence diagram:
 
-```mermaid
-sequenceDiagram
-  participant SC as SSH client
-  participant SS as SSH server
-  participant M as Connection map
-  participant HS as HTTP server
-  participant HC as Web client
-
-  Note over SC, M: Tunnel setup
-  SC ->> SS: SSH connection + tcpip_forward
-  SS ->> SS: Validate login
-  SS ->> M: Register tunnel handler
-  Note over SC, HC: Traffic routing
-  HC ->>+ HS: HTTP request to assigned domain
-  HS ->> M: Look up tunnel for domain
-  HS ->>+ SS: Forward request via tunnel
-  SS ->>+ SC: Relay to local service
-  SC -->>- SS: Response from local service
-  SS -->>- HS: Forward response
-  HS -->>- HC: Return HTTP response
-```
+[![A sequence diagram showing an SSH client connecting to Sandhole's SSH server to register a tunnel handler during tunnel setup, before a web client connects to Sandhole's HTTP server and their request is forwarded to the local service, while the response follows the opposite path.](./sequence_diagram.svg)](./sequence_diagram.svg)

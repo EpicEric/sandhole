@@ -203,7 +203,6 @@
             pkgs.cargo-flamegraph
             pkgs.just
             pkgs.mdbook
-            pkgs.mdbook-mermaid
             pkgs.minica
             pkgs.to-html
           ];

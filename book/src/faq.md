@@ -22,6 +22,10 @@ Host mysshserver.com
 
 Websockets are always enabled for HTTP services.
 
+## Can I expose UDP services (like HTTP/3)?
+
+No. SSH remote forwarding only supports TCP.
+
 ## How do I retrieve proxy information for my HTTP service?
 
 You can use the standard proxy headers set by Sandhole:
