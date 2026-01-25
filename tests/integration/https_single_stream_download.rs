@@ -124,7 +124,7 @@ async fn https_single_stream_download() {
         .await
         .expect("tcpip_forward failed");
 
-    // 3. Connect to the HTTPS port of our proxy with out multiple streams
+    // 3. Connect to the HTTPS port of our proxy with a single stream
     let mut root_store = RootCertStore::empty();
     root_store.add_parsable_certificates(
         CertificateDer::pem_file_iter(concat!(

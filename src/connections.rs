@@ -153,6 +153,7 @@ where
             let slice = value.0.as_slice();
             let entry = match self.strategy {
                 LoadBalancingStrategy::Replace | LoadBalancingStrategy::Deny => slice.first(),
+                LoadBalancingStrategy::Allow if slice.len() <= 1 => slice.first(),
                 LoadBalancingStrategy::Allow => match self.algorithm {
                     LoadBalancingAlgorithm::IpHash => {
                         let mut hash = SipHasher::default();

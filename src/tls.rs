@@ -1,3 +1,4 @@
+use tokio::io::{empty, join};
 use tokio_rustls::LazyConfigAcceptor;
 
 pub(crate) struct TlsPeekData {
@@ -7,10 +8,9 @@ pub(crate) struct TlsPeekData {
 
 // Get the SNI and ALPN from a peeked ClientHello if it's valid.
 pub(crate) async fn peek_sni_and_alpn(buf: &[u8]) -> Option<TlsPeekData> {
-    let handshake =
-        LazyConfigAcceptor::new(Default::default(), tokio::io::join(buf, tokio::io::empty()))
-            .await
-            .ok()?;
+    let handshake = LazyConfigAcceptor::new(Default::default(), join(buf, empty()))
+        .await
+        .ok()?;
     let client_hello = handshake.client_hello();
     client_hello.server_name().map(|sni| TlsPeekData {
         sni: sni.to_owned(),
