@@ -56,6 +56,7 @@ mod http;
 mod ip;
 #[cfg(feature = "login")]
 mod login;
+mod pool;
 mod quota;
 mod reactor;
 mod ssh;

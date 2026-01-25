@@ -1,7 +1,13 @@
-use std::{borrow::Borrow, net::SocketAddr, sync::Arc};
+use std::{
+    borrow::Borrow,
+    net::SocketAddr,
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
+};
 
 use chrono::Utc;
 use color_eyre::eyre::eyre;
+use deadpool::Runtime;
 use http::Request;
 use hyper::{body::Incoming, service::service_fn};
 use hyper_util::{
@@ -23,6 +29,7 @@ use crate::{
     connection_handler::ConnectionHandler,
     connections::ConnectionGetByHttpHost,
     http::proxy_handler,
+    pool::{SshPool, SshPoolManager},
     ssh::{
         AuthenticatedData, ServerHandlerSender, UserData, auth::UserSessionRestriction,
         connection_handler::SshTunnelHandler,
@@ -46,6 +53,9 @@ pub(crate) struct RemoteForwardingContext<'a> {
     pub(crate) user: &'a Option<String>,
     pub(crate) key_fingerprint: &'a Option<Fingerprint>,
     pub(crate) tx: &'a ServerHandlerSender,
+    pub(crate) proxy_pool_capacity: usize,
+    pub(crate) proxy_pool_wait_timeout: Option<Duration>,
+    pub(crate) proxy_pool_timeout: Duration,
 }
 
 pub(crate) struct LocalForwardingContext<'a> {
@@ -54,6 +64,9 @@ pub(crate) struct LocalForwardingContext<'a> {
     pub(crate) peer: &'a SocketAddr,
     pub(crate) key_fingerprint: &'a Option<Fingerprint>,
     pub(crate) tx: &'a ServerHandlerSender,
+    pub(crate) proxy_pool_capacity: usize,
+    pub(crate) proxy_pool_wait_timeout: Option<Duration>,
+    pub(crate) proxy_pool_timeout: Duration,
 }
 
 pub(crate) trait ForwardingHandlerStrategy {
@@ -254,12 +267,22 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                 allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                 http_data: None,
                 ip_filter: Arc::clone(&context.user_data.ip_filter),
-                handle,
+                pool: SshPool::builder(SshPoolManager {
+                    handle,
+                    address: address.to_string(),
+                    port: *port,
+                    limiter: context.user_data.limiter.clone(),
+                })
+                .runtime(Runtime::Tokio1)
+                .max_size(context.proxy_pool_capacity)
+                .wait_timeout(context.proxy_pool_wait_timeout)
+                .recycle_timeout(Some(context.proxy_pool_timeout))
+                .build()
+                .expect("runtime was specified"),
                 tx: context.tx.clone(),
                 peer: *context.peer,
                 address: address.to_string(),
                 port: *port,
-                limiter: context.user_data.limiter.clone(),
             }),
         ) {
             Err(error) => {
@@ -410,7 +433,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                                 let _ = timeout(duration, async {
                                     copy_bidirectional_with_sizes(
                                         &mut stream,
-                                        &mut io,
+                                        io.get_mut(),
                                         buffer_size,
                                         buffer_size,
                                     )
@@ -421,7 +444,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                             None => {
                                 let _ = copy_bidirectional_with_sizes(
                                     &mut stream,
-                                    &mut io,
+                                    io.get_mut(),
                                     buffer_size,
                                     buffer_size,
                                 )
@@ -443,7 +466,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                                 let _ = timeout(duration, async {
                                     copy_bidirectional_with_sizes(
                                         &mut stream,
-                                        &mut io,
+                                        io.get_mut(),
                                         buffer_size,
                                         buffer_size,
                                     )
@@ -454,7 +477,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                             None => {
                                 let _ = copy_bidirectional_with_sizes(
                                     &mut stream,
-                                    &mut io,
+                                    io.get_mut(),
                                     buffer_size,
                                     buffer_size,
                                 )
@@ -527,12 +550,22 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                     allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                     http_data: Some(Arc::clone(&context.user_data.http_data)),
                     ip_filter: Arc::clone(&context.user_data.ip_filter),
-                    handle,
+                    pool: SshPool::builder(SshPoolManager {
+                        handle,
+                        address: address.to_string(),
+                        port: *port,
+                        limiter: context.user_data.limiter.clone(),
+                    })
+                    .runtime(Runtime::Tokio1)
+                    .max_size(context.proxy_pool_capacity)
+                    .wait_timeout(context.proxy_pool_wait_timeout)
+                    .recycle_timeout(Some(context.proxy_pool_timeout))
+                    .build()
+                    .expect("runtime was specified"),
                     tx: context.tx.clone(),
                     peer: *context.peer,
                     address: address.into(),
                     port: *port,
-                    limiter: context.user_data.limiter.clone(),
                 }),
             ) {
                 Err(error) => {
@@ -597,12 +630,22 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                             allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                             http_data: Some(Arc::clone(&context.user_data.http_data)),
                             ip_filter: Arc::clone(&context.user_data.ip_filter),
-                            handle,
+                            pool: SshPool::builder(SshPoolManager {
+                                handle,
+                                address: address.to_string(),
+                                port: *port,
+                                limiter: context.user_data.limiter.clone(),
+                            })
+                            .runtime(Runtime::Tokio1)
+                            .max_size(context.proxy_pool_capacity)
+                            .wait_timeout(context.proxy_pool_wait_timeout)
+                            .recycle_timeout(Some(context.proxy_pool_timeout))
+                            .build()
+                            .expect("runtime was specified"),
                             tx: context.tx.clone(),
                             peer: *context.peer,
                             address: address.into(),
                             port: *port,
-                            limiter: context.user_data.limiter.clone(),
                         }),
                     ) {
                         Err(error) => {
@@ -706,12 +749,22 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                             allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                             http_data: Some(Arc::clone(&context.user_data.http_data)),
                             ip_filter: Arc::clone(&context.user_data.ip_filter),
-                            handle,
+                            pool: SshPool::builder(SshPoolManager {
+                                handle,
+                                address: address.to_string(),
+                                port: *port,
+                                limiter: context.user_data.limiter.clone(),
+                            })
+                            .runtime(Runtime::Tokio1)
+                            .max_size(context.proxy_pool_capacity)
+                            .wait_timeout(context.proxy_pool_wait_timeout)
+                            .recycle_timeout(Some(context.proxy_pool_timeout))
+                            .build()
+                            .expect("runtime was specified"),
                             tx: context.tx.clone(),
                             peer: *context.peer,
                             address: address.to_string(),
                             port: *port,
-                            limiter: context.user_data.limiter.clone(),
                         }),
                     ) {
                         Err(error) => {
@@ -927,7 +980,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
         let ip = context.peer.ip().to_canonical();
         if let Some(tunnel_handler) = context.server.sni.get(address, ip) {
             let mut stream = channel.into_stream();
-            if let Ok(mut channel) = tunnel_handler
+            if let Ok(mut io) = tunnel_handler
                 .tunneling_channel(ip, context.peer.port())
                 .await
             {
@@ -943,7 +996,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                             let _ = timeout(duration, async {
                                 let _ = copy_bidirectional_with_sizes(
                                     &mut stream,
-                                    &mut channel,
+                                    io.get_mut(),
                                     buffer_size,
                                     buffer_size,
                                 )
@@ -954,7 +1007,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                         None => {
                             let _ = copy_bidirectional_with_sizes(
                                 &mut stream,
-                                &mut channel,
+                                io.get_mut(),
                                 buffer_size,
                                 buffer_size,
                             )
@@ -1107,12 +1160,22 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                 allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                 http_data: None,
                 ip_filter: Arc::clone(&context.user_data.ip_filter),
-                handle,
+                pool: SshPool::builder(SshPoolManager {
+                    handle,
+                    address: address.to_string(),
+                    port: *port,
+                    limiter: context.user_data.limiter.clone(),
+                })
+                .runtime(Runtime::Tokio1)
+                .max_size(context.proxy_pool_capacity)
+                .wait_timeout(context.proxy_pool_wait_timeout)
+                .recycle_timeout(Some(context.proxy_pool_timeout))
+                .build()
+                .expect("runtime was specified"),
                 tx: context.tx.clone(),
                 peer: *context.peer,
                 address: address.to_string(),
                 port: *port,
-                limiter: context.user_data.limiter.clone(),
             }),
         ) {
             Err(error) => {
@@ -1302,7 +1365,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                                 let _ = timeout(duration, async {
                                     copy_bidirectional_with_sizes(
                                         &mut stream,
-                                        &mut io,
+                                        io.get_mut(),
                                         buffer_size,
                                         buffer_size,
                                     )
@@ -1313,7 +1376,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                             None => {
                                 let _ = copy_bidirectional_with_sizes(
                                     &mut stream,
-                                    &mut io,
+                                    io.get_mut(),
                                     buffer_size,
                                     buffer_size,
                                 )
@@ -1335,7 +1398,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                                 let _ = timeout(duration, async {
                                     copy_bidirectional_with_sizes(
                                         &mut stream,
-                                        &mut io,
+                                        io.get_mut(),
                                         buffer_size,
                                         buffer_size,
                                     )
@@ -1346,7 +1409,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                             None => {
                                 let _ = copy_bidirectional_with_sizes(
                                     &mut stream,
-                                    &mut io,
+                                    io.get_mut(),
                                     buffer_size,
                                     buffer_size,
                                 )
@@ -1556,12 +1619,22 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                     allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                     http_data: None,
                     ip_filter: Arc::clone(&context.user_data.ip_filter),
-                    handle,
+                    pool: SshPool::builder(SshPoolManager {
+                        handle,
+                        address: address.to_string(),
+                        port: *port,
+                        limiter: context.user_data.limiter.clone(),
+                    })
+                    .runtime(Runtime::Tokio1)
+                    .max_size(context.proxy_pool_capacity)
+                    .wait_timeout(context.proxy_pool_wait_timeout)
+                    .recycle_timeout(Some(context.proxy_pool_timeout))
+                    .build()
+                    .expect("runtime was specified"),
                     tx: context.tx.clone(),
                     peer: *context.peer,
                     address: address.to_string(),
                     port: *port,
-                    limiter: context.user_data.limiter.clone(),
                 }),
             ) {
                 Err(error) => {
@@ -1701,7 +1774,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                                 let _ = timeout(duration, async {
                                     copy_bidirectional_with_sizes(
                                         &mut stream,
-                                        &mut io,
+                                        io.get_mut(),
                                         buffer_size,
                                         buffer_size,
                                     )
@@ -1712,7 +1785,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                             None => {
                                 let _ = copy_bidirectional_with_sizes(
                                     &mut stream,
-                                    &mut io,
+                                    io.get_mut(),
                                     buffer_size,
                                     buffer_size,
                                 )
@@ -1734,7 +1807,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                                 let _ = timeout(duration, async {
                                     copy_bidirectional_with_sizes(
                                         &mut stream,
-                                        &mut io,
+                                        io.get_mut(),
                                         buffer_size,
                                         buffer_size,
                                     )
@@ -1745,7 +1818,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                             None => {
                                 let _ = copy_bidirectional_with_sizes(
                                     &mut stream,
-                                    &mut io,
+                                    io.get_mut(),
                                     buffer_size,
                                     buffer_size,
                                 )

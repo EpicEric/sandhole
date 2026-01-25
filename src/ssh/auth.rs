@@ -3,7 +3,7 @@ use std::{
     fmt::Display,
     sync::{
         Arc, Mutex, RwLock,
-        atomic::{AtomicIsize, Ordering},
+        atomic::{AtomicIsize, AtomicUsize, Ordering},
     },
     time::Duration,
 };

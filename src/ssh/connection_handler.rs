@@ -3,13 +3,13 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use async_speed_limit::{Limiter, Resource, clock::StandardClock};
-use russh::{ChannelStream, keys::ssh_key::Fingerprint, server::Msg};
+use russh::keys::ssh_key::Fingerprint;
 
 use crate::{
     connection_handler::{ConnectionHandler, ConnectionHttpData},
     error::ServerError,
     ip::IpFilter,
+    pool::{SshPool, SshPoolObject},
     ssh::{FingerprintFn, ServerHandlerSender},
 };
 
@@ -24,8 +24,8 @@ pub(crate) struct SshTunnelHandler {
     pub(crate) http_data: Option<Arc<RwLock<ConnectionHttpData>>>,
     // Optional IP filtering for this handler's tunneling and aliasing channels.
     pub(crate) ip_filter: Arc<RwLock<Option<IpFilter>>>,
-    // Handle to the SSH connection, in order to create remote forwarding channels.
-    pub(crate) handle: russh::server::Handle,
+    // SSH connection pool, in order to create remote forwarding channels.
+    pub(crate) pool: SshPool,
     // Sender to the opened data session for logging.
     pub(crate) tx: ServerHandlerSender,
     // IP and port of the SSH connection, for logging.
@@ -34,8 +34,6 @@ pub(crate) struct SshTunnelHandler {
     pub(crate) address: String,
     // Port used for the remote forwarding, required for the client to open the correct session channels.
     pub(crate) port: u32,
-    // Limiter for rate limiting.
-    pub(crate) limiter: Limiter,
 }
 
 impl Drop for SshTunnelHandler {
@@ -52,16 +50,12 @@ impl Drop for SshTunnelHandler {
     }
 }
 
-impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunnelHandler {
+impl ConnectionHandler<SshPoolObject> for SshTunnelHandler {
     fn log_channel(&self) -> ServerHandlerSender {
         self.tx.clone()
     }
 
-    async fn tunneling_channel(
-        &self,
-        ip: IpAddr,
-        port: u16,
-    ) -> color_eyre::Result<Resource<ChannelStream<Msg>, StandardClock>> {
+    async fn tunneling_channel(&self, ip: IpAddr, _port: u16) -> color_eyre::Result<SshPoolObject> {
         // Check if this IP is not blocked
         let tunneling_allowed = self
             .ip_filter
@@ -70,17 +64,7 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
             .as_ref()
             .is_none_or(|filter| filter.is_allowed(ip));
         if tunneling_allowed {
-            let channel = self
-                .handle
-                .channel_open_forwarded_tcpip(
-                    self.address.clone(),
-                    self.port,
-                    ip.to_string(),
-                    port.into(),
-                )
-                .await?
-                .into_stream();
-            Ok(self.limiter.clone().limit(channel))
+            Ok(self.pool.get().await?)
         } else {
             Err(ServerError::TunnelingNotAllowed.into())
         }
@@ -102,19 +86,9 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
         ip: IpAddr,
         port: u16,
         fingerprint: Option<&'_ Fingerprint>,
-    ) -> color_eyre::Result<Resource<ChannelStream<Msg>, StandardClock>> {
+    ) -> color_eyre::Result<SshPoolObject> {
         if self.can_alias(ip, port, fingerprint) {
-            let channel = self
-                .handle
-                .channel_open_forwarded_tcpip(
-                    self.address.clone(),
-                    self.port,
-                    ip.to_string(),
-                    port.into(),
-                )
-                .await?
-                .into_stream();
-            Ok(self.limiter.clone().limit(channel))
+            Ok(self.pool.get().await?)
         } else {
             Err(ServerError::AliasingNotAllowed.into())
         }
