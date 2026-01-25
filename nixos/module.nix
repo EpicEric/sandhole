@@ -76,6 +76,7 @@ in
         # Default values for the CLI
         default = {
           domain = null;
+          no-domain = false;
           ssh-port = 2222;
           http-port = 80;
           https-port = 443;

@@ -12,10 +12,12 @@ services:
       - sh
       - -c
       - >
-        agnos-generate-accounts-keys --key-size 4096 --no-confirm config.toml
-        && agnos --no-staging config.toml
-        && echo 'Retrying in one hour...'
-        && sleep 3600
+        while true; do
+          agnos-generate-accounts-keys --key-size 4096 --no-confirm config.toml;
+          agnos --no-staging config.toml;
+          echo 'Retrying in one hour...';
+          sleep 3600;
+        done
 
   sandhole:
     image: docker.io/epiceric/sandhole:latest
