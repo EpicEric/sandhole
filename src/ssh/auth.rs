@@ -81,6 +81,10 @@ pub(crate) struct UserData {
     pub(crate) http_data: Arc<RwLock<ConnectionHttpData>>,
     // Optional IP filtering for this connection's tunneling and aliasing channels.
     pub(crate) ip_filter: Arc<RwLock<Option<IpFilter>>>,
+    // Time to wait for a remote forwarding to be available before giving up.
+    pub(crate) proxy_pool_wait_timeout: Arc<RwLock<Duration>>,
+    // Time to keep a remote forwarding channel around for.
+    pub(crate) proxy_pool_idle_timeout: Arc<RwLock<Duration>>,
     // What kind of restriction to impose on tunnels and aliases for this session.
     pub(crate) session_restriction: UserSessionRestriction,
     // Identifier for the user, used for creating quota tokens.
@@ -100,7 +104,12 @@ pub(crate) struct UserData {
 }
 
 impl UserData {
-    pub(crate) fn new(quota_key: TokenHolder, limiter: Limiter) -> Self {
+    pub(crate) fn new(
+        quota_key: TokenHolder,
+        limiter: Limiter,
+        proxy_pool_wait_timeout: Duration,
+        proxy_pool_idle_timeout: Duration,
+    ) -> Self {
         Self {
             allow_fingerprint: Arc::new(RwLock::new(Box::new(|_| true))),
             http_data: Arc::new(RwLock::new(ConnectionHttpData {
@@ -110,6 +119,8 @@ impl UserData {
                 host: None,
             })),
             ip_filter: Arc::new(RwLock::new(None)),
+            proxy_pool_wait_timeout: Arc::new(RwLock::new(proxy_pool_wait_timeout)),
+            proxy_pool_idle_timeout: Arc::new(RwLock::new(proxy_pool_idle_timeout)),
             session_restriction: UserSessionRestriction::None,
             quota_key,
             host_addressing: Default::default(),

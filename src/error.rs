@@ -27,4 +27,6 @@ pub(crate) enum ServerError {
     TunnelingNotAllowed,
     #[error("Aliasing not allowed")]
     AliasingNotAllowed,
+    #[error("Pool error: {0}")]
+    Pool(#[from] deadpool::managed::PoolError<russh::Error>),
 }

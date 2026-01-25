@@ -669,6 +669,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .unproxied_connection_timeout
             .unwrap_or(config.idle_connection_timeout),
         tcp_connection_timeout,
+        proxy_pool_wait_timeout: config.idle_connection_timeout, // TO-DO
+        proxy_pool_idle_timeout: config.proxy_pool_idle_timeout,
+        proxy_pool_capacity: config.proxy_pool_capacity,
     });
 
     // Admin aliases

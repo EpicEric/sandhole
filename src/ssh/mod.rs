@@ -241,6 +241,8 @@ impl Handler for ServerHandler {
                                 user_data: Box::new(UserData::new(
                                     TokenHolder::User(UserIdentification::Username(user.into())),
                                     limiter,
+                                    self.server.proxy_pool_wait_timeout,
+                                    self.server.proxy_pool_idle_timeout,
                                 )),
                             };
                             #[cfg(not(coverage_nightly))]
@@ -321,6 +323,8 @@ impl Handler for ServerHandler {
                     user_data: Box::new(UserData::new(
                         TokenHolder::User(UserIdentification::PublicKey(fingerprint)),
                         limiter,
+                        self.server.proxy_pool_wait_timeout,
+                        self.server.proxy_pool_idle_timeout,
                     )),
                 };
             }
@@ -331,6 +335,8 @@ impl Handler for ServerHandler {
                     user_data: Box::new(UserData::new(
                         TokenHolder::Admin(UserIdentification::PublicKey(fingerprint)),
                         limiter,
+                        self.server.proxy_pool_wait_timeout,
+                        self.server.proxy_pool_idle_timeout,
                     )),
                     admin_data: Box::new(AdminData::new()),
                 };
@@ -839,6 +845,7 @@ impl Handler for ServerHandler {
         };
         Forwarder::remote_forwarding(
             &mut RemoteForwardingContext {
+                proxy_pool_capacity: self.server.proxy_pool_capacity,
                 server: &mut self.server,
                 user_data,
                 peer: &mut self.peer,
@@ -878,6 +885,7 @@ impl Handler for ServerHandler {
         };
         Forwarder::cancel_remote_forwarding(
             &mut RemoteForwardingContext {
+                proxy_pool_capacity: self.server.proxy_pool_capacity,
                 server: &mut self.server,
                 user_data,
                 peer: &mut self.peer,

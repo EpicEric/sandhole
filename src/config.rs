@@ -385,10 +385,6 @@ pub struct ApplicationConfig {
     )]
     pub buffer_size: u32,
 
-    /// How long to wait between each keepalive message that is sent to an unresponsive SSH connection.
-    #[arg(long, default_value = "15s", value_parser = validate_duration, value_name = "DURATION")]
-    pub ssh_keepalive_interval: Duration,
-
     /// How many keepalive messages are sent to an unresponsive SSH connection before it is dropped.
     ///
     /// A value of zero disables timeouts.
@@ -396,6 +392,29 @@ pub struct ApplicationConfig {
     /// The timeout is equal to this value plus one, times `--ssh-keepalive-interval`.
     #[arg(long, default_value_t = 3, value_name = "VALUE")]
     pub ssh_keepalive_max: usize,
+
+    /// How long to wait between each keepalive message that is sent to an unresponsive SSH connection.
+    #[arg(long, default_value = "15s", value_parser = validate_duration, value_name = "DURATION")]
+    pub ssh_keepalive_interval: Duration,
+
+    /// How many simultaneous remote forwarding connections should be available at most per service.
+    ///
+    /// A high value may cause starvation of resources on both Sandhole and the services.
+    #[arg(long, default_value_t = 20, value_name = "VALUE")]
+    pub proxy_pool_capacity: usize,
+
+    /// How long a remote forwarding connection for a service remains in the pool before being garbage-collected.
+    ///
+    /// A zero duration disables the pool.
+    ///
+    /// A high value may cause starvation of resources on both Sandhole and other services.
+    #[arg(
+        long,
+        default_value = "10s",
+        value_parser = validate_duration,
+        value_name = "DURATION"
+    )]
+    pub proxy_pool_idle_timeout: Duration,
 
     /// How long to poll certificates and keys directories for new changes.
     ///
@@ -553,12 +572,14 @@ mod application_config_tests {
                 buffer_size: 32_768,
                 ssh_keepalive_interval: Duration::from_secs(15),
                 ssh_keepalive_max: 3,
+                proxy_pool_capacity: 20,
+                proxy_pool_idle_timeout: Duration::from_secs(10),
                 directory_poll_interval: Duration::from_secs(30),
                 idle_connection_timeout: Duration::from_secs(2),
                 unproxied_connection_timeout: None,
                 authentication_request_timeout: Duration::from_secs(5),
                 http_request_timeout: None,
-                tcp_connection_timeout: None
+                tcp_connection_timeout: None,
             }
         )
     }
@@ -612,6 +633,8 @@ mod application_config_tests {
             "--buffer-size=4KB",
             "--ssh-keepalive-interval=10s",
             "--ssh-keepalive-max=2",
+            "--proxy-pool-capacity=1",
+            "--proxy-pool-idle-timeout=0s",
             "--directory-poll-interval=10s",
             "--idle-connection-timeout=3s",
             "--unproxied-connection-timeout=4s",
@@ -673,12 +696,14 @@ mod application_config_tests {
                 buffer_size: 4_000,
                 ssh_keepalive_interval: Duration::from_secs(10),
                 ssh_keepalive_max: 2,
+                proxy_pool_capacity: 1,
+                proxy_pool_idle_timeout: Duration::from_secs(0),
                 directory_poll_interval: Duration::from_secs(10),
                 idle_connection_timeout: Duration::from_secs(3),
                 unproxied_connection_timeout: Some(Duration::from_secs(4)),
                 authentication_request_timeout: Duration::from_secs(6),
                 http_request_timeout: Some(Duration::from_secs(15)),
-                tcp_connection_timeout: Some(Duration::from_secs(30))
+                tcp_connection_timeout: Some(Duration::from_secs(30)),
             }
         )
     }

@@ -13,6 +13,7 @@ use std::{
 use crate::{
     connection_handler::ConnectionHandler,
     connections::ConnectionGetByHttpHost,
+    error::ServerError,
     ssh::ServerHandlerSender,
     tcp_alias::BorrowedTcpAlias,
     telemetry::{
@@ -26,6 +27,7 @@ use axum::{
     response::{IntoResponse, Redirect},
 };
 use bon::Builder;
+use deadpool::managed::PoolError;
 use http::{
     HeaderMap, HeaderName, HeaderValue, Uri, Version,
     uri::{Authority, InvalidUri},
@@ -456,7 +458,7 @@ where
     }
 
     // Find the appropriate handler for this proxy type
-    let Ok(io) = (match proxy_data.proxy_type {
+    let channel = match proxy_data.proxy_type {
         ProxyType::Tunneling => {
             handler
                 .tunneling_channel(tcp_address.ip(), tcp_address.port())
@@ -467,15 +469,22 @@ where
                 .aliasing_channel(tcp_address.ip(), tcp_address.port(), fingerprint.as_ref())
                 .await
         }
-    }) else {
-        // If getting the handler failed, return 404 (they may have an allowlist for fingerprints/IP networks)
-        return Err(HttpError::ChannelRequestDenied);
+    };
+    let io = match channel {
+        Ok(io) => io,
+        // Getting the handler failed
+        Err(error) => match error {
+            // If timeout, return the request timeout error
+            ServerError::Pool(PoolError::Timeout(_)) => return Err(HttpError::RequestTimeout),
+            // Otherwise, return 404 (they may have an allowlist for fingerprints/IP networks)
+            _ => return Err(HttpError::ChannelRequestDenied),
+        },
     };
     let tx = handler.log_channel();
     let is_http2 = http_data.as_ref().map(|data| data.http2).unwrap_or(false);
     let request_host = http_data
         .as_ref()
-        .and_then(|data| data.host.as_ref().map(|host| host.as_str()))
+        .and_then(|data| data.host.as_deref())
         .unwrap_or(host.as_str());
     match request.version() {
         Version::HTTP_2 if is_http2 => {
@@ -485,7 +494,7 @@ where
             *authority = Authority::from_maybe_shared(
                 authority
                     .as_str()
-                    .replace(authority.host(), &request_host)
+                    .replace(authority.host(), request_host)
                     .into_bytes(),
             )?;
             *request.uri_mut() = Uri::from_parts(uri_parts)?;

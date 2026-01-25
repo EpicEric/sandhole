@@ -2,7 +2,7 @@ use std::net::IpAddr;
 
 use russh::keys::ssh_key::Fingerprint;
 
-use crate::ssh::ServerHandlerSender;
+use crate::{error::ServerError, ssh::ServerHandlerSender};
 
 // Extra data available for HTTP tunneling/aliasing connections.
 #[derive(Clone)]
@@ -24,7 +24,7 @@ pub(crate) trait ConnectionHandler<T: Sync> {
     fn log_channel(&self) -> ServerHandlerSender;
 
     // Return a tunneling channel for this handler.
-    async fn tunneling_channel(&self, ip: IpAddr, port: u16) -> color_eyre::Result<T>;
+    async fn tunneling_channel(&self, ip: IpAddr, port: u16) -> Result<T, ServerError>;
 
     // Whether the given credentials can create an aliasing channel to this handler.
     #[expect(clippy::needless_lifetimes)]
@@ -37,7 +37,7 @@ pub(crate) trait ConnectionHandler<T: Sync> {
         ip: IpAddr,
         port: u16,
         fingerprint: Option<&'a Fingerprint>,
-    ) -> color_eyre::Result<T>;
+    ) -> Result<T, ServerError>;
 
     // Returns HTTP-specific data for this handler.
     fn http_data(&self) -> Option<ConnectionHttpData>;

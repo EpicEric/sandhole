@@ -13,8 +13,8 @@ use std::{
 };
 
 use ahash::RandomState;
-use async_speed_limit::{Limiter, Resource, clock::StandardClock};
-use russh::{ChannelStream, keys::ssh_key::Fingerprint, server::Msg};
+use async_speed_limit::Limiter;
+use russh::keys::ssh_key::Fingerprint;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -23,6 +23,7 @@ use crate::{
     connections::{ConnectionMap, HttpAliasingConnection},
     fingerprints::FingerprintsValidator,
     http::ProxyData,
+    pool::SshPoolObject,
     quota::TokenHolderUser,
     reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
     ssh::connection_handler::SshTunnelHandler,
@@ -56,6 +57,7 @@ mod http;
 mod ip;
 #[cfg(feature = "login")]
 mod login;
+mod pool;
 mod quota;
 mod reactor;
 mod ssh;
@@ -80,8 +82,7 @@ type SessionMap = (Limiter, HashMap<usize, CancellationToken, RandomState>);
 // A generic table with data for the admin interface.
 type DataTable<K, V> = Arc<Mutex<BTreeMap<K, V>>>;
 // Helper type for HTTP proxy data types.
-type HttpProxyData<C> =
-    Arc<ProxyData<Arc<C>, SshTunnelHandler, Resource<ChannelStream<Msg>, StandardClock>>>;
+type HttpProxyData<C> = Arc<ProxyData<Arc<C>, SshTunnelHandler, SshPoolObject>>;
 // HTTP proxy data used by the tunneling connections.
 type TunnelingProxyData = HttpProxyData<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>;
 // HTTP proxy data used by the local forwarding aliasing connections.
@@ -162,6 +163,11 @@ pub(crate) struct SandholeServer {
     pub(crate) unproxied_connection_timeout: Duration,
     // How long until TCP, WebSocket, and local forwarding connections are closed.
     pub(crate) tcp_connection_timeout: Option<Duration>,
+
+    // TO-DO
+    pub(crate) proxy_pool_wait_timeout: Duration,
+    pub(crate) proxy_pool_idle_timeout: Duration,
+    pub(crate) proxy_pool_capacity: usize,
 }
 
 impl SandholeServer {
