@@ -5,18 +5,21 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, LazyLock},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
 
 use crate::{
     connection_handler::ConnectionHandler,
-    telemetry::{TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME, TELEMETRY_KEY_HOSTNAME},
+    connections::ConnectionGetByHttpHost,
+    ssh::ServerHandlerSender,
+    tcp_alias::BorrowedTcpAlias,
+    telemetry::{
+        TELEMETRY_COUNTER_ALIAS_CONNECTIONS, TELEMETRY_COUNTER_HTTP_REQUESTS,
+        TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME, TELEMETRY_KEY_ALIAS, TELEMETRY_KEY_HOSTNAME,
+    },
 };
-use crate::{connections::ConnectionGetByHttpHost, telemetry::TELEMETRY_KEY_ALIAS};
-use crate::{ssh::ServerHandlerSender, telemetry::TELEMETRY_COUNTER_HTTP_REQUESTS};
-use crate::{tcp_alias::TcpAlias, telemetry::TELEMETRY_COUNTER_ALIAS_CONNECTIONS};
 
 use axum::{
     body::Body as AxumBody,
@@ -30,7 +33,7 @@ use http::{
 use http::{header::COOKIE, uri::InvalidUriParts};
 use hyper::{
     Request, Response, StatusCode,
-    body::Body,
+    body::{Body, Incoming},
     header::{HOST, UPGRADE},
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -42,18 +45,27 @@ use tokio::{
     time::timeout,
 };
 
-const X_FORWARDED_FOR: &str = "X-Forwarded-For";
-const X_FORWARDED_HOST: &str = "X-Forwarded-Host";
-const X_FORWARDED_PROTO: &str = "X-Forwarded-Proto";
-const X_FORWARDED_PORT: &str = "X-Forwarded-Port";
+static X_FORWARDED_FOR: LazyLock<HeaderName> =
+    LazyLock::new(|| HeaderName::from_str("X-Forwarded-For").expect("valid header name"));
+static X_FORWARDED_HOST: LazyLock<HeaderName> =
+    LazyLock::new(|| HeaderName::from_str("X-Forwarded-Host").expect("valid header name"));
+static X_FORWARDED_PROTO: LazyLock<HeaderName> =
+    LazyLock::new(|| HeaderName::from_str("X-Forwarded-Proto").expect("valid header name"));
+static X_FORWARDED_PORT: LazyLock<HeaderName> =
+    LazyLock::new(|| HeaderName::from_str("X-Forwarded-Port").expect("valid header name"));
+
+enum ProxyResponse {
+    Axum(Response<AxumBody>),
+    Proxy(TimedResponse),
+}
 
 struct TimedResponse {
-    response: Response<AxumBody>,
+    response: Response<Incoming>,
     log: Option<Box<dyn FnOnce() + Send + Sync + 'static>>,
 }
 
 struct TimedResponseBody {
-    body: AxumBody,
+    body: Incoming,
     log: Option<Box<dyn FnOnce() + Send + Sync + 'static>>,
 }
 
@@ -73,7 +85,7 @@ impl IntoResponse for TimedResponse {
 impl Body for TimedResponseBody {
     type Data = bytes::Bytes;
 
-    type Error = axum::Error;
+    type Error = hyper::Error;
 
     #[inline]
     fn poll_frame(
@@ -164,12 +176,11 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
     }
 }
 
-fn append_to_header(headers: &mut HeaderMap, new_header_name: &str, new_value: String) {
-    let header_name: HeaderName = HeaderName::from_str(new_header_name).expect("valid header name");
-
+// Append the bytes to the given comma-separated entry of HeaderMap
+fn append_to_header(headers: &mut HeaderMap, header_name: &HeaderName, new_value: &[u8]) {
     match headers.entry(header_name) {
         http::header::Entry::Vacant(entry) => {
-            entry.insert(HeaderValue::from_str(new_value.as_str()).expect("valid header value"));
+            entry.insert(HeaderValue::from_bytes(new_value).expect("valid header value"));
         }
         http::header::Entry::Occupied(mut entry) => {
             let existing = entry.get().as_bytes();
@@ -178,7 +189,7 @@ fn append_to_header(headers: &mut HeaderMap, new_header_name: &str, new_value: S
 
             combined_bytes.extend_from_slice(existing);
             combined_bytes.extend_from_slice(b", ");
-            combined_bytes.extend_from_slice(new_value.as_bytes());
+            combined_bytes.extend_from_slice(new_value);
 
             if let Ok(new_val) = HeaderValue::from_bytes(&combined_bytes) {
                 entry.insert(new_val);
@@ -307,7 +318,10 @@ where
     <B as Body>::Error: Error + Send + Sync + 'static,
 {
     match proxy_handler_inner(request, tcp_address, fingerprint, proxy_data).await {
-        Ok(response) => Ok(response.into_response()),
+        Ok(response) => Ok(match response {
+            ProxyResponse::Axum(response) => response,
+            ProxyResponse::Proxy(response) => response.into_response(),
+        }),
         Err(error) => Ok(error.into_response()),
     }
 }
@@ -321,7 +335,7 @@ async fn proxy_handler_inner<B, M, H, T>(
     tcp_address: SocketAddr,
     fingerprint: Option<Fingerprint>,
     proxy_data: Arc<ProxyData<M, H, T>>,
-) -> Result<TimedResponse, HttpError>
+) -> Result<ProxyResponse, HttpError>
 where
     M: ConnectionGetByHttpHost<Arc<H>>,
     H: ConnectionHandler<T>,
@@ -353,13 +367,9 @@ where
     let host = host.to_owned();
     let ip = tcp_address.ip().to_canonical();
     let ip_string = ip.to_string();
-    let method = request.method().to_owned();
-    let uri = request.uri().to_owned();
     let http_log_builder = HttpLog::builder()
-        .ip(ip_string.clone())
-        .host(host.clone())
-        .uri(uri.path().into())
-        .method(method.as_str().into());
+        .uri(request.uri().path().to_string())
+        .method(request.method().to_string());
     // Find the HTTP handler for the given host
     let Some(handler) = conn_manager.get_by_http_host(&host, ip) else {
         // If no handler was found, check if this is a request to the root domain
@@ -368,17 +378,17 @@ where
         {
             // If so, redirect to the configured URL
             let response = Redirect::to(&redirect.to).into_response();
-            let http_log_builder = http_log_builder.status(response.status().as_u16());
-            return Ok(TimedResponse {
-                response,
-                log: Some(Box::new(move || {
-                    http_log(
-                        http_log_builder.elapsed_time(timer.elapsed()).build(),
-                        None,
-                        disable_http_logs,
-                    )
-                })),
-            });
+            http_log(
+                http_log_builder
+                    .host(host)
+                    .ip(ip_string)
+                    .status(response.status().as_u16())
+                    .elapsed_time(timer.elapsed())
+                    .build(),
+                None,
+                disable_http_logs,
+            );
+            return Ok(ProxyResponse::Axum(response));
         }
         // No handler was found, return 404
         return Err(HttpError::HandlerNotFound);
@@ -413,17 +423,17 @@ where
                 .as_str(),
             )
             .into_response();
-            let http_log_builder = http_log_builder.status(response.status().as_u16());
-            return Ok(TimedResponse {
-                response,
-                log: Some(Box::new(move || {
-                    http_log(
-                        http_log_builder.elapsed_time(timer.elapsed()).build(),
-                        None,
-                        disable_http_logs,
-                    )
-                })),
-            });
+            http_log(
+                http_log_builder
+                    .host(host)
+                    .ip(ip_string)
+                    .status(response.status().as_u16())
+                    .elapsed_time(timer.elapsed())
+                    .build(),
+                None,
+                disable_http_logs,
+            );
+            return Ok(ProxyResponse::Axum(response));
         }
         (Protocol::Http { port }, _, _)
         | (Protocol::TlsRedirect { from: port, .. }, _, ProxyType::Aliasing) => ("http", *port),
@@ -431,13 +441,14 @@ where
     };
     // Add proxied info to the proper headers, but don't overwrite any existing proxy headers
     let headers = request.headers_mut();
-    append_to_header(headers, X_FORWARDED_FOR, ip_string.clone());
-    append_to_header(headers, X_FORWARDED_HOST, host.clone());
-    append_to_header(headers, X_FORWARDED_PROTO, proto.to_string());
-    append_to_header(headers, X_FORWARDED_PORT, port.to_string());
+    append_to_header(headers, &X_FORWARDED_FOR, ip_string.as_bytes());
+    append_to_header(headers, &X_FORWARDED_HOST, host.as_bytes());
+    append_to_header(headers, &X_FORWARDED_PROTO, proto.as_bytes());
+    append_to_header(headers, &X_FORWARDED_PORT, port.to_string().as_bytes());
+    let http_log_builder = http_log_builder.host(host.clone()).ip(ip_string);
     // Add this request to the telemetry for the host
     if http_data.as_ref().is_some_and(|data| data.is_aliasing) {
-        counter!(TELEMETRY_COUNTER_ALIAS_CONNECTIONS, TELEMETRY_KEY_ALIAS => TcpAlias(host.clone(), port).to_string())
+        counter!(TELEMETRY_COUNTER_ALIAS_CONNECTIONS, TELEMETRY_KEY_ALIAS => BorrowedTcpAlias(&host, &port).to_string())
             .increment(1);
     } else {
         counter!(TELEMETRY_COUNTER_HTTP_REQUESTS, TELEMETRY_KEY_HOSTNAME => host.clone())
@@ -464,8 +475,8 @@ where
     let is_http2 = http_data.as_ref().map(|data| data.http2).unwrap_or(false);
     let request_host = http_data
         .as_ref()
-        .and_then(|data| data.host.clone())
-        .unwrap_or(host);
+        .and_then(|data| data.host.as_deref())
+        .unwrap_or(host.as_str());
     match request.version() {
         Version::HTTP_2 if is_http2 => {
             // Create an HTTP/2 handshake over the selected channel
@@ -474,7 +485,7 @@ where
             *authority = Authority::from_maybe_shared(
                 authority
                     .as_str()
-                    .replace(authority.host(), &request_host)
+                    .replace(authority.host(), request_host)
                     .into_bytes(),
             )?;
             *request.uri_mut() = Uri::from_parts(uri_parts)?;
@@ -508,8 +519,8 @@ where
                 None => sender.send_request(request).await?,
             };
             let http_log_builder = http_log_builder.status(response.status().as_u16());
-            Ok(TimedResponse {
-                response: response.into_response(),
+            Ok(ProxyResponse::Proxy(TimedResponse {
+                response,
                 log: Some(Box::new(move || {
                     http_log(
                         http_log_builder.elapsed_time(timer.elapsed()).build(),
@@ -517,7 +528,7 @@ where
                         disable_http_logs,
                     )
                 })),
-            })
+            }))
         }
         Version::HTTP_11 | Version::HTTP_2 => {
             // Ensure best-effort compatibility of proxy request with HTTP/1.1 format
@@ -634,8 +645,8 @@ where
                         }
                         // Return the response to the client
                         let http_log_builder = http_log_builder.status(response.status().as_u16());
-                        Ok(TimedResponse {
-                            response: response.into_response(),
+                        Ok(ProxyResponse::Proxy(TimedResponse {
+                            response,
                             log: Some(Box::new(move || {
                                 http_log(
                                     http_log_builder.elapsed_time(timer.elapsed()).build(),
@@ -643,12 +654,12 @@ where
                                     disable_http_logs,
                                 )
                             })),
-                        })
+                        }))
                     }
                     _ => {
                         let http_log_builder = http_log_builder.status(response.status().as_u16());
-                        Ok(TimedResponse {
-                            response: response.into_response(),
+                        Ok(ProxyResponse::Proxy(TimedResponse {
+                            response,
                             log: Some(Box::new(move || {
                                 http_log(
                                     http_log_builder.elapsed_time(timer.elapsed()).build(),
@@ -656,7 +667,7 @@ where
                                     disable_http_logs,
                                 )
                             })),
-                        })
+                        }))
                     }
                 }
             } else {
@@ -690,8 +701,8 @@ where
                 };
                 // Return the received response to the client
                 let http_log_builder = http_log_builder.status(response.status().as_u16());
-                Ok(TimedResponse {
-                    response: response.into_response(),
+                Ok(ProxyResponse::Proxy(TimedResponse {
+                    response,
                     log: Some(Box::new(move || {
                         http_log(
                             http_log_builder.elapsed_time(timer.elapsed()).build(),
@@ -699,7 +710,7 @@ where
                             disable_http_logs,
                         )
                     })),
-                })
+                }))
             }
         }
         version => Err(HttpError::InvalidHttpVersion(version)),

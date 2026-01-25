@@ -32,7 +32,7 @@ use tokio::{
     io::copy_bidirectional_with_sizes,
     net::TcpStream,
     pin,
-    time::{sleep, timeout},
+    time::{interval, timeout},
 };
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
@@ -119,10 +119,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     }
     let http_request_timeout = config.http_request_timeout;
     let tcp_connection_timeout = config.tcp_connection_timeout;
-    let buffer_size = config
-        .buffer_size
-        .try_into()
-        .with_context(|| "Cannot convert buffer size to usize")?;
+    let buffer_size = usize::try_from(config.buffer_size)
+        .with_context(|| "Cannot convert buffer size to usize")?
+        .checked_shl(1)
+        .expect("TEST: small buffer size");
     // Initialize crypto and credentials
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // Find the private SSH key for Sandhole or create a new one.
@@ -378,8 +378,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let telemetry_clone = Arc::clone(&telemetry);
         // Periodically update SSH data, based on the connection map.
         tokio::spawn(async move {
+            let mut refresh_interval = interval(Duration::from_millis(3_000));
+            refresh_interval.tick().await;
             loop {
-                sleep(Duration::from_millis(3_000)).await;
+                refresh_interval.tick().await;
                 let data = connections_clone.data();
                 let telemetry_per_minute = telemetry_clone.get_ssh_connections_per_minute();
                 let telemetry_current = telemetry_clone.get_current_ssh_connections();
@@ -410,8 +412,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let telemetry_clone = Arc::clone(&telemetry);
         // Periodically update HTTP data, based on the connection map and the telemetry counters.
         tokio::spawn(async move {
+            let mut refresh_interval = interval(Duration::from_millis(3_000));
+            refresh_interval.tick().await;
             loop {
-                sleep(Duration::from_millis(3_000)).await;
+                refresh_interval.tick().await;
                 let data = connections_clone.data();
                 let telemetry = telemetry_clone.get_http_requests_per_minute();
                 let data = data
@@ -431,8 +435,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             let telemetry_clone = Arc::clone(&telemetry);
             // Periodically update SNI data, based on the connection map and the telemetry counters.
             tokio::spawn(async move {
+                let mut refresh_interval = interval(Duration::from_millis(3_000));
+                refresh_interval.tick().await;
                 loop {
-                    sleep(Duration::from_millis(3_000)).await;
+                    refresh_interval.tick().await;
                     let data = connections_clone.data();
                     let telemetry_per_minute = telemetry_clone.get_sni_connections_per_minute();
                     let telemetry_current = telemetry_clone.get_current_sni_connections();
@@ -465,8 +471,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let telemetry_clone = Arc::clone(&telemetry);
         // Periodically update TCP data, based on the connection map.
         tokio::spawn(async move {
+            let mut refresh_interval = interval(Duration::from_millis(3_000));
+            refresh_interval.tick().await;
             loop {
-                sleep(Duration::from_millis(3_000)).await;
+                refresh_interval.tick().await;
                 let data = connections_clone.data();
                 let telemetry_per_minute = telemetry_clone.get_tcp_connections_per_minute();
                 let telemetry_current = telemetry_clone.get_current_tcp_connections();
@@ -495,8 +503,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let telemetry_clone = Arc::clone(&telemetry);
         // Periodically update alias data, based on the connection map.
         tokio::spawn(async move {
+            let mut refresh_interval = interval(Duration::from_millis(3_000));
+            refresh_interval.tick().await;
             loop {
-                sleep(Duration::from_millis(3_000)).await;
+                refresh_interval.tick().await;
                 let alias_data = alias_connections_clone.data();
                 let admin_data = admin_connections_clone.data();
                 let telemetry_alias_per_minute = telemetry_clone.get_alias_connections_per_minute();
@@ -549,8 +559,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .with_memory(MemoryRefreshKind::nothing().with_ram());
         let mut system = System::new_with_specifics(system_refresh);
         let mut networks = Networks::new_with_refreshed_list();
+        let mut system_data_interval = interval(Duration::from_millis(1_000));
+        system_data_interval.tick().await;
         loop {
-            sleep(Duration::from_millis(1_000)).await;
+            system_data_interval.tick().await;
             system.refresh_specifics(system_refresh);
             networks.refresh(true);
             let (network_tx, network_rx) = match networks
@@ -768,10 +780,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         http11_server_config
             .alpn_protocols
             .extend_from_slice(&[b"http/1.1".to_vec()]);
+        http11_server_config.max_early_data_size = 1024;
         let http11_server_config = Arc::new(http11_server_config);
         http2_server_config
             .alpn_protocols
             .extend_from_slice(&[b"h2".to_vec(), b"http/1.1".to_vec()]);
+        http2_server_config.max_early_data_size = 1024;
         let http2_server_config = Arc::new(http2_server_config);
         let ip_filter_clone = Arc::clone(&ip_filter);
         let https_proxy_data = Arc::new(
@@ -985,7 +999,8 @@ async fn handle_https_connection(
             let service = service_fn(move |req: Request<Incoming>| {
                 proxy_handler(req, address, None, Arc::clone(&proxy_data))
             });
-            let server = auto::Builder::new(TokioExecutor::new());
+            let mut server = auto::Builder::new(TokioExecutor::new());
+            server.http1().pipeline_flush(true);
             let conn = server.serve_connection_with_upgrades(io, service);
             match sandhole.tcp_connection_timeout {
                 Some(duration) => {
