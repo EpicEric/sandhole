@@ -5,7 +5,7 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     str::FromStr,
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, Mutex},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -13,6 +13,9 @@ use std::{
 use crate::{
     connection_handler::ConnectionHandler,
     connections::ConnectionGetByHttpHost,
+    droppable_handle::DroppableHandle,
+    error::ServerError,
+    keepalive::{BorrowedKeepaliveAlias, KeepaliveAlias, KeepaliveAliasKey},
     ssh::ServerHandlerSender,
     tcp_alias::BorrowedTcpAlias,
     telemetry::{
@@ -21,19 +24,24 @@ use crate::{
     },
 };
 
+use ahash::RandomState;
+use async_channel::{Receiver, Sender};
 use axum::{
     body::Body as AxumBody,
     response::{IntoResponse, Redirect},
 };
 use bon::Builder;
+use dashmap::DashMap;
 use http::{
     HeaderMap, HeaderName, HeaderValue, Uri, Version,
+    header::CONNECTION,
     uri::{Authority, InvalidUri},
 };
 use http::{header::COOKIE, uri::InvalidUriParts};
 use hyper::{
     Request, Response, StatusCode,
     body::{Body, Incoming},
+    client::conn::{http1, http2},
     header::{HOST, UPGRADE},
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -61,12 +69,12 @@ enum ProxyResponse {
 
 struct TimedResponse {
     response: Response<Incoming>,
-    log: Option<Box<dyn FnOnce() + Send + Sync + 'static>>,
+    on_drop: Option<Box<dyn FnOnce() + Send + Sync + 'static>>,
 }
 
 struct TimedResponseBody {
     body: Incoming,
-    log: Option<Box<dyn FnOnce() + Send + Sync + 'static>>,
+    on_drop: Option<Box<dyn FnOnce() + Send + Sync + 'static>>,
 }
 
 impl IntoResponse for TimedResponse {
@@ -76,7 +84,7 @@ impl IntoResponse for TimedResponse {
             parts,
             AxumBody::new(TimedResponseBody {
                 body,
-                log: self.log,
+                on_drop: self.on_drop,
             }),
         )
     }
@@ -108,8 +116,8 @@ impl Body for TimedResponseBody {
 
 impl Drop for TimedResponseBody {
     fn drop(&mut self) {
-        if let Some(log) = self.log.take() {
-            (log)()
+        if let Some(on_drop) = self.on_drop.take() {
+            (on_drop)();
         }
     }
 }
@@ -242,6 +250,13 @@ pub(crate) enum HttpError {
     RequestTimeout,
 }
 
+impl From<ServerError> for HttpError {
+    fn from(_: ServerError) -> Self {
+        // If getting the handler failed, return 404 (they may have an allowlist for fingerprints/IP networks)
+        HttpError::ChannelRequestDenied
+    }
+}
+
 impl IntoResponse for HttpError {
     fn into_response(self) -> axum::response::Response {
         #[cfg(not(coverage_nightly))]
@@ -263,15 +278,35 @@ impl IntoResponse for HttpError {
     }
 }
 
+type KeepalivePool<P> = (
+    Sender<P>,
+    Receiver<P>,
+    Arc<Mutex<Option<DroppableHandle<()>>>>,
+);
+
 // Data commonly reused between HTTP proxy requests.
 #[derive(Builder)]
-pub(crate) struct ProxyData<M, H, T>
+pub(crate) struct ProxyData<B, M, H, T>
 where
-    M: ConnectionGetByHttpHost<Arc<H>>,
-    H: ConnectionHandler<T>,
+    M: ConnectionGetByHttpHost<Arc<H>> + Send + Sync + 'static,
+    H: ConnectionHandler<T> + Send + Sync + 'static,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    B: Body + Debug + Send + Unpin + 'static,
+    <B as Body>::Data: Send + Sync + 'static,
+    <B as Body>::Error: Error + Send + Sync + 'static,
 {
-    // An HTTP connection manager (usually ConnectionMap) that returns a tunneling/aliasing handler.
+    #[builder(default = DashMap::default())]
+    keepalive_http11_pool_map: DashMap<
+        KeepaliveAlias,
+        KeepalivePool<(http1::SendRequest<B>, ServerHandlerSender)>,
+        RandomState,
+    >,
+    #[builder(default = DashMap::default())]
+    keepalive_http2_pool_map: DashMap<
+        KeepaliveAlias,
+        KeepalivePool<(http2::SendRequest<B>, ServerHandlerSender)>,
+        RandomState,
+    >,
     conn_manager: M,
     // Tuple containing where to redirect requests from the main domain to.
     domain_redirect: Option<Arc<DomainRedirect>>,
@@ -291,14 +326,89 @@ where
     _phantom_data: PhantomData<(H, T)>,
 }
 
-impl<M, H, T> ProxyData<M, H, T>
+impl<B, M, H, T> ProxyData<B, M, H, T>
 where
-    M: ConnectionGetByHttpHost<Arc<H>>,
-    H: ConnectionHandler<T>,
+    M: ConnectionGetByHttpHost<Arc<H>> + Send + Sync + 'static,
+    H: ConnectionHandler<T> + Send + Sync + 'static,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    B: Body + Debug + Send + Unpin + 'static,
+    <B as Body>::Data: Send + Sync + 'static,
+    <B as Body>::Error: Error + Send + Sync + 'static,
 {
     pub(crate) fn conn_manager(&self) -> &M {
         &self.conn_manager
+    }
+}
+
+trait ArcProxyData<B> {
+    fn get_http11_sender(
+        &self,
+        key: BorrowedKeepaliveAlias,
+    ) -> Option<(http1::SendRequest<B>, ServerHandlerSender)>;
+
+    fn get_http2_sender(
+        &self,
+        key: BorrowedKeepaliveAlias,
+    ) -> Option<(http2::SendRequest<B>, ServerHandlerSender)>;
+}
+
+impl<B, M, H, T> ArcProxyData<B> for Arc<ProxyData<B, M, H, T>>
+where
+    M: ConnectionGetByHttpHost<Arc<H>> + Send + Sync + 'static,
+    H: ConnectionHandler<T> + Send + Sync + 'static,
+    T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    B: Body + Debug + Send + Unpin + 'static,
+    <B as Body>::Data: Send + Sync + 'static,
+    <B as Body>::Error: Error + Send + Sync + 'static,
+{
+    fn get_http11_sender(
+        &self,
+        key: BorrowedKeepaliveAlias,
+    ) -> Option<(http1::SendRequest<B>, ServerHandlerSender)> {
+        let (pool, gc) = {
+            let map_ref = self
+                .keepalive_http11_pool_map
+                .get(&key as &dyn KeepaliveAliasKey)?;
+            (map_ref.1.clone(), map_ref.2.clone())
+        };
+        while let Ok(sender) = pool.try_recv() {
+            if sender.0.is_ready() {
+                return Some(sender);
+            }
+        }
+        let owned_key = key.as_owned();
+        let this = Arc::clone(self);
+        *gc.lock().expect("not poisoned") = Some(DroppableHandle(tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(15)).await;
+            this.keepalive_http11_pool_map
+                .remove_if(&owned_key as &dyn KeepaliveAliasKey, |_, v| v.1.is_empty());
+        })));
+        None
+    }
+
+    fn get_http2_sender(
+        &self,
+        key: BorrowedKeepaliveAlias,
+    ) -> Option<(http2::SendRequest<B>, ServerHandlerSender)> {
+        let (pool, gc) = {
+            let map_ref = self
+                .keepalive_http2_pool_map
+                .get(&key as &dyn KeepaliveAliasKey)?;
+            (map_ref.1.clone(), map_ref.2.clone())
+        };
+        while let Ok(sender) = pool.try_recv() {
+            if sender.0.is_ready() {
+                return Some(sender);
+            }
+        }
+        let owned_key = key.as_owned();
+        let this = Arc::clone(self);
+        *gc.lock().expect("not poisoned") = Some(DroppableHandle(tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(15)).await;
+            this.keepalive_http2_pool_map
+                .remove_if(&owned_key as &dyn KeepaliveAliasKey, |_, v| v.1.is_empty());
+        })));
+        None
     }
 }
 
@@ -307,11 +417,11 @@ pub(crate) async fn proxy_handler<B, M, H, T>(
     request: Request<B>,
     tcp_address: SocketAddr,
     fingerprint: Option<Fingerprint>,
-    proxy_data: Arc<ProxyData<M, H, T>>,
+    proxy_data: Arc<ProxyData<B, M, H, T>>,
 ) -> color_eyre::Result<Response<AxumBody>>
 where
-    M: ConnectionGetByHttpHost<Arc<H>>,
-    H: ConnectionHandler<T>,
+    M: ConnectionGetByHttpHost<Arc<H>> + Send + Sync + 'static,
+    H: ConnectionHandler<T> + Send + Sync + 'static,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     B: Body + Debug + Send + Unpin + 'static,
     <B as Body>::Data: Send + Sync + 'static,
@@ -334,11 +444,11 @@ async fn proxy_handler_inner<B, M, H, T>(
     mut request: Request<B>,
     tcp_address: SocketAddr,
     fingerprint: Option<Fingerprint>,
-    proxy_data: Arc<ProxyData<M, H, T>>,
+    proxy_data: Arc<ProxyData<B, M, H, T>>,
 ) -> Result<ProxyResponse, HttpError>
 where
-    M: ConnectionGetByHttpHost<Arc<H>>,
-    H: ConnectionHandler<T>,
+    M: ConnectionGetByHttpHost<Arc<H>> + Send + Sync + 'static,
+    H: ConnectionHandler<T> + Send + Sync + 'static,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     B: Body + Debug + Send + Unpin + 'static,
     <B as Body>::Data: Send + Sync + 'static,
@@ -454,133 +564,80 @@ where
         counter!(TELEMETRY_COUNTER_HTTP_REQUESTS, TELEMETRY_KEY_HOSTNAME => host.clone())
             .increment(1);
     }
-
-    // Find the appropriate handler for this proxy type
-    let Ok(io) = (match proxy_data.proxy_type {
-        ProxyType::Tunneling => {
-            handler
-                .tunneling_channel(tcp_address.ip(), tcp_address.port())
-                .await
-        }
-        ProxyType::Aliasing => {
-            handler
-                .aliasing_channel(tcp_address.ip(), tcp_address.port(), fingerprint.as_ref())
-                .await
-        }
-    }) else {
-        // If getting the handler failed, return 404 (they may have an allowlist for fingerprints/IP networks)
-        return Err(HttpError::ChannelRequestDenied);
-    };
-    let tx = handler.log_channel();
     let is_http2 = http_data.as_ref().map(|data| data.http2).unwrap_or(false);
     let request_host = http_data
         .as_ref()
         .and_then(|data| data.host.as_deref())
         .unwrap_or(host.as_str());
-    match request.version() {
-        Version::HTTP_2 if is_http2 => {
-            // Create an HTTP/2 handshake over the selected channel
-            let mut uri_parts = request.uri().clone().into_parts();
-            let authority = uri_parts.authority.as_mut().expect("Host has been checked");
-            *authority = Authority::from_maybe_shared(
-                authority
-                    .as_str()
-                    .replace(authority.host(), request_host)
-                    .into_bytes(),
-            )?;
-            *request.uri_mut() = Uri::from_parts(uri_parts)?;
-            let (mut sender, conn) =
-                hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(io))
-                    .await?;
-            tokio::spawn(Box::pin(async move {
-                if let Err(error) = conn.await {
-                    #[cfg(not(coverage_nightly))]
-                    tracing::warn!(%error, "HTTP/2 connection failed.");
-                }
-            }));
-            let response = match proxy_data.http_request_timeout {
-                // Await for a response under the given duration.
-                Some(duration) => {
-                    if let Ok(response) = timeout(duration, sender.send_request(request)).await {
-                        response?
-                    } else {
-                        let elapsed_time = timer.elapsed();
-                        http_log(
-                            http_log_builder
-                                .status(StatusCode::REQUEST_TIMEOUT.as_u16())
-                                .elapsed_time(elapsed_time)
-                                .build(),
-                            Some(tx),
-                            disable_http_logs,
-                        );
-                        return Err(HttpError::RequestTimeout);
-                    }
-                }
-                None => sender.send_request(request).await?,
-            };
-            let http_log_builder = http_log_builder.status(response.status().as_u16());
-            Ok(ProxyResponse::Proxy(TimedResponse {
-                response,
-                log: Some(Box::new(move || {
-                    http_log(
-                        http_log_builder.elapsed_time(timer.elapsed()).build(),
-                        Some(tx),
-                        disable_http_logs,
-                    )
-                })),
-            }))
-        }
-        Version::HTTP_11 | Version::HTTP_2 => {
-            // Ensure best-effort compatibility of proxy request with HTTP/1.1 format
-            // -> Add host header if missing
-            request
-                .headers_mut()
-                .insert(HOST, request_host.try_into().expect("valid host"));
-            // -> Change URI to only include path and query
-            *request.uri_mut() = request
-                .uri()
-                .path_and_query()
-                .map(|path| Uri::from_str(path.as_str()).expect("valid URI"))
-                .unwrap_or_default();
-            // -> Decompress cookies: https://www.rfc-editor.org/rfc/rfc7540#section-8.1.2.5
-            if let http::header::Entry::Occupied(occupied_entry) =
-                request.headers_mut().entry(COOKIE)
-            {
-                let (header, values) = occupied_entry.remove_entry_mult();
-                let mut value = vec![];
-                for header_value in values {
-                    if !value.is_empty() {
-                        value.extend_from_slice(b"; ");
-                    }
-                    value.extend_from_slice(header_value.as_bytes());
-                }
-                request
-                    .headers_mut()
-                    .insert(header, value.try_into().expect("valid header value"));
-            }
 
-            // Create an HTTP/1.1 handshake over the selected channel
-            let (mut sender, conn) =
-                hyper::client::conn::http1::handshake(TokioIo::new(io)).await?;
+    // Try to locate an already-open HTTP sender
+    let proxy_http_version = match request.version() {
+        Version::HTTP_2 if is_http2 => Version::HTTP_2,
+        Version::HTTP_2 | Version::HTTP_11 => Version::HTTP_11,
+        version => return Err(HttpError::InvalidHttpVersion(version)),
+    };
 
-            // Check for an Upgrade header
-            if let Some(request_upgrade) = request.headers().get(UPGRADE) {
-                // If there is an Upgrade header, make sure that it's a valid Websocket upgrade.
-                tokio::spawn(async move {
-                    if let Err(error) = conn.with_upgrades().await {
-                        #[cfg(not(coverage_nightly))]
-                        tracing::warn!(%error, "HTTP/1.1 connection with upgrades failed.");
+    // Find the appropriate handler for this proxy type
+    let key = KeepaliveAlias(host.to_string(), ip, fingerprint);
+    loop {
+        match proxy_http_version {
+            Version::HTTP_2 => {
+                let (mut sender, tx) = match proxy_data.get_http2_sender(key.key()) {
+                    Some(sender) => sender,
+                    None => {
+                        let io = match proxy_data.proxy_type {
+                            ProxyType::Tunneling => {
+                                handler
+                                    .tunneling_channel(tcp_address.ip(), tcp_address.port())
+                                    .await
+                            }
+                            ProxyType::Aliasing => {
+                                handler
+                                    .aliasing_channel(
+                                        tcp_address.ip(),
+                                        tcp_address.port(),
+                                        fingerprint.as_ref(),
+                                    )
+                                    .await
+                            }
+                        };
+                        let (sender, conn) = hyper::client::conn::http2::handshake(
+                            TokioExecutor::new(),
+                            TokioIo::new(io?),
+                        )
+                        .await?;
+                        tokio::spawn(Box::pin(async move {
+                            if let Err(error) = conn.await {
+                                #[cfg(not(coverage_nightly))]
+                                tracing::warn!(%error, "HTTP/2 connection failed.");
+                            }
+                        }));
+                        (sender, handler.log_channel())
                     }
-                });
-                let request_type = request_upgrade.to_str()?.to_string();
-                // Retrieve the OnUpgrade from the incoming request
-                let upgraded_request = hyper::upgrade::on(&mut request);
-                let mut response = match proxy_data.http_request_timeout {
+                };
+
+                // Create an HTTP/2 handshake over the selected channel
+                let mut uri_parts = request.uri().clone().into_parts();
+                let authority = uri_parts.authority.as_mut().expect("Host has been checked");
+                *authority = Authority::from_maybe_shared(
+                    authority
+                        .as_str()
+                        .replace(authority.host(), request_host)
+                        .into_bytes(),
+                )?;
+                *request.uri_mut() = Uri::from_parts(uri_parts)?;
+                request.headers_mut().insert(
+                    CONNECTION,
+                    "keepalive".try_into().expect("valid HeaderValue"),
+                );
+
+                let response = match proxy_data.http_request_timeout {
                     // Await for a response under the given duration.
                     Some(duration) => {
-                        if let Ok(response) = timeout(duration, sender.send_request(request)).await
+                        if let Ok(response) =
+                            timeout(duration, sender.try_send_request(request)).await
                         {
-                            response?
+                            response
                         } else {
                             let elapsed_time = timer.elapsed();
                             http_log(
@@ -594,126 +651,335 @@ where
                             return Err(HttpError::RequestTimeout);
                         }
                     }
-                    None => sender.send_request(request).await?,
+                    None => sender.try_send_request(request).await,
                 };
-                // Check if the underlying server accepts the Upgrade request
-                match response.status() {
-                    StatusCode::SWITCHING_PROTOCOLS => {
-                        if request_type
-                            == response
-                                .headers()
-                                .get(UPGRADE)
-                                .ok_or(HttpError::MissingUpgradeHeader)?
-                                .to_str()?
-                        {
-                            // Retrieve the upgraded connection from the response
-                            let upgraded_response = hyper::upgrade::on(&mut response).await?;
-                            let websocket_timeout = proxy_data.websocket_timeout;
-                            let buffer_size = proxy_data.buffer_size;
-                            // Start a task to copy data between the two Upgraded parts
-                            tokio::spawn(async move {
-                                let mut upgraded_request = TokioIo::new(
-                                    upgraded_request.await.expect("upgradable request"),
+                let response = match response {
+                    Ok(response) => response,
+                    Err(mut error) => {
+                        if let Some(recovered) = error.take_message() {
+                            #[cfg(not(coverage_nightly))]
+                            tracing::debug!(error = %error.error(), "Recovering HTTP/2 request to try again.");
+                            request = recovered;
+                            continue;
+                        } else {
+                            let elapsed_time = timer.elapsed();
+                            http_log(
+                                http_log_builder
+                                    .status(StatusCode::INTERNAL_SERVER_ERROR.as_u16())
+                                    .elapsed_time(elapsed_time)
+                                    .build(),
+                                Some(tx),
+                                disable_http_logs,
+                            );
+                            return Err(error.into_error().into());
+                        }
+                    }
+                };
+
+                let http_log_builder = http_log_builder.status(response.status().as_u16());
+                return Ok(ProxyResponse::Proxy(TimedResponse {
+                    response,
+                    on_drop: Some(Box::new(move || {
+                        // Log HTTP request
+                        http_log(
+                            http_log_builder.elapsed_time(timer.elapsed()).build(),
+                            Some(tx.clone()),
+                            disable_http_logs,
+                        );
+                        // Send sender to pool
+                        let pool = {
+                            let pool_ref = proxy_data
+                                .keepalive_http2_pool_map
+                                .entry(key)
+                                .and_modify(|v| {
+                                    v.2.lock().expect("not poisoned").take();
+                                })
+                                .or_insert_with(|| {
+                                    let (sender, receiver) = async_channel::bounded(128);
+                                    (sender, receiver, Arc::default())
+                                })
+                                .downgrade();
+                            pool_ref.0.clone()
+                        };
+                        let _ = pool.try_send((sender, tx));
+                    })),
+                }));
+            }
+            Version::HTTP_11 => {
+                // Ensure best-effort compatibility of proxy request with HTTP/1.1 format
+                // -> Add host header if missing
+                request
+                    .headers_mut()
+                    .insert(HOST, request_host.try_into().expect("valid host"));
+                // -> Change URI to only include path and query
+                *request.uri_mut() = request
+                    .uri()
+                    .path_and_query()
+                    .map(|path| Uri::from_str(path.as_str()).expect("valid URI"))
+                    .unwrap_or_default();
+                // -> Decompress cookies: https://www.rfc-editor.org/rfc/rfc7540#section-8.1.2.5
+                if let http::header::Entry::Occupied(occupied_entry) =
+                    request.headers_mut().entry(COOKIE)
+                {
+                    let (header, values) = occupied_entry.remove_entry_mult();
+                    let mut value = vec![];
+                    for header_value in values {
+                        if !value.is_empty() {
+                            value.extend_from_slice(b"; ");
+                        }
+                        value.extend_from_slice(header_value.as_bytes());
+                    }
+                    request
+                        .headers_mut()
+                        .insert(header, value.try_into().expect("valid header value"));
+                }
+
+                // Check for an Upgrade header
+                if let Some(request_upgrade) = request.headers().get(UPGRADE) {
+                    // If there is an Upgrade header, make sure that it's a valid Websocket upgrade.
+                    let (mut sender, tx) = match proxy_data.get_http11_sender(key.key()) {
+                        Some(sender) => sender,
+                        None => {
+                            let io = match proxy_data.proxy_type {
+                                ProxyType::Tunneling => {
+                                    handler
+                                        .tunneling_channel(tcp_address.ip(), tcp_address.port())
+                                        .await
+                                }
+                                ProxyType::Aliasing => {
+                                    handler
+                                        .aliasing_channel(
+                                            tcp_address.ip(),
+                                            tcp_address.port(),
+                                            fingerprint.as_ref(),
+                                        )
+                                        .await
+                                }
+                            };
+                            let (sender, conn) =
+                                hyper::client::conn::http1::handshake(TokioIo::new(io?)).await?;
+                            tokio::spawn(Box::pin(async move {
+                                if let Err(error) = conn.with_upgrades().await {
+                                    #[cfg(not(coverage_nightly))]
+                                    tracing::warn!(%error, "HTTP/1.1 connection failed.");
+                                }
+                            }));
+                            (sender, handler.log_channel())
+                        }
+                    };
+
+                    let request_type = request_upgrade.to_str()?.to_string();
+                    // Retrieve the OnUpgrade from the incoming request
+                    let upgraded_request = hyper::upgrade::on(&mut request);
+                    let mut response = match proxy_data.http_request_timeout {
+                        // Await for a response under the given duration.
+                        Some(duration) => {
+                            if let Ok(response) =
+                                timeout(duration, sender.send_request(request)).await
+                            {
+                                response?
+                            } else {
+                                let elapsed_time = timer.elapsed();
+                                http_log(
+                                    http_log_builder
+                                        .status(StatusCode::REQUEST_TIMEOUT.as_u16())
+                                        .elapsed_time(elapsed_time)
+                                        .build(),
+                                    Some(tx),
+                                    disable_http_logs,
                                 );
-                                let mut upgraded_response = TokioIo::new(upgraded_response);
-                                match websocket_timeout {
-                                    // If there is a Websocket timeout, copy until the deadline is reached.
-                                    Some(duration) => {
-                                        let _ = timeout(duration, async {
-                                            copy_bidirectional_with_sizes(
+                                return Err(HttpError::RequestTimeout);
+                            }
+                        }
+                        None => sender.send_request(request).await?,
+                    };
+                    // Check if the underlying server accepts the Upgrade request
+                    match response.status() {
+                        StatusCode::SWITCHING_PROTOCOLS => {
+                            if request_type
+                                == response
+                                    .headers()
+                                    .get(UPGRADE)
+                                    .ok_or(HttpError::MissingUpgradeHeader)?
+                                    .to_str()?
+                            {
+                                // Retrieve the upgraded connection from the response
+                                let upgraded_response = hyper::upgrade::on(&mut response).await?;
+                                let websocket_timeout = proxy_data.websocket_timeout;
+                                let buffer_size = proxy_data.buffer_size;
+                                // Start a task to copy data between the two Upgraded parts
+                                tokio::spawn(async move {
+                                    let mut upgraded_request = TokioIo::new(
+                                        upgraded_request.await.expect("upgradable request"),
+                                    );
+                                    let mut upgraded_response = TokioIo::new(upgraded_response);
+                                    match websocket_timeout {
+                                        // If there is a Websocket timeout, copy until the deadline is reached.
+                                        Some(duration) => {
+                                            let _ = timeout(duration, async {
+                                                copy_bidirectional_with_sizes(
+                                                    &mut upgraded_response,
+                                                    &mut upgraded_request,
+                                                    buffer_size,
+                                                    buffer_size,
+                                                )
+                                                .await
+                                            })
+                                            .await;
+                                        }
+                                        // If there isn't a Websocket timeout, copy data between both sides unconditionally.
+                                        None => {
+                                            let _ = copy_bidirectional_with_sizes(
                                                 &mut upgraded_response,
                                                 &mut upgraded_request,
                                                 buffer_size,
                                                 buffer_size,
                                             )
-                                            .await
-                                        })
-                                        .await;
+                                            .await;
+                                        }
                                     }
-                                    // If there isn't a Websocket timeout, copy data between both sides unconditionally.
-                                    None => {
-                                        let _ = copy_bidirectional_with_sizes(
-                                            &mut upgraded_response,
-                                            &mut upgraded_request,
-                                            buffer_size,
-                                            buffer_size,
-                                        )
-                                        .await;
-                                    }
-                                }
-                            });
+                                });
+                            }
+                            // Return the response to the client
+                            let http_log_builder =
+                                http_log_builder.status(response.status().as_u16());
+                            return Ok(ProxyResponse::Proxy(TimedResponse {
+                                response,
+                                on_drop: Some(Box::new(move || {
+                                    http_log(
+                                        http_log_builder.elapsed_time(timer.elapsed()).build(),
+                                        Some(tx),
+                                        disable_http_logs,
+                                    )
+                                })),
+                            }));
                         }
-                        // Return the response to the client
-                        let http_log_builder = http_log_builder.status(response.status().as_u16());
-                        Ok(ProxyResponse::Proxy(TimedResponse {
-                            response,
-                            log: Some(Box::new(move || {
+                        _ => {
+                            let http_log_builder =
+                                http_log_builder.status(response.status().as_u16());
+                            return Ok(ProxyResponse::Proxy(TimedResponse {
+                                response,
+                                on_drop: Some(Box::new(move || {
+                                    http_log(
+                                        http_log_builder.elapsed_time(timer.elapsed()).build(),
+                                        Some(tx),
+                                        disable_http_logs,
+                                    )
+                                })),
+                            }));
+                        }
+                    }
+                } else {
+                    // If Upgrade header is not present, simply handle the request
+                    let (mut sender, tx) = match proxy_data.get_http11_sender(key.key()) {
+                        Some(sender) => sender,
+                        None => {
+                            let io = match proxy_data.proxy_type {
+                                ProxyType::Tunneling => {
+                                    handler
+                                        .tunneling_channel(tcp_address.ip(), tcp_address.port())
+                                        .await
+                                }
+                                ProxyType::Aliasing => {
+                                    handler
+                                        .aliasing_channel(
+                                            tcp_address.ip(),
+                                            tcp_address.port(),
+                                            fingerprint.as_ref(),
+                                        )
+                                        .await
+                                }
+                            };
+                            let (sender, conn) =
+                                hyper::client::conn::http1::handshake(TokioIo::new(io?)).await?;
+                            tokio::spawn(Box::pin(async move {
+                                if let Err(error) = conn.with_upgrades().await {
+                                    #[cfg(not(coverage_nightly))]
+                                    tracing::warn!(%error, "HTTP/1.1 connection failed.");
+                                }
+                            }));
+                            (sender, handler.log_channel())
+                        }
+                    };
+
+                    let response = match proxy_data.http_request_timeout {
+                        // Await for a response under the given duration.
+                        Some(duration) => {
+                            if let Ok(response) =
+                                timeout(duration, sender.try_send_request(request)).await
+                            {
+                                response
+                            } else {
+                                let elapsed_time = timer.elapsed();
                                 http_log(
-                                    http_log_builder.elapsed_time(timer.elapsed()).build(),
+                                    http_log_builder
+                                        .status(StatusCode::REQUEST_TIMEOUT.as_u16())
+                                        .elapsed_time(elapsed_time)
+                                        .build(),
                                     Some(tx),
                                     disable_http_logs,
-                                )
-                            })),
-                        }))
-                    }
-                    _ => {
-                        let http_log_builder = http_log_builder.status(response.status().as_u16());
-                        Ok(ProxyResponse::Proxy(TimedResponse {
-                            response,
-                            log: Some(Box::new(move || {
+                                );
+                                return Err(HttpError::RequestTimeout);
+                            }
+                        }
+                        None => sender.try_send_request(request).await,
+                    };
+                    let response = match response {
+                        Ok(response) => response,
+                        Err(mut error) => {
+                            if let Some(recovered) = error.take_message() {
+                                #[cfg(not(coverage_nightly))]
+                                tracing::debug!(error = %error.error(), "Recovering HTTP/1.1 request to try again.");
+                                request = recovered;
+                                continue;
+                            } else {
+                                let elapsed_time = timer.elapsed();
                                 http_log(
-                                    http_log_builder.elapsed_time(timer.elapsed()).build(),
+                                    http_log_builder
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR.as_u16())
+                                        .elapsed_time(elapsed_time)
+                                        .build(),
                                     Some(tx),
                                     disable_http_logs,
-                                )
-                            })),
-                        }))
-                    }
-                }
-            } else {
-                // If Upgrade header is not present, simply handle the request
-                tokio::spawn(async move {
-                    if let Err(error) = conn.await {
-                        #[cfg(not(coverage_nightly))]
-                        tracing::warn!(%error, "HTTP/1.1 connection failed.");
-                    }
-                });
-                let response = match proxy_data.http_request_timeout {
-                    // Await for a response under the given duration.
-                    Some(duration) => {
-                        if let Ok(response) = timeout(duration, sender.send_request(request)).await
-                        {
-                            response?
-                        } else {
-                            let elapsed_time = timer.elapsed();
+                                );
+                                return Err(error.into_error().into());
+                            }
+                        }
+                    };
+
+                    // Return the received response to the client
+                    let http_log_builder = http_log_builder.status(response.status().as_u16());
+                    return Ok(ProxyResponse::Proxy(TimedResponse {
+                        response,
+                        on_drop: Some(Box::new(move || {
+                            // Log HTTP request
                             http_log(
-                                http_log_builder
-                                    .status(StatusCode::REQUEST_TIMEOUT.as_u16())
-                                    .elapsed_time(elapsed_time)
-                                    .build(),
-                                Some(tx),
+                                http_log_builder.elapsed_time(timer.elapsed()).build(),
+                                Some(tx.clone()),
                                 disable_http_logs,
                             );
-                            return Err(HttpError::RequestTimeout);
-                        }
-                    }
-                    None => sender.send_request(request).await?,
-                };
-                // Return the received response to the client
-                let http_log_builder = http_log_builder.status(response.status().as_u16());
-                Ok(ProxyResponse::Proxy(TimedResponse {
-                    response,
-                    log: Some(Box::new(move || {
-                        http_log(
-                            http_log_builder.elapsed_time(timer.elapsed()).build(),
-                            Some(tx),
-                            disable_http_logs,
-                        )
-                    })),
-                }))
+                            // Send sender to pool
+                            let pool = {
+                                let pool_ref = proxy_data
+                                    .keepalive_http11_pool_map
+                                    .entry(key)
+                                    .and_modify(|v| {
+                                        v.2.lock().expect("not poisoned").take();
+                                    })
+                                    .or_insert_with(|| {
+                                        let (sender, receiver) = async_channel::bounded(128);
+                                        (sender, receiver, Arc::default())
+                                    })
+                                    .downgrade();
+                                pool_ref.0.clone()
+                            };
+                            let _ = pool.try_send((sender, tx));
+                        })),
+                    }));
+                }
             }
+            version => return Err(HttpError::InvalidHttpVersion(version)),
         }
-        version => Err(HttpError::InvalidHttpVersion(version)),
     }
 }
 

@@ -43,6 +43,7 @@ mod http_addressing_profanities_subdomain;
 mod http_force_https_by_user;
 mod http_redirects;
 mod http_rewrite_host;
+mod http_simultaneous_requests;
 mod http_timeout;
 mod https_bind_all_hostnames;
 mod https_connect_ssh_on_https_port;

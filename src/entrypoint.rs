@@ -744,7 +744,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 });
                 let io = TokioIo::new(stream);
                 tokio::spawn(async move {
-                    let server = auto::Builder::new(TokioExecutor::new());
+                    let mut server = auto::Builder::new(TokioExecutor::new());
+                    server.http1().pipeline_flush(true);
                     let conn = server.serve_connection_with_upgrades(io, service);
                     match tcp_connection_timeout {
                         Some(duration) => {
@@ -995,10 +996,8 @@ async fn handle_https_connection(
             let service = service_fn(move |req: Request<Incoming>| {
                 proxy_handler(req, address, None, Arc::clone(&proxy_data))
             });
-            let server = auto::Builder::new(TokioExecutor::new());
-            // TO-DO: See if this is breaking no-js-speedtest
-            // let mut server = auto::Builder::new(TokioExecutor::new());
-            // server.http1().pipeline_flush(true);
+            let mut server = auto::Builder::new(TokioExecutor::new());
+            server.http1().pipeline_flush(true);
             let conn = server.serve_connection_with_upgrades(io, service);
             match sandhole.tcp_connection_timeout {
                 Some(duration) => {
@@ -1046,7 +1045,7 @@ fn handle_ssh_connection(
         tokio::select! {
             result = &mut session => {
                 if let Err(error) = result {
-                    #[cfg(not(coverage_nightly))] tracing::warn!(%error, %address, "Connection closed.");
+                    #[cfg(not(coverage_nightly))] tracing::warn!(%error, %address, "SSH connection closed.");
                 }
             }
             _ = cancellation_token.cancelled() => {

@@ -14,6 +14,7 @@ use std::{
 
 use ahash::RandomState;
 use async_speed_limit::{Limiter, Resource, clock::StandardClock};
+use hyper::body::Incoming;
 use russh::{ChannelStream, keys::ssh_key::Fingerprint, server::Msg};
 use tokio_util::sync::CancellationToken;
 
@@ -54,6 +55,7 @@ mod error;
 mod fingerprints;
 mod http;
 mod ip;
+mod keepalive;
 #[cfg(feature = "login")]
 mod login;
 mod quota;
@@ -81,7 +83,7 @@ type SessionMap = (Limiter, HashMap<usize, CancellationToken, RandomState>);
 type DataTable<K, V> = Arc<Mutex<BTreeMap<K, V>>>;
 // Helper type for HTTP proxy data types.
 type HttpProxyData<C> =
-    Arc<ProxyData<Arc<C>, SshTunnelHandler, Resource<ChannelStream<Msg>, StandardClock>>>;
+    Arc<ProxyData<Incoming, Arc<C>, SshTunnelHandler, Resource<ChannelStream<Msg>, StandardClock>>>;
 // HTTP proxy data used by the tunneling connections.
 type TunnelingProxyData = HttpProxyData<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>;
 // HTTP proxy data used by the local forwarding aliasing connections.

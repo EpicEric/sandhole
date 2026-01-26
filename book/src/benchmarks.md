@@ -4,26 +4,22 @@ This page includes some benchmarks comparing Sandhole and competing solutions.
 
 ## Methodology
 
-- **Test service**: [sandhole-benchmark/service](https://github.com/EpicEric/sandhole-benchmark) in release profile, using AES-256-GCM.
-- **Test client**: [sandhole-benchmark/measure](https://github.com/EpicEric/sandhole-benchmark) in release profile.
-- **Service-to-proxy latency**:
-
-```
---- sandhole.com.br ping statistics ---
-30 packets transmitted, 30 received, 0% packet loss, time 29131ms
-rtt min/avg/max/mdev = 141.265/144.842/150.421/2.243 ms
-```
-
-- **Client-to-proxy latency**: Same as above.
-- **Measurements**: Two cold runs, then average + standard deviation of five results.
+- **Test service**: [sandhole-benchmark/service](https://github.com/EpicEric/sandhole-benchmark) in release profile, using the given ciphers, running on the same machine as the proxy.
+- **Test client**: [sandhole-benchmark/measure](https://github.com/EpicEric/sandhole-benchmark) in release profile, running on the same machine as the proxy.
+- **Measurements**: Seven runs in sequence, then average of five best results.
 
 ## Results
 
-|                 | sandhole v0.6.0   | sish v2.19.0         | Speedup |
-| --------------- | ----------------- | -------------------- | ------- |
-| HTTPS GET 50MB  | 9s 351ms ± 193ms  | 10s 500ms ± 1s 110ms | 1.123x  |
-| HTTPS GET 100MB | 17s 264ms ± 342ms | 13s 837ms ± 1s 512ms | 0.802x  |
-| HTTPS POST 50MB | 11s 252ms ± 180ms | 12s 677ms ± 305ms    | 1.126x  |
+| aes256-gcm       | sandhole v0.9.0-preview | sish v2.20.0 | Speedup |
+| ---------------- | ----------------------- | ------------ | ------- |
+| HTTPS GET 50MB   | 115.2ms                 | 104.8ms      | 0.910x  |
+| HTTPS GET 100MB  | 196.8ms                 | 179.6ms      | 0.913x  |
+| HTTPS POST 50MB  | 120.8ms                 | 171.8ms      | 1.422x  |
+| HTTPS POST 100MB | 210.6ms                 | 260.4ms      | 1.236x  |
 
-- At smaller transfer sizes, Sandhole is faster.
-- Latency is much more consistent in Sandhole.
+| chacha20-poly1305 | sandhole v0.9.0-preview | sish v2.20.0 | Speedup |
+| ----------------- | ----------------------- | ------------ | ------- |
+| HTTPS GET 50MB    | 130.6ms                 | 144.8ms      | 1.109x  |
+| HTTPS GET 100MB   | 228.4ms                 | 245.2ms      | 1.074x  |
+| HTTPS POST 50MB   | 144.4ms                 | 195.6ms      | 1.355x  |
+| HTTPS POST 100MB  | 228.0ms                 | 307.4ms      | 1.348x  |

@@ -21,6 +21,7 @@ acme = ["dep:rustls-acme"]
 
 [dependencies]
 ahash = "0.8.12"
+async-channel = "2.5.0"
 async-speed-limit = { version = "0.4.2", features = ["tokio"] }
 aws-lc-rs = "1.15.2"
 axum = { version = "0.8.8", default-features = false }

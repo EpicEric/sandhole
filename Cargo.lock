@@ -4128,6 +4128,7 @@ name = "sandhole"
 version = "0.8.7"
 dependencies = [
  "ahash",
+ "async-channel",
  "async-speed-limit",
  "aws-lc-rs",
  "axum",
