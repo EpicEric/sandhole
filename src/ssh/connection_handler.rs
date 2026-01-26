@@ -61,7 +61,7 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
         &self,
         ip: IpAddr,
         port: u16,
-    ) -> color_eyre::Result<Resource<ChannelStream<Msg>, StandardClock>> {
+    ) -> Result<Resource<ChannelStream<Msg>, StandardClock>, ServerError> {
         // Check if this IP is not blocked
         let tunneling_allowed = self
             .ip_filter
@@ -82,7 +82,7 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
                 .into_stream();
             Ok(self.limiter.clone().limit(channel))
         } else {
-            Err(ServerError::TunnelingNotAllowed.into())
+            Err(ServerError::TunnelingNotAllowed)
         }
     }
 
@@ -102,7 +102,7 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
         ip: IpAddr,
         port: u16,
         fingerprint: Option<&'_ Fingerprint>,
-    ) -> color_eyre::Result<Resource<ChannelStream<Msg>, StandardClock>> {
+    ) -> Result<Resource<ChannelStream<Msg>, StandardClock>, ServerError> {
         if self.can_alias(ip, port, fingerprint) {
             let channel = self
                 .handle
@@ -116,7 +116,7 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
                 .into_stream();
             Ok(self.limiter.clone().limit(channel))
         } else {
-            Err(ServerError::AliasingNotAllowed.into())
+            Err(ServerError::AliasingNotAllowed)
         }
     }
 
