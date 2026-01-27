@@ -321,9 +321,7 @@ where
 
     fn get_sender(&self, key: BorrowedKeepaliveAlias) -> Option<HttpChannel<B, T>> {
         let key: &dyn KeepaliveAliasKey = &key;
-        let Some(pool) = self.keepalive.get(key) else {
-            return None;
-        };
+        let pool = self.keepalive.get(key)?;
         let pool_clone = Arc::clone(&pool);
         drop(pool);
         loop {
@@ -511,7 +509,7 @@ where
     let is_http2 = http_data.as_ref().map(|data| data.http2).unwrap_or(false);
     let request_host = http_data
         .as_ref()
-        .and_then(|data| data.host.as_ref().map(|host| host.as_str()))
+        .and_then(|data| data.host.as_deref())
         .unwrap_or(host.as_str());
 
     // Try to locate an already-open HTTP sender
@@ -559,7 +557,7 @@ where
                 *authority = Authority::from_maybe_shared(
                     authority
                         .as_str()
-                        .replace(authority.host(), &request_host)
+                        .replace(authority.host(), request_host)
                         .into_bytes(),
                 )?;
                 *request.uri_mut() = Uri::from_parts(uri_parts)?;
@@ -575,7 +573,7 @@ where
                             proxy_http_version,
                             host.to_string(),
                             ip,
-                            fingerprint.clone(),
+                            fingerprint,
                         ))
                         .or_default()
                         .downgrade()
@@ -816,7 +814,7 @@ where
                                 proxy_http_version,
                                 host.to_string(),
                                 ip,
-                                fingerprint.clone(),
+                                fingerprint,
                             ))
                             .or_default()
                             .downgrade()

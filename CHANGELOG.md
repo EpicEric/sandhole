@@ -5,6 +5,11 @@
 ### Added
 
 - Add `--no-domain` CLI flag.
+- Add keepalive mechanism to proxied HTTP connections.
+
+### Fixed
+
+- Improved general performance.
 
 ## 0.8.7 (2026-01-15)
 
