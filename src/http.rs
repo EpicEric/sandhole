@@ -14,6 +14,7 @@ use std::{
 use crate::{
     connection_handler::ConnectionHandler,
     connections::ConnectionGetByHttpHost,
+    droppable_handle::DroppableHandle,
     keepalive::{BorrowedKeepaliveAlias, KeepaliveAlias, KeepaliveAliasKey},
     ssh::ServerHandlerSender,
     tcp_alias::BorrowedTcpAlias,
@@ -67,12 +68,12 @@ enum ProxyResponse {
 
 struct TimedResponse {
     response: Response<Incoming>,
-    log: Option<Box<dyn FnOnce() + Send + Sync + 'static>>,
+    on_drop: Option<Box<dyn FnOnce() + Send + Sync + 'static>>,
 }
 
 struct TimedResponseBody {
     body: Incoming,
-    log: Option<Box<dyn FnOnce() + Send + Sync + 'static>>,
+    on_drop: Option<Box<dyn FnOnce() + Send + Sync + 'static>>,
 }
 
 impl IntoResponse for TimedResponse {
@@ -82,7 +83,7 @@ impl IntoResponse for TimedResponse {
             parts,
             AxumBody::new(TimedResponseBody {
                 body,
-                log: self.log,
+                on_drop: self.on_drop,
             }),
         )
     }
@@ -114,8 +115,8 @@ impl Body for TimedResponseBody {
 
 impl Drop for TimedResponseBody {
     fn drop(&mut self) {
-        if let Some(log) = self.log.take() {
-            (log)()
+        if let Some(on_drop) = self.on_drop.take() {
+            (on_drop)();
         }
     }
 }
@@ -275,17 +276,19 @@ type KeepalivePool<B, T> = Arc<Mutex<BTreeMap<usize, HttpChannel<B, T>>>>;
 #[derive(Builder)]
 pub(crate) struct ProxyData<B, M, H, T>
 where
-    M: ConnectionGetByHttpHost<Arc<H>>,
-    H: ConnectionHandler<T>,
+    M: ConnectionGetByHttpHost<Arc<H>> + Send + Sync + 'static,
+    H: ConnectionHandler<T> + Send + Sync + 'static,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     B: Body + Debug + Send + Unpin + 'static,
     <B as Body>::Data: Send + Sync + 'static,
     <B as Body>::Error: Error + Send + Sync + 'static,
 {
     #[builder(default = DashMap::default())]
-    keepalive: DashMap<KeepaliveAlias, KeepalivePool<B, T>, RandomState>,
+    keepalive_pool_map: DashMap<KeepaliveAlias, KeepalivePool<B, T>, RandomState>,
     #[builder(default = AtomicUsize::new(0))]
     keepalive_index: AtomicUsize,
+    #[builder(skip)]
+    keepalive_gc_handle: Mutex<Option<DroppableHandle<()>>>,
     // An HTTP connection manager (usually ConnectionMap) that returns a tunneling/aliasing handler.
     conn_manager: M,
     // Tuple containing where to redirect requests from the main domain to.
@@ -308,8 +311,8 @@ where
 
 impl<B, M, H, T> ProxyData<B, M, H, T>
 where
-    M: ConnectionGetByHttpHost<Arc<H>>,
-    H: ConnectionHandler<T>,
+    M: ConnectionGetByHttpHost<Arc<H>> + Send + Sync + 'static,
+    H: ConnectionHandler<T> + Send + Sync + 'static,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     B: Body + Debug + Send + Unpin + 'static,
     <B as Body>::Data: Send + Sync + 'static,
@@ -321,30 +324,47 @@ where
 
     fn get_sender(&self, key: BorrowedKeepaliveAlias) -> Option<HttpChannel<B, T>> {
         let key: &dyn KeepaliveAliasKey = &key;
-        let pool = self.keepalive.get(key)?;
-        let pool_clone = Arc::clone(&pool);
-        drop(pool);
-        loop {
-            let mut pool_guard = pool_clone.lock().expect("not poisoned");
-            let Some((_, sender)) = pool_guard.pop_first() else {
-                drop(pool_guard);
-                drop(pool_clone);
-                self.keepalive
-                    .remove_if(key, |_, v| v.lock().expect("not poisoned").is_empty());
-                return None;
-            };
+        let pool = {
+            let map_ref = self.keepalive_pool_map.get(key)?;
+            Arc::clone(map_ref.value())
+        };
+        let mut pool_guard = pool.lock().expect("not poisoned");
+        while let Some((_, sender)) = pool_guard.pop_first() {
             if match &sender {
                 HttpChannel::Http11Sender(sender, _) => !sender.is_closed(),
                 HttpChannel::Http2Sender(sender, _) => !sender.is_closed(),
                 HttpChannel::Channel(_, _) => false,
             } {
-                drop(pool_guard);
-                drop(pool_clone);
-                self.keepalive
-                    .remove_if(key, |_, v| v.lock().expect("not poisoned").is_empty());
                 return Some(sender);
             }
         }
+        None
+    }
+}
+
+pub(crate) fn start_keepalive_garbage_collection<B, M, H, T>(
+    proxy_data: &Arc<ProxyData<B, M, H, T>>,
+) where
+    M: ConnectionGetByHttpHost<Arc<H>> + Send + Sync + 'static,
+    H: ConnectionHandler<T> + Send + Sync + 'static,
+    T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    B: Body + Debug + Send + Unpin + 'static,
+    <B as Body>::Data: Send + Sync + 'static,
+    <B as Body>::Error: Error + Send + Sync + 'static,
+{
+    let proxy_data_clone = Arc::clone(proxy_data);
+    let mut handle = proxy_data.keepalive_gc_handle.lock().expect("not poisoned");
+    if handle.is_none() {
+        *handle = Some(DroppableHandle(tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                proxy_data_clone
+                    .keepalive_pool_map
+                    .retain(|_, v| !v.lock().expect("not poisoned").is_empty());
+            }
+        })));
     }
 }
 
@@ -356,8 +376,8 @@ pub(crate) async fn proxy_handler<B, M, H, T>(
     proxy_data: Arc<ProxyData<B, M, H, T>>,
 ) -> color_eyre::Result<Response<AxumBody>>
 where
-    M: ConnectionGetByHttpHost<Arc<H>>,
-    H: ConnectionHandler<T>,
+    M: ConnectionGetByHttpHost<Arc<H>> + Send + Sync + 'static,
+    H: ConnectionHandler<T> + Send + Sync + 'static,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     B: Body + Debug + Send + Unpin + 'static,
     <B as Body>::Data: Send + Sync + 'static,
@@ -389,8 +409,8 @@ async fn proxy_handler_inner<B, M, H, T>(
     proxy_data: Arc<ProxyData<B, M, H, T>>,
 ) -> Result<ProxyResponse, HttpError>
 where
-    M: ConnectionGetByHttpHost<Arc<H>>,
-    H: ConnectionHandler<T>,
+    M: ConnectionGetByHttpHost<Arc<H>> + Send + Sync + 'static,
+    H: ConnectionHandler<T> + Send + Sync + 'static,
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     B: Body + Debug + Send + Unpin + 'static,
     <B as Body>::Data: Send + Sync + 'static,
@@ -520,6 +540,7 @@ where
     };
 
     // Find the appropriate handler for this proxy type
+    dbg!("a");
     loop {
         let channel = match proxy_data.get_sender(BorrowedKeepaliveAlias(
             &proxy_http_version,
@@ -530,6 +551,7 @@ where
             Some(sender) => sender,
             None => match match proxy_data.proxy_type {
                 ProxyType::Tunneling => {
+                    dbg!("b");
                     handler
                         .tunneling_channel(tcp_address.ip(), tcp_address.port())
                         .await
@@ -566,19 +588,9 @@ where
                     "keepalive".try_into().expect("valid HeaderValue"),
                 );
 
-                let pool = Arc::clone(
-                    proxy_data
-                        .keepalive
-                        .entry(KeepaliveAlias(
-                            proxy_http_version,
-                            host.to_string(),
-                            ip,
-                            fingerprint,
-                        ))
-                        .or_default()
-                        .downgrade()
-                        .value(),
-                );
+                let cloned_proxy_data = Arc::clone(&proxy_data);
+                let key = KeepaliveAlias(proxy_http_version, host.to_string(), ip, fingerprint);
+                let cloned_key = key.clone();
                 let pool_index = proxy_data
                     .keepalive_index
                     .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
@@ -591,13 +603,22 @@ where
                             TokioIo::new(io),
                         )
                         .await?;
-                        let pool = Arc::clone(&pool);
                         tokio::spawn(Box::pin(async move {
                             if let Err(error) = conn.await {
                                 #[cfg(not(coverage_nightly))]
                                 tracing::warn!(%error, "HTTP/2 connection failed.");
                             }
-                            pool.lock().expect("not poisoned").remove(&pool_index);
+                            {
+                                if let Some(pool_ref) =
+                                    cloned_proxy_data.keepalive_pool_map.get(&cloned_key)
+                                {
+                                    pool_ref
+                                        .value()
+                                        .lock()
+                                        .expect("not poisoned")
+                                        .remove(&pool_index);
+                                }
+                            }
                         }));
                         (sender, tx)
                     }
@@ -639,20 +660,26 @@ where
                     }
                 };
 
-                // Add sender to pool
-                pool.lock()
-                    .expect("not poisoned")
-                    .insert(pool_index, HttpChannel::Http2Sender(sender, tx.clone()));
-
                 let http_log_builder = http_log_builder.status(response.status().as_u16());
                 return Ok(ProxyResponse::Proxy(TimedResponse {
                     response,
-                    log: Some(Box::new(move || {
+                    on_drop: Some(Box::new(move || {
+                        // Log HTTP request
                         http_log(
                             http_log_builder.elapsed_time(timer.elapsed()).build(),
-                            Some(tx),
+                            Some(tx.clone()),
                             disable_http_logs,
-                        )
+                        );
+                        // Send sender to pool
+                        proxy_data
+                            .keepalive_pool_map
+                            .entry(key)
+                            .or_default()
+                            .downgrade()
+                            .value()
+                            .lock()
+                            .expect("not poisoned")
+                            .insert(pool_index, HttpChannel::Http2Sender(sender, tx));
                     })),
                 }));
             }
@@ -781,7 +808,7 @@ where
                                 http_log_builder.status(response.status().as_u16());
                             return Ok(ProxyResponse::Proxy(TimedResponse {
                                 response,
-                                log: Some(Box::new(move || {
+                                on_drop: Some(Box::new(move || {
                                     http_log(
                                         http_log_builder.elapsed_time(timer.elapsed()).build(),
                                         Some(tx),
@@ -795,7 +822,7 @@ where
                                 http_log_builder.status(response.status().as_u16());
                             return Ok(ProxyResponse::Proxy(TimedResponse {
                                 response,
-                                log: Some(Box::new(move || {
+                                on_drop: Some(Box::new(move || {
                                     http_log(
                                         http_log_builder.elapsed_time(timer.elapsed()).build(),
                                         Some(tx),
@@ -807,19 +834,10 @@ where
                     }
                 } else {
                     // If Upgrade header is not present, simply handle the request
-                    let pool = Arc::clone(
-                        proxy_data
-                            .keepalive
-                            .entry(KeepaliveAlias(
-                                proxy_http_version,
-                                host.to_string(),
-                                ip,
-                                fingerprint,
-                            ))
-                            .or_default()
-                            .downgrade()
-                            .value(),
-                    );
+                    dbg!("c");
+                    let cloned_proxy_data = Arc::clone(&proxy_data);
+                    let key = KeepaliveAlias(proxy_http_version, host.to_string(), ip, fingerprint);
+                    let cloned_key = key.clone();
                     let pool_index = proxy_data
                         .keepalive_index
                         .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
@@ -829,13 +847,22 @@ where
                         HttpChannel::Channel(io, tx) => {
                             let (sender, conn) =
                                 hyper::client::conn::http1::handshake(TokioIo::new(io)).await?;
-                            let pool = Arc::clone(&pool);
                             tokio::spawn(Box::pin(async move {
                                 if let Err(error) = conn.with_upgrades().await {
                                     #[cfg(not(coverage_nightly))]
                                     tracing::warn!(%error, "HTTP/1.1 connection failed.");
                                 }
-                                pool.lock().expect("not poisoned").remove(&pool_index);
+                                {
+                                    if let Some(pool_ref) =
+                                        cloned_proxy_data.keepalive_pool_map.get(&cloned_key)
+                                    {
+                                        pool_ref
+                                            .value()
+                                            .lock()
+                                            .expect("not poisoned")
+                                            .remove(&pool_index);
+                                    }
+                                }
                             }));
                             (sender, tx)
                         }
@@ -877,21 +904,27 @@ where
                         }
                     };
 
-                    // Add sender to pool
-                    pool.lock()
-                        .expect("not poisoned")
-                        .insert(pool_index, HttpChannel::Http11Sender(sender, tx.clone()));
-
                     // Return the received response to the client
                     let http_log_builder = http_log_builder.status(response.status().as_u16());
                     return Ok(ProxyResponse::Proxy(TimedResponse {
                         response,
-                        log: Some(Box::new(move || {
+                        on_drop: Some(Box::new(move || {
+                            // Log HTTP request
                             http_log(
                                 http_log_builder.elapsed_time(timer.elapsed()).build(),
-                                Some(tx),
+                                Some(tx.clone()),
                                 disable_http_logs,
-                            )
+                            );
+                            // Send sender to pool
+                            proxy_data
+                                .keepalive_pool_map
+                                .entry(key)
+                                .or_default()
+                                .downgrade()
+                                .value()
+                                .lock()
+                                .expect("not poisoned")
+                                .insert(pool_index, HttpChannel::Http11Sender(sender, tx));
                         })),
                     }));
                 }

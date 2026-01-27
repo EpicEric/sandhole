@@ -55,7 +55,10 @@ use crate::{
     droppable_handle::DroppableHandle,
     error::ServerError,
     fingerprints::FingerprintsValidator,
-    http::{DomainRedirect, Protocol, ProxyData, ProxyType, proxy_handler},
+    http::{
+        DomainRedirect, Protocol, ProxyData, ProxyType, proxy_handler,
+        start_keepalive_garbage_collection,
+    },
     ip::{IpFilter, IpFilterConfig},
     quota::{DummyQuotaHandler, QuotaHandler, QuotaMap},
     reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
@@ -625,6 +628,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .disable_http_logs(config.disable_http_logs)
             .build(),
     );
+    start_keepalive_garbage_collection(&aliasing_proxy_data);
     let mut sandhole = Arc::new(SandholeServer {
         session_id: AtomicUsize::new(0),
         sessions_password: Mutex::default(),
@@ -724,6 +728,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 .disable_http_logs(config.disable_http_logs)
                 .build(),
         );
+        start_keepalive_garbage_collection(&http_proxy_data);
         DroppableHandle(tokio::spawn(async move {
             loop {
                 let proxy_data = Arc::clone(&http_proxy_data);
@@ -803,6 +808,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 .disable_http_logs(config.disable_http_logs)
                 .build(),
         );
+        start_keepalive_garbage_collection(&https_proxy_data);
         let sandhole_clone = Arc::clone(&sandhole);
         let ssh_config_clone = Arc::clone(&ssh_config);
         DroppableHandle(tokio::spawn(async move {
