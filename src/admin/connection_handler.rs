@@ -38,8 +38,12 @@ impl ConnectionHandler<DuplexStream> for AdminAliasHandler {
         ServerHandlerSender(None)
     }
 
-    async fn tunneling_channel(&self, _ip: IpAddr, _port: u16) -> color_eyre::Result<DuplexStream> {
-        Err(ServerError::TunnelingUnavailable.into())
+    async fn tunneling_channel(
+        &self,
+        _ip: IpAddr,
+        _port: u16,
+    ) -> Result<DuplexStream, ServerError> {
+        Err(ServerError::TunnelingUnavailable)
     }
 
     fn can_alias(&self, _ip: IpAddr, _port: u16, _fingerprint: Option<&'_ Fingerprint>) -> bool {
@@ -52,7 +56,7 @@ impl ConnectionHandler<DuplexStream> for AdminAliasHandler {
         _ip: IpAddr,
         _port: u16,
         _fingerprint: Option<&'_ Fingerprint>,
-    ) -> color_eyre::Result<DuplexStream> {
+    ) -> Result<DuplexStream, ServerError> {
         Ok((self.handler)())
     }
 

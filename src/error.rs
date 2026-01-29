@@ -27,4 +27,6 @@ pub(crate) enum ServerError {
     TunnelingNotAllowed,
     #[error("Aliasing not allowed")]
     AliasingNotAllowed,
+    #[error("SSH error: {0}")]
+    Ssh(#[from] russh::Error),
 }

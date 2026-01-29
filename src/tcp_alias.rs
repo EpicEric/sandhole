@@ -32,6 +32,12 @@ impl FromStr for TcpAlias {
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct BorrowedTcpAlias<'a>(pub(crate) &'a str, pub(crate) &'a u16);
 
+impl Display for BorrowedTcpAlias<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.0, self.1)
+    }
+}
+
 impl<'a> Borrow<dyn TcpAliasKey + 'a> for TcpAlias {
     fn borrow(&self) -> &(dyn TcpAliasKey + 'a) {
         self
