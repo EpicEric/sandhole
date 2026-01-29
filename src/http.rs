@@ -583,19 +583,9 @@ where
                     "keepalive".try_into().expect("valid HeaderValue"),
                 );
 
-                let pool = Arc::clone(
-                    proxy_data
-                        .keepalive_pool_map
-                        .entry(KeepaliveAlias(
-                            proxy_http_version,
-                            host.to_string(),
-                            ip,
-                            fingerprint,
-                        ))
-                        .or_default()
-                        .downgrade()
-                        .value(),
-                );
+                let cloned_proxy_data = Arc::clone(&proxy_data);
+                let key = KeepaliveAlias(proxy_http_version, host.to_string(), ip, fingerprint);
+                let cloned_key = key.clone();
                 let pool_index = proxy_data
                     .keepalive_index
                     .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
@@ -608,13 +598,22 @@ where
                             TokioIo::new(io),
                         )
                         .await?;
-                        let pool = Arc::clone(&pool);
                         tokio::spawn(Box::pin(async move {
                             if let Err(error) = conn.await {
                                 #[cfg(not(coverage_nightly))]
                                 tracing::warn!(%error, "HTTP/2 connection failed.");
                             }
-                            pool.lock().expect("not poisoned").remove(&pool_index);
+                            {
+                                if let Some(pool_ref) =
+                                    cloned_proxy_data.keepalive_pool_map.get(&cloned_key)
+                                {
+                                    pool_ref
+                                        .value()
+                                        .lock()
+                                        .expect("not poisoned")
+                                        .remove(&pool_index);
+                                }
+                            }
                         }));
                         (sender, tx)
                     }
@@ -657,9 +656,17 @@ where
                 };
 
                 // Add sender to pool
-                pool.lock()
-                    .expect("not poisoned")
-                    .insert(pool_index, HttpChannel::Http2Sender(sender, tx.clone()));
+                {
+                    proxy_data
+                        .keepalive_pool_map
+                        .entry(key)
+                        .or_default()
+                        .downgrade()
+                        .value()
+                        .lock()
+                        .expect("not poisoned")
+                        .insert(pool_index, HttpChannel::Http2Sender(sender, tx.clone()));
+                }
 
                 let http_log_builder = http_log_builder.status(response.status().as_u16());
                 return Ok(ProxyResponse::Proxy(TimedResponse {
@@ -824,19 +831,9 @@ where
                     }
                 } else {
                     // If Upgrade header is not present, simply handle the request
-                    let pool = Arc::clone(
-                        proxy_data
-                            .keepalive_pool_map
-                            .entry(KeepaliveAlias(
-                                proxy_http_version,
-                                host.to_string(),
-                                ip,
-                                fingerprint,
-                            ))
-                            .or_default()
-                            .downgrade()
-                            .value(),
-                    );
+                    let cloned_proxy_data = Arc::clone(&proxy_data);
+                    let key = KeepaliveAlias(proxy_http_version, host.to_string(), ip, fingerprint);
+                    let cloned_key = key.clone();
                     let pool_index = proxy_data
                         .keepalive_index
                         .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
@@ -846,13 +843,22 @@ where
                         HttpChannel::Channel(io, tx) => {
                             let (sender, conn) =
                                 hyper::client::conn::http1::handshake(TokioIo::new(io)).await?;
-                            let pool = Arc::clone(&pool);
                             tokio::spawn(Box::pin(async move {
                                 if let Err(error) = conn.with_upgrades().await {
                                     #[cfg(not(coverage_nightly))]
                                     tracing::warn!(%error, "HTTP/1.1 connection failed.");
                                 }
-                                pool.lock().expect("not poisoned").remove(&pool_index);
+                                {
+                                    if let Some(pool_ref) =
+                                        cloned_proxy_data.keepalive_pool_map.get(&cloned_key)
+                                    {
+                                        pool_ref
+                                            .value()
+                                            .lock()
+                                            .expect("not poisoned")
+                                            .remove(&pool_index);
+                                    }
+                                }
                             }));
                             (sender, tx)
                         }
@@ -895,9 +901,17 @@ where
                     };
 
                     // Add sender to pool
-                    pool.lock()
-                        .expect("not poisoned")
-                        .insert(pool_index, HttpChannel::Http11Sender(sender, tx.clone()));
+                    {
+                        proxy_data
+                            .keepalive_pool_map
+                            .entry(key)
+                            .or_default()
+                            .downgrade()
+                            .value()
+                            .lock()
+                            .expect("not poisoned")
+                            .insert(pool_index, HttpChannel::Http11Sender(sender, tx.clone()));
+                    }
 
                     // Return the received response to the client
                     let http_log_builder = http_log_builder.status(response.status().as_u16());
