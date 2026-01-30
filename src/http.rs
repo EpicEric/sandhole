@@ -540,18 +540,12 @@ where
     };
 
     // Find the appropriate handler for this proxy type
-    dbg!("a");
+    let key = KeepaliveAlias(proxy_http_version, host.to_string(), ip, fingerprint);
     loop {
-        let channel = match proxy_data.get_sender(BorrowedKeepaliveAlias(
-            &proxy_http_version,
-            &host,
-            &ip,
-            &fingerprint,
-        )) {
+        let channel = match proxy_data.get_sender(key.key()) {
             Some(sender) => sender,
             None => match match proxy_data.proxy_type {
                 ProxyType::Tunneling => {
-                    dbg!("b");
                     handler
                         .tunneling_channel(tcp_address.ip(), tcp_address.port())
                         .await
@@ -589,7 +583,6 @@ where
                 );
 
                 let cloned_proxy_data = Arc::clone(&proxy_data);
-                let key = KeepaliveAlias(proxy_http_version, host.to_string(), ip, fingerprint);
                 let cloned_key = key.clone();
                 let pool_index = proxy_data
                     .keepalive_index
@@ -612,11 +605,9 @@ where
                                 if let Some(pool_ref) =
                                     cloned_proxy_data.keepalive_pool_map.get(&cloned_key)
                                 {
-                                    pool_ref
-                                        .value()
-                                        .lock()
-                                        .expect("not poisoned")
-                                        .remove(&pool_index);
+                                    let pool = Arc::clone(&pool_ref.value());
+                                    drop(pool_ref);
+                                    pool.lock().expect("not poisoned").remove(&pool_index);
                                 }
                             }
                         }));
@@ -655,6 +646,15 @@ where
                             request = recovered;
                             continue;
                         } else {
+                            let elapsed_time = timer.elapsed();
+                            http_log(
+                                http_log_builder
+                                    .status(StatusCode::INTERNAL_SERVER_ERROR.as_u16())
+                                    .elapsed_time(elapsed_time)
+                                    .build(),
+                                Some(tx),
+                                disable_http_logs,
+                            );
                             return Err(error.into_error().into());
                         }
                     }
@@ -671,13 +671,15 @@ where
                             disable_http_logs,
                         );
                         // Send sender to pool
-                        proxy_data
-                            .keepalive_pool_map
-                            .entry(key)
-                            .or_default()
-                            .downgrade()
-                            .value()
-                            .lock()
+                        let pool = {
+                            let pool_ref = proxy_data
+                                .keepalive_pool_map
+                                .entry(key)
+                                .or_default()
+                                .downgrade();
+                            Arc::clone(&pool_ref.value())
+                        };
+                        pool.lock()
                             .expect("not poisoned")
                             .insert(pool_index, HttpChannel::Http2Sender(sender, tx));
                     })),
@@ -834,7 +836,6 @@ where
                     }
                 } else {
                     // If Upgrade header is not present, simply handle the request
-                    dbg!("c");
                     let cloned_proxy_data = Arc::clone(&proxy_data);
                     let key = KeepaliveAlias(proxy_http_version, host.to_string(), ip, fingerprint);
                     let cloned_key = key.clone();
@@ -856,11 +857,9 @@ where
                                     if let Some(pool_ref) =
                                         cloned_proxy_data.keepalive_pool_map.get(&cloned_key)
                                     {
-                                        pool_ref
-                                            .value()
-                                            .lock()
-                                            .expect("not poisoned")
-                                            .remove(&pool_index);
+                                        let pool = Arc::clone(&pool_ref.value());
+                                        drop(pool_ref);
+                                        pool.lock().expect("not poisoned").remove(&pool_index);
                                     }
                                 }
                             }));
@@ -899,6 +898,15 @@ where
                                 request = recovered;
                                 continue;
                             } else {
+                                let elapsed_time = timer.elapsed();
+                                http_log(
+                                    http_log_builder
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR.as_u16())
+                                        .elapsed_time(elapsed_time)
+                                        .build(),
+                                    Some(tx),
+                                    disable_http_logs,
+                                );
                                 return Err(error.into_error().into());
                             }
                         }
@@ -916,13 +924,15 @@ where
                                 disable_http_logs,
                             );
                             // Send sender to pool
-                            proxy_data
-                                .keepalive_pool_map
-                                .entry(key)
-                                .or_default()
-                                .downgrade()
-                                .value()
-                                .lock()
+                            let pool = {
+                                let pool_ref = proxy_data
+                                    .keepalive_pool_map
+                                    .entry(key)
+                                    .or_default()
+                                    .downgrade();
+                                Arc::clone(&pool_ref.value())
+                            };
+                            pool.lock()
                                 .expect("not poisoned")
                                 .insert(pool_index, HttpChannel::Http11Sender(sender, tx));
                         })),

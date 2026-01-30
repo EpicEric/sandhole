@@ -1054,7 +1054,7 @@ fn handle_ssh_connection(
         tokio::select! {
             result = &mut session => {
                 if let Err(error) = result {
-                    #[cfg(not(coverage_nightly))] tracing::warn!(%error, %address, "Connection closed.");
+                    #[cfg(not(coverage_nightly))] tracing::warn!(%error, %address, "SSH connection closed.");
                 }
             }
             _ = cancellation_token.cancelled() => {
