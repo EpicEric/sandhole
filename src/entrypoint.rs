@@ -120,9 +120,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     let http_request_timeout = config.http_request_timeout;
     let tcp_connection_timeout = config.tcp_connection_timeout;
     let buffer_size = usize::try_from(config.buffer_size)
-        .with_context(|| "Cannot convert buffer size to usize")?
-        .checked_shl(1)
-        .expect("TEST: small buffer size");
+        .with_context(|| "Cannot convert buffer size to usize")?;
     // Initialize crypto and credentials
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // Find the private SSH key for Sandhole or create a new one.
@@ -780,12 +778,10 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         http11_server_config
             .alpn_protocols
             .extend_from_slice(&[b"http/1.1".to_vec()]);
-        http11_server_config.max_early_data_size = 1024;
         let http11_server_config = Arc::new(http11_server_config);
         http2_server_config
             .alpn_protocols
             .extend_from_slice(&[b"h2".to_vec(), b"http/1.1".to_vec()]);
-        http2_server_config.max_early_data_size = 1024;
         let http2_server_config = Arc::new(http2_server_config);
         let ip_filter_clone = Arc::clone(&ip_filter);
         let https_proxy_data = Arc::new(
@@ -999,8 +995,10 @@ async fn handle_https_connection(
             let service = service_fn(move |req: Request<Incoming>| {
                 proxy_handler(req, address, None, Arc::clone(&proxy_data))
             });
-            let mut server = auto::Builder::new(TokioExecutor::new());
-            server.http1().pipeline_flush(true);
+            let server = auto::Builder::new(TokioExecutor::new());
+            // TO-DO: See if this is breaking no-js-speedtest
+            // let mut server = auto::Builder::new(TokioExecutor::new());
+            // server.http1().pipeline_flush(true);
             let conn = server.serve_connection_with_upgrades(io, service);
             match sandhole.tcp_connection_timeout {
                 Some(duration) => {
