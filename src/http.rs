@@ -3,7 +3,7 @@ use std::{
     fmt::Debug,
     marker::PhantomData,
     net::SocketAddr,
-    pin::Pin,
+    pin::{Pin, pin},
     str::FromStr,
     sync::{Arc, LazyLock, Mutex},
     task::{Context, Poll},
@@ -225,6 +225,8 @@ pub(crate) enum ProxyType {
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum HttpError {
+    #[error("Pool closed")]
+    PoolClosed,
     #[error("Hyper error: {0}")]
     HyperError(#[from] hyper::Error),
     #[error("Handler not found")]
@@ -280,7 +282,7 @@ impl IntoResponse for HttpError {
             HttpError::NoHandlerAvailable => StatusCode::TOO_MANY_REQUESTS,
             HttpError::RequestTimeout => StatusCode::GATEWAY_TIMEOUT,
             HttpError::HandlerNotFound | HttpError::ChannelRequestDenied => StatusCode::NOT_FOUND,
-            HttpError::HyperError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            HttpError::PoolClosed | HttpError::HyperError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
         .into_response()
     }
@@ -317,6 +319,8 @@ where
         KeepalivePool<(http2::SendRequest<B>, ServerHandlerSender)>,
         RandomState,
     >,
+    // Whether the server supports a queue pool for handlers.
+    has_pool_queue: bool,
     // Connection manager to get handlers from.
     conn_manager: M,
     // Tuple containing where to redirect requests from the main domain to.
@@ -359,10 +363,27 @@ trait ArcProxyData<B> {
         key: BorrowedKeepaliveAlias,
     ) -> Option<(http1::SendRequest<B>, ServerHandlerSender)>;
 
+    fn get_http11_sender_async(
+        &self,
+        key: BorrowedKeepaliveAlias<'_>,
+    ) -> Option<GetHttp11Sender<B>>;
+
     fn get_http2_sender(
         &self,
         key: BorrowedKeepaliveAlias,
     ) -> Option<(http2::SendRequest<B>, ServerHandlerSender)>;
+
+    fn get_http2_sender_async(&self, key: BorrowedKeepaliveAlias<'_>) -> Option<GetHttp2Sender<B>>;
+}
+
+struct GetHttp11Sender<B> {
+    pool: Receiver<(http1::SendRequest<B>, ServerHandlerSender)>,
+    gc: Arc<Mutex<Option<DroppableHandle<()>>>>,
+}
+
+struct GetHttp2Sender<B> {
+    pool: Receiver<(http2::SendRequest<B>, ServerHandlerSender)>,
+    gc: Arc<Mutex<Option<DroppableHandle<()>>>>,
 }
 
 impl<B, M, H, T> ArcProxyData<B> for Arc<ProxyData<B, M, H, T>>
@@ -399,6 +420,19 @@ where
         None
     }
 
+    fn get_http11_sender_async(
+        &self,
+        key: BorrowedKeepaliveAlias<'_>,
+    ) -> Option<GetHttp11Sender<B>> {
+        let (pool, gc) = {
+            let map_ref = self
+                .keepalive_http11_pool_map
+                .get(&key as &dyn KeepaliveAliasKey)?;
+            (map_ref.1.clone(), map_ref.2.clone())
+        };
+        Some(GetHttp11Sender { pool, gc })
+    }
+
     fn get_http2_sender(
         &self,
         key: BorrowedKeepaliveAlias,
@@ -422,6 +456,16 @@ where
                 .remove_if(&owned_key as &dyn KeepaliveAliasKey, |_, v| v.1.is_empty());
         })));
         None
+    }
+
+    fn get_http2_sender_async(&self, key: BorrowedKeepaliveAlias<'_>) -> Option<GetHttp2Sender<B>> {
+        let (pool, gc) = {
+            let map_ref = self
+                .keepalive_http2_pool_map
+                .get(&key as &dyn KeepaliveAliasKey)?;
+            (map_ref.1.clone(), map_ref.2.clone())
+        };
+        Some(GetHttp2Sender { pool, gc })
     }
 }
 
@@ -595,10 +639,14 @@ where
     loop {
         match proxy_http_version {
             Version::HTTP_2 => {
-                let (mut sender, tx) = match proxy_data.get_http2_sender(key.key()) {
-                    Some(sender) => sender,
-                    None => {
-                        let io = match proxy_data.proxy_type {
+                // Get HTTP/2 sender and remote log channel
+                let (mut sender, tx) = if proxy_data.has_pool_queue
+                    && let Some(pool_future) = proxy_data.get_http2_sender_async(key.key())
+                {
+                    // Race between new channel and HTTP pool
+                    let mut recv = pool_future.pool.recv();
+                    let mut channel_future = pin!(async {
+                        match proxy_data.proxy_type {
                             ProxyType::Tunneling => {
                                 handler
                                     .tunneling_channel(tcp_address.ip(), tcp_address.port())
@@ -613,20 +661,103 @@ where
                                     )
                                     .await
                             }
-                        };
-                        let (sender, conn) = hyper::client::conn::http2::handshake(
-                            TokioExecutor::new(),
-                            TokioIo::new(io?),
-                        )
-                        .await?;
-                        tokio::spawn(Box::pin(async move {
-                            if let Err(error) = conn.await {
-                                #[cfg(not(coverage_nightly))]
-                                tracing::warn!(%error, "HTTP/2 connection failed.");
+                        }
+                    });
+                    loop {
+                        tokio::select! {
+                            result = recv => {
+                                match result {
+                                    // Return pool item
+                                    Ok(tuple) if tuple.0.is_ready() => break tuple,
+                                    // Connection is closed; discard pool item
+                                    Ok(_) => {
+                                        recv = pool_future.pool.recv();
+                                        continue;
+                                    },
+                                    Err(_) => return Err(HttpError::PoolClosed),
+                                }
                             }
-                        }));
-                        (sender, handler.log_channel())
+                            result = &mut channel_future => {
+                                match result {
+                                    Ok(io) => {
+                                        let (sender, conn) = hyper::client::conn::http2::handshake(
+                                            TokioExecutor::new(),
+                                            TokioIo::new(io),
+                                        )
+                                        .await?;
+                                        tokio::spawn(Box::pin(async move {
+                                            if let Err(error) = conn.await {
+                                                #[cfg(not(coverage_nightly))]
+                                                tracing::warn!(%error, "HTTP/2 connection failed.");
+                                            }
+                                        }));
+                                        break (sender, handler.log_channel());
+                                    }
+                                    Err(error) => {
+                                        let proxy_data = Arc::clone(&proxy_data);
+                                        *pool_future.gc.lock().expect("not poisoned") = Some(DroppableHandle(tokio::spawn(async move {
+                                            tokio::time::sleep(Duration::from_secs(15)).await;
+                                            proxy_data.keepalive_http2_pool_map
+                                                .remove_if(&key as &dyn KeepaliveAliasKey, |_, v| v.1.is_empty());
+                                        })));
+                                        return Err(error.into());
+                                    }
+                                }
+                            }
+                        }
                     }
+                } else {
+                    // No pool timeout - get recycled sender or create new one
+                    match proxy_data.get_http2_sender(key.key()) {
+                        Some(sender) => sender,
+                        None => {
+                            let io = match proxy_data.proxy_type {
+                                ProxyType::Tunneling => {
+                                    handler
+                                        .tunneling_channel(tcp_address.ip(), tcp_address.port())
+                                        .await
+                                }
+                                ProxyType::Aliasing => {
+                                    handler
+                                        .aliasing_channel(
+                                            tcp_address.ip(),
+                                            tcp_address.port(),
+                                            fingerprint.as_ref(),
+                                        )
+                                        .await
+                                }
+                            };
+                            let (sender, conn) = hyper::client::conn::http2::handshake(
+                                TokioExecutor::new(),
+                                TokioIo::new(io?),
+                            )
+                            .await?;
+                            tokio::spawn(Box::pin(async move {
+                                if let Err(error) = conn.await {
+                                    #[cfg(not(coverage_nightly))]
+                                    tracing::warn!(%error, "HTTP/2 connection failed.");
+                                }
+                            }));
+                            (sender, handler.log_channel())
+                        }
+                    }
+                };
+
+                // Create entry for pool
+                let key_clone = key.clone();
+                let pool = {
+                    let pool_ref = proxy_data
+                        .keepalive_http2_pool_map
+                        .entry(key_clone)
+                        .and_modify(|v| {
+                            v.2.lock().expect("not poisoned").take();
+                        })
+                        .or_insert_with(|| {
+                            let (sender, receiver) = async_channel::bounded(proxy_data.pool_size);
+                            (sender, receiver, Arc::default())
+                        })
+                        .downgrade();
+                    pool_ref.0.clone()
                 };
 
                 // Create an HTTP/2 handshake over the selected channel
@@ -700,22 +831,9 @@ where
                             disable_http_logs,
                         );
                         // Send sender to pool
-                        let pool = {
-                            let pool_ref = proxy_data
-                                .keepalive_http2_pool_map
-                                .entry(key)
-                                .and_modify(|v| {
-                                    v.2.lock().expect("not poisoned").take();
-                                })
-                                .or_insert_with(|| {
-                                    let (sender, receiver) =
-                                        async_channel::bounded(proxy_data.pool_size);
-                                    (sender, receiver, Arc::default())
-                                })
-                                .downgrade();
-                            pool_ref.0.clone()
-                        };
-                        let _ = pool.try_send((sender, tx));
+                        tokio::spawn(async move {
+                            let _ = pool.send((sender, tx)).await;
+                        });
                     })),
                 }));
             }
@@ -750,38 +868,34 @@ where
 
                 // Check for an Upgrade header
                 if let Some(request_upgrade) = request.headers().get(UPGRADE) {
-                    // If there is an Upgrade header, make sure that it's a valid Websocket upgrade.
-                    let (mut sender, tx) = match proxy_data.get_http11_sender(key.key()) {
-                        Some(sender) => sender,
-                        None => {
-                            let io = match proxy_data.proxy_type {
-                                ProxyType::Tunneling => {
-                                    handler
-                                        .tunneling_channel(tcp_address.ip(), tcp_address.port())
-                                        .await
-                                }
-                                ProxyType::Aliasing => {
-                                    handler
-                                        .aliasing_channel(
-                                            tcp_address.ip(),
-                                            tcp_address.port(),
-                                            fingerprint.as_ref(),
-                                        )
-                                        .await
-                                }
-                            };
-                            let (sender, conn) =
-                                hyper::client::conn::http1::handshake(TokioIo::new(io?)).await?;
-                            tokio::spawn(Box::pin(async move {
-                                if let Err(error) = conn.with_upgrades().await {
-                                    #[cfg(not(coverage_nightly))]
-                                    tracing::warn!(%error, "HTTP/1.1 connection failed.");
-                                }
-                            }));
-                            (sender, handler.log_channel())
+                    // Get HTTP/1.1 sender and remote log channel with upgrades with a new connection
+                    let io = match proxy_data.proxy_type {
+                        ProxyType::Tunneling => {
+                            handler
+                                .tunneling_channel(tcp_address.ip(), tcp_address.port())
+                                .await
+                        }
+                        ProxyType::Aliasing => {
+                            handler
+                                .aliasing_channel(
+                                    tcp_address.ip(),
+                                    tcp_address.port(),
+                                    fingerprint.as_ref(),
+                                )
+                                .await
                         }
                     };
+                    let (mut sender, conn) =
+                        hyper::client::conn::http1::handshake(TokioIo::new(io?)).await?;
+                    tokio::spawn(Box::pin(async move {
+                        if let Err(error) = conn.with_upgrades().await {
+                            #[cfg(not(coverage_nightly))]
+                            tracing::warn!(%error, "HTTP/1.1 connection failed.");
+                        }
+                    }));
+                    let tx = handler.log_channel();
 
+                    // If there is an Upgrade header, make sure that it's a valid Websocket upgrade
                     let request_type = request_upgrade.to_str()?.to_string();
                     // Retrieve the OnUpgrade from the incoming request
                     let upgraded_request = hyper::upgrade::on(&mut request);
@@ -884,11 +998,14 @@ where
                         }
                     }
                 } else {
-                    // If Upgrade header is not present, simply handle the request
-                    let (mut sender, tx) = match proxy_data.get_http11_sender(key.key()) {
-                        Some(sender) => sender,
-                        None => {
-                            let io = match proxy_data.proxy_type {
+                    // If Upgrade header is not present, get HTTP/1.1 sender and remote log channel
+                    let (mut sender, tx) = if proxy_data.has_pool_queue
+                        && let Some(pool_future) = proxy_data.get_http11_sender_async(key.key())
+                    {
+                        // Race between new channel and HTTP pool
+                        let mut recv = pool_future.pool.recv();
+                        let mut channel_future = pin!(async {
+                            match proxy_data.proxy_type {
                                 ProxyType::Tunneling => {
                                     handler
                                         .tunneling_channel(tcp_address.ip(), tcp_address.port())
@@ -903,17 +1020,101 @@ where
                                         )
                                         .await
                                 }
-                            };
-                            let (sender, conn) =
-                                hyper::client::conn::http1::handshake(TokioIo::new(io?)).await?;
-                            tokio::spawn(Box::pin(async move {
-                                if let Err(error) = conn.with_upgrades().await {
-                                    #[cfg(not(coverage_nightly))]
-                                    tracing::warn!(%error, "HTTP/1.1 connection failed.");
+                            }
+                        });
+                        loop {
+                            tokio::select! {
+                                result = recv => {
+                                    match result {
+                                        // Return pool item
+                                        Ok(tuple) if tuple.0.is_ready() => break tuple,
+                                        // Connection is closed; discard pool item
+                                        Ok(_) => {
+                                            recv = pool_future.pool.recv();
+                                            continue;
+                                        },
+                                        Err(_) => return Err(HttpError::PoolClosed),
+                                    }
                                 }
-                            }));
-                            (sender, handler.log_channel())
+                                result = &mut channel_future => {
+                                    match result {
+                                        Ok(io) => {
+                                            let (sender, conn) = hyper::client::conn::http1::handshake(
+                                                TokioIo::new(io),
+                                            )
+                                            .await?;
+                                            tokio::spawn(Box::pin(async move {
+                                                if let Err(error) = conn.await {
+                                                    #[cfg(not(coverage_nightly))]
+                                                    tracing::warn!(%error, "HTTP/1.1 connection failed.");
+                                                }
+                                            }));
+                                            break (sender, handler.log_channel());
+                                        }
+                                        Err(error) => {
+                                            let proxy_data = Arc::clone(&proxy_data);
+                                            *pool_future.gc.lock().expect("not poisoned") = Some(DroppableHandle(tokio::spawn(async move {
+                                                tokio::time::sleep(Duration::from_secs(15)).await;
+                                                proxy_data.keepalive_http11_pool_map
+                                                    .remove_if(&key as &dyn KeepaliveAliasKey, |_, v| v.1.is_empty());
+                                            })));
+                                            return Err(error.into());
+                                        }
+                                    }
+                                }
+                            }
                         }
+                    } else {
+                        // No pool timeout - get recycled sender or create new one
+                        match proxy_data.get_http11_sender(key.key()) {
+                            Some(sender) => sender,
+                            None => {
+                                let io = match proxy_data.proxy_type {
+                                    ProxyType::Tunneling => {
+                                        handler
+                                            .tunneling_channel(tcp_address.ip(), tcp_address.port())
+                                            .await
+                                    }
+                                    ProxyType::Aliasing => {
+                                        handler
+                                            .aliasing_channel(
+                                                tcp_address.ip(),
+                                                tcp_address.port(),
+                                                fingerprint.as_ref(),
+                                            )
+                                            .await
+                                    }
+                                };
+                                let (sender, conn) =
+                                    hyper::client::conn::http1::handshake(TokioIo::new(io?))
+                                        .await?;
+                                tokio::spawn(Box::pin(async move {
+                                    if let Err(error) = conn.await {
+                                        #[cfg(not(coverage_nightly))]
+                                        tracing::warn!(%error, "HTTP/1.1 connection failed.");
+                                    }
+                                }));
+                                (sender, handler.log_channel())
+                            }
+                        }
+                    };
+
+                    // Create entry for pool
+                    let key_clone = key.clone();
+                    let pool = {
+                        let pool_ref = proxy_data
+                            .keepalive_http11_pool_map
+                            .entry(key_clone)
+                            .and_modify(|v| {
+                                v.2.lock().expect("not poisoned").take();
+                            })
+                            .or_insert_with(|| {
+                                let (sender, receiver) =
+                                    async_channel::bounded(proxy_data.pool_size);
+                                (sender, receiver, Arc::default())
+                            })
+                            .downgrade();
+                        pool_ref.0.clone()
                     };
 
                     let response = match proxy_data.http_request_timeout {
@@ -972,23 +1173,10 @@ where
                                 Some(tx.clone()),
                                 disable_http_logs,
                             );
-                            // Send sender to pool
-                            let pool = {
-                                let pool_ref = proxy_data
-                                    .keepalive_http11_pool_map
-                                    .entry(key)
-                                    .and_modify(|v| {
-                                        v.2.lock().expect("not poisoned").take();
-                                    })
-                                    .or_insert_with(|| {
-                                        let (sender, receiver) =
-                                            async_channel::bounded(proxy_data.pool_size);
-                                        (sender, receiver, Arc::default())
-                                    })
-                                    .downgrade();
-                                pool_ref.0.clone()
-                            };
-                            let _ = pool.try_send((sender, tx));
+                            // Return sender to pool
+                            tokio::spawn(async move {
+                                let _ = pool.send((sender, tx)).await;
+                            });
                         })),
                     }));
                 }
@@ -1058,6 +1246,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1103,6 +1292,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1148,6 +1338,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1213,6 +1404,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1281,6 +1473,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1350,6 +1543,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1418,6 +1612,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1512,6 +1707,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1602,6 +1798,7 @@ mod proxy_handler_tests {
                 None,
                 Arc::new(
                     ProxyData::builder()
+                        .has_pool_queue(false)
                         .conn_manager(Arc::clone(&conn_manager))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),
@@ -1714,6 +1911,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1814,6 +2012,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1915,6 +2114,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -2015,6 +2215,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -2114,6 +2315,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -2214,6 +2416,7 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
+                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "root.domain".into(),
@@ -2309,6 +2512,7 @@ mod proxy_handler_tests {
                 None,
                 Arc::new(
                     ProxyData::builder()
+                        .has_pool_queue(false)
                         .conn_manager(Arc::clone(&conn_manager))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),
@@ -2427,6 +2631,7 @@ mod proxy_handler_tests {
                 None,
                 Arc::new(
                     ProxyData::builder()
+                        .has_pool_queue(false)
                         .conn_manager(Arc::clone(&conn_manager))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),
@@ -2536,6 +2741,7 @@ mod proxy_handler_tests {
                 None,
                 Arc::new(
                     ProxyData::builder()
+                        .has_pool_queue(false)
                         .conn_manager(Arc::clone(&conn_manager))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),
@@ -2662,6 +2868,7 @@ mod proxy_handler_tests {
                 None,
                 Arc::new(
                     ProxyData::builder()
+                        .has_pool_queue(false)
                         .conn_manager(Arc::clone(&conn_manager))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),
@@ -2738,6 +2945,7 @@ mod proxy_handler_tests {
                 None,
                 Arc::new(
                     ProxyData::builder()
+                        .has_pool_queue(false)
                         .conn_manager(Arc::clone(&conn_manager))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),

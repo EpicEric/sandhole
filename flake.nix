@@ -112,13 +112,10 @@
 
         sandhole-cli = pkgs.stdenv.mkDerivation {
           name = "sandhole-cli";
-          nativeBuildInputs = [
-            pkgs.which
-            pkgs.unixtools.script
-          ];
+          nativeBuildInputs = [ pkgs.to-html ];
           buildCommand = ''
             mkdir $out
-            ${pkgs.to-html}/bin/to-html --no-prompt "${sandhole}/bin/sandhole --help" > $out/cli.html
+            to-html --no-prompt "${sandhole}/bin/sandhole --help" > $out/cli.html
           '';
         };
 
@@ -127,17 +124,14 @@
           src = lib.fileset.toSource {
             root = ./.;
             fileset = lib.fileset.unions [
-              (lib.fileset.fileFilter (file: file.hasExt "js") ./book)
               ./book/book.toml
               ./book/src
               ./book/theme
             ];
           };
-          nativeBuildInputs = [
-            pkgs.mdbook-mermaid
-          ];
+          nativeBuildInputs = [ pkgs.mdbook ];
           buildPhase = ''
-            ${pkgs.mdbook}/bin/mdbook build book --dest-dir $out
+            mdbook build book --dest-dir $out
           '';
         };
       in

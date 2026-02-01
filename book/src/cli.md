@@ -288,6 +288,22 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           [default: 32768B]
 
+      <b>--pool-size</b> &lt;SIZE&gt;
+          Maximum pool size for simultaneous connections per proxied service.
+          The maximum is 1024.
+
+          A higher value will lead to higher memory consumption, and may cause
+          disruption on services.
+
+          [default: 128]
+
+      <b>--pool-timeout</b> &lt;DURATION&gt;
+          How long to wait for a connection to be available in the pool
+          before being timed out.
+
+          By default, connections are immediately timed out when the pool is
+          exhausted.
+
       <b>--ssh-keepalive-interval</b> &lt;DURATION&gt;
           How long to wait between each keepalive message that is sent to an
           unresponsive SSH connection
@@ -310,7 +326,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           A low value may consume too many resources on large file trees.
 
-          [default: 30s]
+          [default: 15s]
 
       <b>--idle-connection-timeout</b> &lt;DURATION&gt;
           Grace period for dangling/unauthenticated connections before they are

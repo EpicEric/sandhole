@@ -392,6 +392,12 @@ pub struct ApplicationConfig {
     #[arg(long, default_value_t = 128, value_name = "SIZE")]
     pub pool_size: u16,
 
+    /// How long to wait for a connection to be available in the pool before being timed out.
+    ///
+    /// By default, connections are immediately timed out when the pool is exhausted.
+    #[arg(long, value_parser = validate_duration, value_name = "DURATION")]
+    pub pool_timeout: Option<Duration>,
+
     /// How long to wait between each keepalive message that is sent to an unresponsive SSH connection.
     #[arg(long, default_value = "15s", value_parser = validate_duration, value_name = "DURATION")]
     pub ssh_keepalive_interval: Duration,
@@ -559,6 +565,7 @@ mod application_config_tests {
                 ip_blocklist: None,
                 buffer_size: 32_768,
                 pool_size: 128,
+                pool_timeout: None,
                 ssh_keepalive_interval: Duration::from_secs(15),
                 ssh_keepalive_max: 3,
                 directory_poll_interval: Duration::from_secs(15),
@@ -619,6 +626,7 @@ mod application_config_tests {
             "--ip-blocklist=10.1.0.0/16,10.2.0.0/16",
             "--buffer-size=4KB",
             "--pool-size=1024",
+            "--pool-timeout=9s",
             "--ssh-keepalive-interval=10s",
             "--ssh-keepalive-max=2",
             "--directory-poll-interval=10s",
@@ -681,6 +689,7 @@ mod application_config_tests {
                 ]),
                 buffer_size: 4_000,
                 pool_size: 1_024,
+                pool_timeout: Some(Duration::from_secs(9)),
                 ssh_keepalive_interval: Duration::from_secs(10),
                 ssh_keepalive_max: 2,
                 directory_poll_interval: Duration::from_secs(10),

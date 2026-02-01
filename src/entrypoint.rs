@@ -624,6 +624,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             // Always use aliasing channels instead of tunneling channels.
             .proxy_type(ProxyType::Aliasing)
             .pool_size(pool_size)
+            .has_pool_queue(config.pool_timeout.is_some())
             .buffer_size(buffer_size)
             .maybe_http_request_timeout(http_request_timeout)
             .maybe_websocket_timeout(tcp_connection_timeout)
@@ -664,6 +665,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         disable_aliasing: config.disable_aliasing,
         buffer_size,
         pool_size,
+        pool_timeout: config.pool_timeout,
         rate_limit: config
             .rate_limit_per_user
             .map(|rate| rate as f64)
@@ -725,6 +727,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 // Always use tunneling channels.
                 .proxy_type(ProxyType::Tunneling)
                 .pool_size(pool_size)
+                .has_pool_queue(config.pool_timeout.is_some())
                 .buffer_size(buffer_size)
                 .maybe_http_request_timeout(http_request_timeout)
                 .maybe_websocket_timeout(tcp_connection_timeout)
@@ -804,6 +807,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 // Always use tunneling channels.
                 .proxy_type(ProxyType::Tunneling)
                 .pool_size(pool_size)
+                .has_pool_queue(config.pool_timeout.is_some())
                 .buffer_size(buffer_size)
                 .maybe_http_request_timeout(http_request_timeout)
                 .maybe_websocket_timeout(tcp_connection_timeout)

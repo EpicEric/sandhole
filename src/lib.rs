@@ -165,6 +165,8 @@ pub(crate) struct SandholeServer {
     pub(crate) unproxied_connection_timeout: Duration,
     // How long until TCP, WebSocket, and local forwarding connections are closed.
     pub(crate) tcp_connection_timeout: Option<Duration>,
+    // How long should a connection wait for a spot in the pool before being timed out.
+    pub(crate) pool_timeout: Option<Duration>,
 }
 
 impl SandholeServer {
