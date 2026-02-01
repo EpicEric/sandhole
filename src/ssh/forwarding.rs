@@ -1,4 +1,8 @@
-use std::{borrow::Borrow, net::SocketAddr, sync::Arc};
+use std::{
+    borrow::Borrow,
+    net::SocketAddr,
+    sync::{Arc, atomic::AtomicUsize},
+};
 
 use chrono::Utc;
 use color_eyre::eyre::eyre;
@@ -253,6 +257,8 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
             Arc::new(SshTunnelHandler {
                 allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                 http_data: None,
+                max_pool_size: Arc::clone(&context.user_data.max_pool_size),
+                current_pool_size: Arc::new(AtomicUsize::new(0)),
                 ip_filter: Arc::clone(&context.user_data.ip_filter),
                 handle,
                 tx: context.tx.clone(),
@@ -526,6 +532,8 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 Arc::new(SshTunnelHandler {
                     allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                     http_data: Some(Arc::clone(&context.user_data.http_data)),
+                    max_pool_size: Arc::clone(&context.user_data.max_pool_size),
+                    current_pool_size: Arc::new(AtomicUsize::new(0)),
                     ip_filter: Arc::clone(&context.user_data.ip_filter),
                     handle,
                     tx: context.tx.clone(),
@@ -596,6 +604,8 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                         Arc::new(SshTunnelHandler {
                             allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                             http_data: Some(Arc::clone(&context.user_data.http_data)),
+                            max_pool_size: Arc::clone(&context.user_data.max_pool_size),
+                            current_pool_size: Arc::new(AtomicUsize::new(0)),
                             ip_filter: Arc::clone(&context.user_data.ip_filter),
                             handle,
                             tx: context.tx.clone(),
@@ -705,6 +715,8 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                         Arc::new(SshTunnelHandler {
                             allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                             http_data: Some(Arc::clone(&context.user_data.http_data)),
+                            max_pool_size: Arc::clone(&context.user_data.max_pool_size),
+                            current_pool_size: Arc::new(AtomicUsize::new(0)),
                             ip_filter: Arc::clone(&context.user_data.ip_filter),
                             handle,
                             tx: context.tx.clone(),
@@ -1106,6 +1118,8 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             Arc::new(SshTunnelHandler {
                 allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                 http_data: None,
+                max_pool_size: Arc::clone(&context.user_data.max_pool_size),
+                current_pool_size: Arc::new(AtomicUsize::new(0)),
                 ip_filter: Arc::clone(&context.user_data.ip_filter),
                 handle,
                 tx: context.tx.clone(),
@@ -1555,6 +1569,8 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                 Arc::new(SshTunnelHandler {
                     allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                     http_data: None,
+                    max_pool_size: Arc::clone(&context.user_data.max_pool_size),
+                    current_pool_size: Arc::new(AtomicUsize::new(0)),
                     ip_filter: Arc::clone(&context.user_data.ip_filter),
                     handle,
                     tx: context.tx.clone(),

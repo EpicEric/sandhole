@@ -3,7 +3,7 @@ use std::{
     fmt::Display,
     sync::{
         Arc, Mutex, RwLock,
-        atomic::{AtomicIsize, Ordering},
+        atomic::{AtomicIsize, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -79,6 +79,8 @@ pub(crate) struct UserData {
     pub(crate) allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
     // Extra data available for HTTP tunneling/aliasing connections.
     pub(crate) http_data: Arc<RwLock<ConnectionHttpData>>,
+    // Maximum amount of simultaneous connections for each handler.
+    pub(crate) max_pool_size: Arc<AtomicUsize>,
     // Optional IP filtering for this connection's tunneling and aliasing channels.
     pub(crate) ip_filter: Arc<RwLock<Option<IpFilter>>>,
     // What kind of restriction to impose on tunnels and aliases for this session.
@@ -100,7 +102,7 @@ pub(crate) struct UserData {
 }
 
 impl UserData {
-    pub(crate) fn new(quota_key: TokenHolder, limiter: Limiter) -> Self {
+    pub(crate) fn new(quota_key: TokenHolder, limiter: Limiter, max_pool_size: usize) -> Self {
         Self {
             allow_fingerprint: Arc::new(RwLock::new(Box::new(|_| true))),
             http_data: Arc::new(RwLock::new(ConnectionHttpData {
@@ -109,6 +111,7 @@ impl UserData {
                 http2: false,
                 host: None,
             })),
+            max_pool_size: Arc::new(AtomicUsize::new(max_pool_size)),
             ip_filter: Arc::new(RwLock::new(None)),
             session_restriction: UserSessionRestriction::None,
             quota_key,

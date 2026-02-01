@@ -42,6 +42,14 @@ These options allow you to limit the IP ranges for incoming proxy/alias connecti
 ssh -p 2222 -R website.com:80:localhost:3000 sandhole.com.br ip-allowlist=10.0.0.0/8,20ff::/16 ip-blocklist=10.1.0.0/16
 ```
 
+## `pool`
+
+This option allows you to reduce the maximum number of connections created for each of your handlers. It must not be larger than the server's `--pool-size` option.
+
+```bash
+ssh -p 2222 -R my.tunnel:80:localhost:8080 sandhole.com.br pool=16
+```
+
 ## `sni-proxy`
 
 This option tells Sandhole that it should use your provided TLS backend. This guarantees that Sandhole cannot see unencrypted traffic. This option only works over HTTPS, so you may want to also set `force-https`.

@@ -1,10 +1,15 @@
 use std::{
     net::{IpAddr, SocketAddr},
-    sync::{Arc, RwLock},
+    pin::pin,
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use async_speed_limit::{Limiter, Resource, clock::StandardClock};
 use russh::{ChannelStream, keys::ssh_key::Fingerprint, server::Msg};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{
     connection_handler::{ConnectionHandler, ConnectionHttpData},
@@ -12,6 +17,52 @@ use crate::{
     ip::IpFilter,
     ssh::{FingerprintFn, ServerHandlerSender},
 };
+
+// Reference-counted wrapper of an SSH channel stream.
+pub(crate) struct SshChannel {
+    inner: Resource<ChannelStream<Msg>, StandardClock>,
+    current_pool_size: Arc<AtomicUsize>,
+}
+
+impl Drop for SshChannel {
+    fn drop(&mut self) {
+        self.current_pool_size.fetch_sub(1, Ordering::Release);
+    }
+}
+
+impl AsyncRead for SshChannel {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        pin!(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for SshChannel {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        pin!(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        pin!(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        pin!(&mut self.inner).poll_shutdown(cx)
+    }
+}
 
 // Struct for generating tunneling/aliasing channels from an underlying SSH connection,
 // via remote forwarding. It also includes a log channel to communicate messages
@@ -22,6 +73,10 @@ pub(crate) struct SshTunnelHandler {
     pub(crate) allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
     // Optional extra data available for HTTP tunneling/aliasing connections.
     pub(crate) http_data: Option<Arc<RwLock<ConnectionHttpData>>>,
+    // Maximum amount of simultaneous connections for this handler.
+    pub(crate) max_pool_size: Arc<AtomicUsize>,
+    // Current active connections for this handler.
+    pub(crate) current_pool_size: Arc<AtomicUsize>,
     // Optional IP filtering for this handler's tunneling and aliasing channels.
     pub(crate) ip_filter: Arc<RwLock<Option<IpFilter>>>,
     // Handle to the SSH connection, in order to create remote forwarding channels.
@@ -52,16 +107,12 @@ impl Drop for SshTunnelHandler {
     }
 }
 
-impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunnelHandler {
+impl ConnectionHandler<SshChannel> for SshTunnelHandler {
     fn log_channel(&self) -> ServerHandlerSender {
         self.tx.clone()
     }
 
-    async fn tunneling_channel(
-        &self,
-        ip: IpAddr,
-        port: u16,
-    ) -> Result<Resource<ChannelStream<Msg>, StandardClock>, ServerError> {
+    async fn tunneling_channel(&self, ip: IpAddr, port: u16) -> Result<SshChannel, ServerError> {
         // Check if this IP is not blocked
         let tunneling_allowed = self
             .ip_filter
@@ -70,6 +121,11 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
             .as_ref()
             .is_none_or(|filter| filter.is_allowed(ip));
         if tunneling_allowed {
+            let max_pool_size = self.max_pool_size.load(Ordering::Acquire);
+            if self.current_pool_size.fetch_add(1, Ordering::AcqRel) >= max_pool_size {
+                self.current_pool_size.fetch_sub(1, Ordering::Release);
+                return Err(ServerError::PoolLimitReached);
+            }
             let channel = self
                 .handle
                 .channel_open_forwarded_tcpip(
@@ -80,7 +136,10 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
                 )
                 .await?
                 .into_stream();
-            Ok(self.limiter.clone().limit(channel))
+            Ok(SshChannel {
+                inner: self.limiter.clone().limit(channel),
+                current_pool_size: Arc::clone(&self.current_pool_size),
+            })
         } else {
             Err(ServerError::TunnelingNotAllowed)
         }
@@ -102,8 +161,13 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
         ip: IpAddr,
         port: u16,
         fingerprint: Option<&'_ Fingerprint>,
-    ) -> Result<Resource<ChannelStream<Msg>, StandardClock>, ServerError> {
+    ) -> Result<SshChannel, ServerError> {
         if self.can_alias(ip, port, fingerprint) {
+            let max_pool_size = self.max_pool_size.load(Ordering::Acquire);
+            if self.current_pool_size.fetch_add(1, Ordering::AcqRel) >= max_pool_size {
+                self.current_pool_size.fetch_sub(1, Ordering::Release);
+                return Err(ServerError::PoolLimitReached);
+            }
             let channel = self
                 .handle
                 .channel_open_forwarded_tcpip(
@@ -114,7 +178,10 @@ impl ConnectionHandler<Resource<ChannelStream<Msg>, StandardClock>> for SshTunne
                 )
                 .await?
                 .into_stream();
-            Ok(self.limiter.clone().limit(channel))
+            Ok(SshChannel {
+                inner: self.limiter.clone().limit(channel),
+                current_pool_size: Arc::clone(&self.current_pool_size),
+            })
         } else {
             Err(ServerError::AliasingNotAllowed)
         }

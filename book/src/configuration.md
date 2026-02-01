@@ -14,23 +14,23 @@ Similarly, there is a `./deploy/admin_keys/` directory (set by `--admin-keys-dir
 
 Users with unrecognized SSH keys are still allowed to connect, in order to perform [local forwarding](./local_forwarding.mdrandom-subdomain-seed) to user-provided services. As such, these are the possible types of authentication:
 
-| Authentication type | Connection method(s)    |
-| ------------------- | ----------------------- |
-| None                | Public key              |
-| User                | Password¹ or public key |
-| Admin               | Public key              |
+| Authentication type | Connection method(s)               |
+| ------------------- | ---------------------------------- |
+| None                | Public key                         |
+| User                | Password<sup>1</sup> or public key |
+| Admin               | Public key                         |
 
-¹ Optional password authentication with a [login API](#alternative-authentication-with-password).
+<sup>1</sup> Optional password authentication with a [login API](#alternative-authentication-with-password).
 
 And these are each of their capabilities:
 
 | Authentication type | Local forwarding (proxy) | Remote forwading (reverse proxy) | Admin interface access |
 | ------------------- | ------------------------ | -------------------------------- | ---------------------- |
 | None                | ✅                       | ❌                               | ❌                     |
-| User                | ✅                       | ✅²                              | ❌                     |
+| User                | ✅                       | ✅<sup>2</sup>                   | ❌                     |
 | Admin               | ✅                       | ✅                               | ✅                     |
 
-² Remote forwarding by users is subject to restrictions, such as [service quotas](#service-quotas) and [rate limiting](#rate-limiting).
+<sup>2</sup> Remote forwarding by users is subject to restrictions, such as [service quotas](#service-quotas) and [rate limiting](#rate-limiting).
 
 ## Default ports
 

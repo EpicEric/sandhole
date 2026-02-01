@@ -1,5 +1,5 @@
 # Compile application with the official Rust image
-FROM --platform=$BUILDPLATFORM rust:1.92.0-alpine3.22 AS builder
+FROM --platform=$BUILDPLATFORM rust:1.93.0-alpine3.23 AS builder
 ENV PKGCONFIG_SYSROOTDIR=/
 # Add build dependencies and targets
 RUN apk add --no-cache musl-dev libressl-dev perl build-base zig

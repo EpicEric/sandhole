@@ -40,6 +40,7 @@ async fn ssh_invalid_exec_commands() {
         "--idle-connection-timeout=2s",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
+        "--pool-size=64",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -111,6 +112,15 @@ async fn ssh_invalid_exec_commands() {
         // `host` twice
         vec!["host=hello.world host=goodbye.world"],
         vec!["host=hello.world", "host=goodbye.world"],
+        // Invalid `pool`
+        vec!["pool=hello"],
+        // No `pool`
+        vec!["pool="],
+        // `pool` greater than the default
+        vec!["pool=65"],
+        // `pool` twice
+        vec!["pool=10 pool=10"],
+        vec!["pool=10", "pool=10"],
         // Unknown command
         vec!["unknown"],
     ] {

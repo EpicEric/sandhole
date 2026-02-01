@@ -25,6 +25,7 @@ pub(crate) enum ExecCommandFlag {
     IpAllowlist,
     IpBlocklist,
     Host,
+    Pool,
 }
 
 pub(crate) struct SshCommandContext<'a> {
@@ -376,6 +377,35 @@ impl SshCommand for HostCommand {
                 let host = mem::take(&mut self.0);
                 DnsName::try_from_str(&host).map_err(|_| eyre!("invalid host"))?;
                 user_data.http_data.write().expect("not poisoned").host = Some(host);
+                context.commands.insert(self.flag());
+                Ok(())
+            }
+            _ => Err(eyre!("not authenticated as user")),
+        }
+    }
+}
+
+pub(crate) struct PoolCommand(pub(crate) usize);
+
+impl SshCommand for PoolCommand {
+    fn flag(&self) -> ExecCommandFlag {
+        ExecCommandFlag::Pool
+    }
+
+    async fn execute(&mut self, context: &mut SshCommandContext<'_>) -> color_eyre::Result<()> {
+        if context.commands.contains(self.flag()) {
+            return Err(eyre!("duplicated command"));
+        }
+        match context.auth_data {
+            AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
+                let prev_pool_size = user_data
+                    .max_pool_size
+                    .fetch_min(self.0, std::sync::atomic::Ordering::AcqRel);
+                if prev_pool_size < self.0 {
+                    return Err(eyre!(
+                        "pool size must be less than or equal to {prev_pool_size}"
+                    ));
+                };
                 context.commands.insert(self.flag());
                 Ok(())
             }

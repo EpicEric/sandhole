@@ -132,6 +132,7 @@ struct HttpLog {
     elapsed_time: Duration,
 }
 
+// Pretty-print an HTTP log with ANSI
 fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: bool) {
     let HttpLog {
         ip,
@@ -228,6 +229,8 @@ pub(crate) enum HttpError {
     HyperError(#[from] hyper::Error),
     #[error("Handler not found")]
     HandlerNotFound,
+    #[error("No handler available")]
+    NoHandlerAvailable,
     #[error("Channel request denied")]
     ChannelRequestDenied,
     #[error("Header to string error: {0}")]
@@ -251,9 +254,13 @@ pub(crate) enum HttpError {
 }
 
 impl From<ServerError> for HttpError {
-    fn from(_: ServerError) -> Self {
-        // If getting the handler failed, return 404 (they may have an allowlist for fingerprints/IP networks)
-        HttpError::ChannelRequestDenied
+    fn from(value: ServerError) -> Self {
+        match value {
+            // If pool limit was reached, return 429 (no handler is available)
+            ServerError::PoolLimitReached => HttpError::NoHandlerAvailable,
+            // Otherwise, return 404 (they may have an allowlist for fingerprints/IP networks)
+            _ => HttpError::ChannelRequestDenied,
+        }
     }
 }
 
@@ -270,7 +277,8 @@ impl IntoResponse for HttpError {
             | HttpError::InvalidUri(_)
             | HttpError::InvalidUriParts(_)
             | HttpError::MissingUpgradeHeader => StatusCode::BAD_REQUEST,
-            HttpError::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
+            HttpError::NoHandlerAvailable => StatusCode::TOO_MANY_REQUESTS,
+            HttpError::RequestTimeout => StatusCode::GATEWAY_TIMEOUT,
             HttpError::HandlerNotFound | HttpError::ChannelRequestDenied => StatusCode::NOT_FOUND,
             HttpError::HyperError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -295,18 +303,21 @@ where
     <B as Body>::Data: Send + Sync + 'static,
     <B as Body>::Error: Error + Send + Sync + 'static,
 {
+    // Keep-alive pool for opened HTTP/1.1 connections.
     #[builder(default = DashMap::default())]
     keepalive_http11_pool_map: DashMap<
         KeepaliveAlias,
         KeepalivePool<(http1::SendRequest<B>, ServerHandlerSender)>,
         RandomState,
     >,
+    // Keep-alive pool for opened HTTP/2 connections.
     #[builder(default = DashMap::default())]
     keepalive_http2_pool_map: DashMap<
         KeepaliveAlias,
         KeepalivePool<(http2::SendRequest<B>, ServerHandlerSender)>,
         RandomState,
     >,
+    // Connection manager to get handlers from.
     conn_manager: M,
     // Tuple containing where to redirect requests from the main domain to.
     domain_redirect: Option<Arc<DomainRedirect>>,
@@ -314,6 +325,8 @@ where
     protocol: Protocol,
     // Configuration on which type of channel to retrieve from the handler.
     proxy_type: ProxyType,
+    // Pool size for connections reuse per handler.
+    pool_size: usize,
     // Buffer size for bidirectional copying.
     buffer_size: usize,
     // Optional duration until an outgoing request is canceled.
@@ -642,7 +655,7 @@ where
                             let elapsed_time = timer.elapsed();
                             http_log(
                                 http_log_builder
-                                    .status(StatusCode::REQUEST_TIMEOUT.as_u16())
+                                    .status(StatusCode::GATEWAY_TIMEOUT.as_u16())
                                     .elapsed_time(elapsed_time)
                                     .build(),
                                 Some(tx),
@@ -695,7 +708,8 @@ where
                                     v.2.lock().expect("not poisoned").take();
                                 })
                                 .or_insert_with(|| {
-                                    let (sender, receiver) = async_channel::bounded(128);
+                                    let (sender, receiver) =
+                                        async_channel::bounded(proxy_data.pool_size);
                                     (sender, receiver, Arc::default())
                                 })
                                 .downgrade();
@@ -782,7 +796,7 @@ where
                                 let elapsed_time = timer.elapsed();
                                 http_log(
                                     http_log_builder
-                                        .status(StatusCode::REQUEST_TIMEOUT.as_u16())
+                                        .status(StatusCode::GATEWAY_TIMEOUT.as_u16())
                                         .elapsed_time(elapsed_time)
                                         .build(),
                                     Some(tx),
@@ -913,7 +927,7 @@ where
                                 let elapsed_time = timer.elapsed();
                                 http_log(
                                     http_log_builder
-                                        .status(StatusCode::REQUEST_TIMEOUT.as_u16())
+                                        .status(StatusCode::GATEWAY_TIMEOUT.as_u16())
                                         .elapsed_time(elapsed_time)
                                         .build(),
                                     Some(tx),
@@ -967,7 +981,8 @@ where
                                         v.2.lock().expect("not poisoned").take();
                                     })
                                     .or_insert_with(|| {
-                                        let (sender, receiver) = async_channel::bounded(128);
+                                        let (sender, receiver) =
+                                            async_channel::bounded(proxy_data.pool_size);
                                         (sender, receiver, Arc::default())
                                     })
                                     .downgrade();
@@ -1050,6 +1065,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Http { port: 80 })
                     .proxy_type(ProxyType::Tunneling)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1094,6 +1110,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Http { port: 80 })
                     .proxy_type(ProxyType::Tunneling)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1138,6 +1155,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Http { port: 80 })
                     .proxy_type(ProxyType::Tunneling)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1202,6 +1220,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::TlsRedirect { from: 80, to: 443 })
                     .proxy_type(ProxyType::Tunneling)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1269,6 +1288,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::TlsRedirect { from: 80, to: 8443 })
                     .proxy_type(ProxyType::Tunneling)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1337,6 +1357,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Http { port: 80 })
                     .proxy_type(ProxyType::Tunneling)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1404,6 +1425,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Http { port: 80 })
                     .proxy_type(ProxyType::Tunneling)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1497,6 +1519,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Https { port: 443 })
                     .proxy_type(ProxyType::Tunneling)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .http_request_timeout(Duration::from_millis(500))
                     .disable_http_logs(false)
@@ -1509,7 +1532,7 @@ mod proxy_handler_tests {
             "should log after timing out request"
         );
         let response = response.expect("should return response after proxy");
-        assert_eq!(response.status(), hyper::StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(response.status(), hyper::StatusCode::GATEWAY_TIMEOUT);
         jh.abort();
     }
 
@@ -1586,6 +1609,7 @@ mod proxy_handler_tests {
                         }))
                         .protocol(Protocol::Https { port: 443 })
                         .proxy_type(ProxyType::Tunneling)
+                        .pool_size(128)
                         .buffer_size(8_000)
                         .http_request_timeout(Duration::from_millis(500))
                         .disable_http_logs(false)
@@ -1606,7 +1630,7 @@ mod proxy_handler_tests {
         match error {
             tokio_tungstenite::tungstenite::Error::Http(response) => {
                 assert!(
-                    response.status() == StatusCode::REQUEST_TIMEOUT,
+                    response.status() == StatusCode::GATEWAY_TIMEOUT,
                     "should've timed out Websocket request"
                 )
             }
@@ -1697,6 +1721,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Https { port: 443 })
                     .proxy_type(ProxyType::Tunneling)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .http_request_timeout(Duration::from_millis(500))
                     .disable_http_logs(false)
@@ -1709,7 +1734,7 @@ mod proxy_handler_tests {
             "should log after timing out request"
         );
         let response = response.expect("should return response after proxy");
-        assert_eq!(response.status(), hyper::StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(response.status(), hyper::StatusCode::GATEWAY_TIMEOUT);
         jh.abort();
     }
 
@@ -1796,6 +1821,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Https { port: 443 })
                     .proxy_type(ProxyType::Tunneling)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1896,6 +1922,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Https { port: 443 })
                     .proxy_type(ProxyType::Tunneling)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1995,6 +2022,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Https { port: 443 })
                     .proxy_type(ProxyType::Tunneling)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -2093,6 +2121,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Http { port: 80 })
                     .proxy_type(ProxyType::Aliasing)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -2192,6 +2221,7 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Https { port: 443 })
                     .proxy_type(ProxyType::Tunneling)
+                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -2286,6 +2316,7 @@ mod proxy_handler_tests {
                         }))
                         .protocol(Protocol::Https { port: 443 })
                         .proxy_type(ProxyType::Tunneling)
+                        .pool_size(128)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .build(),
@@ -2403,6 +2434,7 @@ mod proxy_handler_tests {
                         }))
                         .protocol(Protocol::Https { port: 443 })
                         .proxy_type(ProxyType::Tunneling)
+                        .pool_size(128)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .build(),
@@ -2511,6 +2543,7 @@ mod proxy_handler_tests {
                         }))
                         .protocol(Protocol::Https { port: 443 })
                         .proxy_type(ProxyType::Tunneling)
+                        .pool_size(128)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .build(),
@@ -2636,6 +2669,7 @@ mod proxy_handler_tests {
                         }))
                         .protocol(Protocol::Https { port: 443 })
                         .proxy_type(ProxyType::Tunneling)
+                        .pool_size(128)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .build(),
@@ -2711,6 +2745,7 @@ mod proxy_handler_tests {
                         }))
                         .protocol(Protocol::Https { port: 443 })
                         .proxy_type(ProxyType::Tunneling)
+                        .pool_size(128)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .build(),

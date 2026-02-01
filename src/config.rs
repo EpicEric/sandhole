@@ -385,6 +385,13 @@ pub struct ApplicationConfig {
     )]
     pub buffer_size: u32,
 
+    /// Maximum pool size for simultaneous connections per proxied service.
+    /// The maximum is 1024.
+    ///
+    /// A higher value will lead to higher memory consumption, and may cause disruption on services.
+    #[arg(long, default_value_t = 128, value_name = "SIZE")]
+    pub pool_size: u16,
+
     /// How long to wait between each keepalive message that is sent to an unresponsive SSH connection.
     #[arg(long, default_value = "15s", value_parser = validate_duration, value_name = "DURATION")]
     pub ssh_keepalive_interval: Duration,
@@ -402,7 +409,7 @@ pub struct ApplicationConfig {
     /// A low value may consume too many resources on large file trees.
     #[arg(
         long,
-        default_value = "30s",
+        default_value = "15s",
         value_parser = validate_duration,
         value_name = "DURATION"
     )]
@@ -551,9 +558,10 @@ mod application_config_tests {
                 ip_allowlist: None,
                 ip_blocklist: None,
                 buffer_size: 32_768,
+                pool_size: 128,
                 ssh_keepalive_interval: Duration::from_secs(15),
                 ssh_keepalive_max: 3,
-                directory_poll_interval: Duration::from_secs(30),
+                directory_poll_interval: Duration::from_secs(15),
                 idle_connection_timeout: Duration::from_secs(2),
                 unproxied_connection_timeout: None,
                 authentication_request_timeout: Duration::from_secs(5),
@@ -610,6 +618,7 @@ mod application_config_tests {
             "--ip-allowlist=10.0.0.0/8",
             "--ip-blocklist=10.1.0.0/16,10.2.0.0/16",
             "--buffer-size=4KB",
+            "--pool-size=1024",
             "--ssh-keepalive-interval=10s",
             "--ssh-keepalive-max=2",
             "--directory-poll-interval=10s",
@@ -671,6 +680,7 @@ mod application_config_tests {
                     IpNet::from_str("10.2.0.0/16").unwrap()
                 ]),
                 buffer_size: 4_000,
+                pool_size: 1_024,
                 ssh_keepalive_interval: Duration::from_secs(10),
                 ssh_keepalive_max: 2,
                 directory_poll_interval: Duration::from_secs(10),

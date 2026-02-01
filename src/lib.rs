@@ -13,9 +13,9 @@ use std::{
 };
 
 use ahash::RandomState;
-use async_speed_limit::{Limiter, Resource, clock::StandardClock};
+use async_speed_limit::Limiter;
 use hyper::body::Incoming;
-use russh::{ChannelStream, keys::ssh_key::Fingerprint, server::Msg};
+use russh::keys::ssh_key::Fingerprint;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -26,7 +26,7 @@ use crate::{
     http::ProxyData,
     quota::TokenHolderUser,
     reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
-    ssh::connection_handler::SshTunnelHandler,
+    ssh::connection_handler::{SshChannel, SshTunnelHandler},
     tcp::TcpHandler,
     tcp_alias::TcpAlias,
 };
@@ -82,8 +82,7 @@ type SessionMap = (Limiter, HashMap<usize, CancellationToken, RandomState>);
 // A generic table with data for the admin interface.
 type DataTable<K, V> = Arc<Mutex<BTreeMap<K, V>>>;
 // Helper type for HTTP proxy data types.
-type HttpProxyData<C> =
-    Arc<ProxyData<Incoming, Arc<C>, SshTunnelHandler, Resource<ChannelStream<Msg>, StandardClock>>>;
+type HttpProxyData<C> = Arc<ProxyData<Incoming, Arc<C>, SshTunnelHandler, SshChannel>>;
 // HTTP proxy data used by the tunneling connections.
 type TunnelingProxyData = HttpProxyData<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>;
 // HTTP proxy data used by the local forwarding aliasing connections.
@@ -153,6 +152,8 @@ pub(crate) struct SandholeServer {
     pub(crate) disable_aliasing: bool,
     // Buffer size for bidirectional copying.
     pub(crate) buffer_size: usize,
+    // Pool size for SSH handlers.
+    pub(crate) pool_size: usize,
     // Rate limit per second for services of a single user.
     pub(crate) rate_limit: f64,
     // How long until a login API request is timed out.

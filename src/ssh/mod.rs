@@ -24,8 +24,8 @@ use crate::{
         auth::{AdminData, AuthenticatedData, ProxyAutoCancellation, UserData},
         exec::{
             AdminCommand, AllowedFingerprintsCommand, ExecCommandFlag, ForceHttpsCommand,
-            HostCommand, Http2Command, IpAllowlistCommand, IpBlocklistCommand, SniProxyCommand,
-            SshCommand, SshCommandContext, TcpAliasCommand,
+            HostCommand, Http2Command, IpAllowlistCommand, IpBlocklistCommand, PoolCommand,
+            SniProxyCommand, SshCommand, SshCommandContext, TcpAliasCommand,
         },
         forwarding::{Forwarder, LocalForwardingContext, RemoteForwardingContext},
     },
@@ -241,6 +241,7 @@ impl Handler for ServerHandler {
                                 user_data: Box::new(UserData::new(
                                     TokenHolder::User(UserIdentification::Username(user.into())),
                                     limiter,
+                                    self.server.pool_size,
                                 )),
                             };
                             #[cfg(not(coverage_nightly))]
@@ -321,6 +322,7 @@ impl Handler for ServerHandler {
                     user_data: Box::new(UserData::new(
                         TokenHolder::User(UserIdentification::PublicKey(fingerprint)),
                         limiter,
+                        self.server.pool_size,
                     )),
                 };
             }
@@ -331,6 +333,7 @@ impl Handler for ServerHandler {
                     user_data: Box::new(UserData::new(
                         TokenHolder::Admin(UserIdentification::PublicKey(fingerprint)),
                         limiter,
+                        self.server.pool_size,
                     )),
                     admin_data: Box::new(AdminData::new()),
                 };
@@ -416,7 +419,7 @@ impl Handler for ServerHandler {
                 // - `admin` command creates an admin interface if the user is an admin
                 "admin" => {
                     let mut command = AdminCommand;
-                    match command
+                    if let Err(error) = command
                         .execute(&mut SshCommandContext {
                             server: &self.server,
                             auth_data: &mut self.auth_data,
@@ -426,17 +429,14 @@ impl Handler for ServerHandler {
                         })
                         .await
                     {
-                        Ok(_) => {}
-                        Err(error) => {
-                            #[cfg(not(coverage_nightly))]
-                            tracing::debug!(peer = %self.peer, %error, "'admin' command failed.");
-                            let _ = self
-                                .tx
-                                .send(format!("'admin' command failed: {error}\r\n").into());
-                            success = false;
-                            self.cancellation_token.cancel();
-                            break;
-                        }
+                        #[cfg(not(coverage_nightly))]
+                        tracing::debug!(peer = %self.peer, %error, "'admin' command failed.");
+                        let _ = self
+                            .tx
+                            .send(format!("'admin' command failed: {error}\r\n").into());
+                        success = false;
+                        self.cancellation_token.cancel();
+                        break;
                     }
                 }
                 // - `allowed-fingerprints` sets this connection as alias-only,
@@ -449,7 +449,7 @@ impl Handler for ServerHandler {
                         .map(|key| key.parse::<Fingerprint>())
                         .collect();
                     let mut command = AllowedFingerprintsCommand(set);
-                    match command
+                    if let Err(error) = command
                         .execute(&mut SshCommandContext {
                             server: &self.server,
                             auth_data: &mut self.auth_data,
@@ -459,24 +459,20 @@ impl Handler for ServerHandler {
                         })
                         .await
                     {
-                        Ok(_) => {}
-                        Err(error) => {
-                            #[cfg(not(coverage_nightly))]
-                            tracing::debug!(peer = %self.peer, %error, "'allowed-fingerprints' command failed.");
-                            let _ = self.tx.send(
-                                format!("'allowed-fingerprints' command failed: {error}\r\n")
-                                    .into(),
-                            );
-                            success = false;
-                            self.cancellation_token.cancel();
-                            break;
-                        }
+                        #[cfg(not(coverage_nightly))]
+                        tracing::debug!(peer = %self.peer, %error, "'allowed-fingerprints' command failed.");
+                        let _ = self.tx.send(
+                            format!("'allowed-fingerprints' command failed: {error}\r\n").into(),
+                        );
+                        success = false;
+                        self.cancellation_token.cancel();
+                        break;
                     }
                 }
                 // - `tcp-alias` sets this connection as alias-only.
                 "tcp-alias" => {
                     let mut command = TcpAliasCommand;
-                    match command
+                    if let Err(error) = command
                         .execute(&mut SshCommandContext {
                             server: &self.server,
                             auth_data: &mut self.auth_data,
@@ -486,23 +482,20 @@ impl Handler for ServerHandler {
                         })
                         .await
                     {
-                        Ok(_) => {}
-                        Err(error) => {
-                            #[cfg(not(coverage_nightly))]
-                            tracing::debug!(peer = %self.peer, %error, "'tcp-alias' command failed.");
-                            let _ = self
-                                .tx
-                                .send(format!("'tcp-alias' command failed: {error}\r\n").into());
-                            success = false;
-                            self.cancellation_token.cancel();
-                            break;
-                        }
+                        #[cfg(not(coverage_nightly))]
+                        tracing::debug!(peer = %self.peer, %error, "'tcp-alias' command failed.");
+                        let _ = self
+                            .tx
+                            .send(format!("'tcp-alias' command failed: {error}\r\n").into());
+                        success = false;
+                        self.cancellation_token.cancel();
+                        break;
                     }
                 }
                 // - `force-https` causes tunneled HTTP requests to be redirected to HTTPS.
                 "force-https" => {
                     let mut command = ForceHttpsCommand;
-                    match command
+                    if let Err(error) = command
                         .execute(&mut SshCommandContext {
                             server: &self.server,
                             auth_data: &mut self.auth_data,
@@ -512,23 +505,20 @@ impl Handler for ServerHandler {
                         })
                         .await
                     {
-                        Ok(_) => {}
-                        Err(error) => {
-                            #[cfg(not(coverage_nightly))]
-                            tracing::debug!(peer = %self.peer, %error, "'force-https' command failed.");
-                            let _ = self
-                                .tx
-                                .send(format!("'force-https' command failed: {error}\r\n").into());
-                            success = false;
-                            self.cancellation_token.cancel();
-                            break;
-                        }
+                        #[cfg(not(coverage_nightly))]
+                        tracing::debug!(peer = %self.peer, %error, "'force-https' command failed.");
+                        let _ = self
+                            .tx
+                            .send(format!("'force-https' command failed: {error}\r\n").into());
+                        success = false;
+                        self.cancellation_token.cancel();
+                        break;
                     }
                 }
                 // - `http2` allows serving HTTP/2 to the HTTP endpoints.
                 "http2" => {
                     let mut command = Http2Command;
-                    match command
+                    if let Err(error) = command
                         .execute(&mut SshCommandContext {
                             server: &self.server,
                             auth_data: &mut self.auth_data,
@@ -538,23 +528,20 @@ impl Handler for ServerHandler {
                         })
                         .await
                     {
-                        Ok(_) => {}
-                        Err(error) => {
-                            #[cfg(not(coverage_nightly))]
-                            tracing::debug!(peer = %self.peer, %error, "'http2' command failed.");
-                            let _ = self
-                                .tx
-                                .send(format!("'http2' command failed: {error}\r\n").into());
-                            success = false;
-                            self.cancellation_token.cancel();
-                            break;
-                        }
+                        #[cfg(not(coverage_nightly))]
+                        tracing::debug!(peer = %self.peer, %error, "'http2' command failed.");
+                        let _ = self
+                            .tx
+                            .send(format!("'http2' command failed: {error}\r\n").into());
+                        success = false;
+                        self.cancellation_token.cancel();
+                        break;
                     }
                 }
                 // - `sni-proxy` allows the user to handle the certificates themselves for HTTPS traffic.
                 "sni-proxy" => {
                     let mut command = SniProxyCommand;
-                    match command
+                    if let Err(error) = command
                         .execute(&mut SshCommandContext {
                             server: &self.server,
                             auth_data: &mut self.auth_data,
@@ -564,17 +551,14 @@ impl Handler for ServerHandler {
                         })
                         .await
                     {
-                        Ok(_) => {}
-                        Err(error) => {
-                            #[cfg(not(coverage_nightly))]
-                            tracing::debug!(peer = %self.peer, %error, "'sni-proxy' command failed.");
-                            let _ = self
-                                .tx
-                                .send(format!("'sni-proxy' command failed: {error}\r\n").into());
-                            success = false;
-                            self.cancellation_token.cancel();
-                            break;
-                        }
+                        #[cfg(not(coverage_nightly))]
+                        tracing::debug!(peer = %self.peer, %error, "'sni-proxy' command failed.");
+                        let _ = self
+                            .tx
+                            .send(format!("'sni-proxy' command failed: {error}\r\n").into());
+                        success = false;
+                        self.cancellation_token.cancel();
+                        break;
                     }
                 }
                 // - `ip-allowlist` requires tunneling/aliasing connections to come from
@@ -587,7 +571,7 @@ impl Handler for ServerHandler {
                         .map(|network| network.parse::<IpNet>())
                         .collect();
                     let mut command = IpAllowlistCommand(list);
-                    match command
+                    if let Err(error) = command
                         .execute(&mut SshCommandContext {
                             server: &self.server,
                             auth_data: &mut self.auth_data,
@@ -597,17 +581,14 @@ impl Handler for ServerHandler {
                         })
                         .await
                     {
-                        Ok(_) => {}
-                        Err(error) => {
-                            #[cfg(not(coverage_nightly))]
-                            tracing::debug!(peer = %self.peer, %error, "'ip-allowlist' command failed.");
-                            let _ = self
-                                .tx
-                                .send(format!("'ip-allowlist' command failed: {error}\r\n").into());
-                            success = false;
-                            self.cancellation_token.cancel();
-                            break;
-                        }
+                        #[cfg(not(coverage_nightly))]
+                        tracing::debug!(peer = %self.peer, %error, "'ip-allowlist' command failed.");
+                        let _ = self
+                            .tx
+                            .send(format!("'ip-allowlist' command failed: {error}\r\n").into());
+                        success = false;
+                        self.cancellation_token.cancel();
+                        break;
                     }
                 }
                 // - `ip-blocklist` requires tunneling/aliasing connections to come from
@@ -620,7 +601,7 @@ impl Handler for ServerHandler {
                         .map(|network| network.parse::<IpNet>())
                         .collect();
                     let mut command = IpBlocklistCommand(list);
-                    match command
+                    if let Err(error) = command
                         .execute(&mut SshCommandContext {
                             server: &self.server,
                             auth_data: &mut self.auth_data,
@@ -630,24 +611,21 @@ impl Handler for ServerHandler {
                         })
                         .await
                     {
-                        Ok(_) => {}
-                        Err(error) => {
-                            #[cfg(not(coverage_nightly))]
-                            tracing::debug!(peer = %self.peer, %error, "'ip-blocklist' command failed.");
-                            let _ = self
-                                .tx
-                                .send(format!("'ip-blocklist' command failed: {error}\r\n").into());
-                            success = false;
-                            self.cancellation_token.cancel();
-                            break;
-                        }
+                        #[cfg(not(coverage_nightly))]
+                        tracing::debug!(peer = %self.peer, %error, "'ip-blocklist' command failed.");
+                        let _ = self
+                            .tx
+                            .send(format!("'ip-blocklist' command failed: {error}\r\n").into());
+                        success = false;
+                        self.cancellation_token.cancel();
+                        break;
                     }
                 }
                 // - `host` changes the Host header of HTTP requests
                 command if command.starts_with("host=") => {
                     let host = command.trim_start_matches("host=").to_string();
                     let mut command = HostCommand(host);
-                    match command
+                    if let Err(error) = command
                         .execute(&mut SshCommandContext {
                             server: &self.server,
                             auth_data: &mut self.auth_data,
@@ -657,17 +635,50 @@ impl Handler for ServerHandler {
                         })
                         .await
                     {
-                        Ok(_) => {}
+                        #[cfg(not(coverage_nightly))]
+                        tracing::debug!(peer = %self.peer, %error, "'host' command failed.");
+                        let _ = self
+                            .tx
+                            .send(format!("'host' command failed: {error}\r\n").into());
+                        success = false;
+                        self.cancellation_token.cancel();
+                        break;
+                    }
+                }
+                // - `pool` decreases the pool size of the connection's handlers
+                command if command.starts_with("pool=") => {
+                    let pool_size: usize = match command.trim_start_matches("pool=").parse() {
+                        Ok(pool_size) => pool_size,
                         Err(error) => {
                             #[cfg(not(coverage_nightly))]
-                            tracing::debug!(peer = %self.peer, %error, "'host' command failed.");
+                            tracing::debug!(peer = %self.peer, %error, "'pool' command failed.");
                             let _ = self
                                 .tx
-                                .send(format!("'host' command failed: {error}\r\n").into());
+                                .send(format!("Invalid parameter for 'pool': {error}\r\n").into());
                             success = false;
                             self.cancellation_token.cancel();
                             break;
                         }
+                    };
+                    let mut command = PoolCommand(pool_size);
+                    if let Err(error) = command
+                        .execute(&mut SshCommandContext {
+                            server: &self.server,
+                            auth_data: &mut self.auth_data,
+                            peer: &self.peer,
+                            commands: &mut self.commands,
+                            tx: &self.tx,
+                        })
+                        .await
+                    {
+                        #[cfg(not(coverage_nightly))]
+                        tracing::debug!(peer = %self.peer, %error, "'pool' command failed.");
+                        let _ = self
+                            .tx
+                            .send(format!("'pool' command failed: {error}\r\n").into());
+                        success = false;
+                        self.cancellation_token.cancel();
+                        break;
                     }
                 }
                 // - Unknown command

@@ -4,12 +4,20 @@
 
 ### Added
 
+- **BREAKING**: Add maximum pool size for proxy handlers.
+- Add `--pool-size` CLI flag.
 - Add `--no-domain` CLI flag.
+- Add `pool` option for remote forwarding connections.
 - Add keepalive mechanism for proxied HTTP connections.
 
 ### Fixed
 
 - Improve HTTP proxy performance.
+
+### Changed
+
+- Lower `--directory-poll-interval` default value from 30 seconds to 15 seconds.
+- Update Docker base image.
 
 ## 0.8.7 (2026-01-15)
 
