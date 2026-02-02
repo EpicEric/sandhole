@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use axum::{Router, extract::Request, routing::get};
 use clap::Parser;
@@ -23,10 +26,10 @@ use tower::Service;
 
 use crate::common::SandholeHandle;
 
-/// This test ensures that no more connections than the specified pool limit
-/// are able to connect at the same time via HTTP.
+/// This test ensures that queued connections get a spot
+/// when the HTTP pool gets released.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn http_pool_limit() {
+async fn http_pool_timeout() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -52,6 +55,7 @@ async fn http_pool_limit() {
         "--authentication-request-timeout=5s",
         "--http-request-timeout=10s",
         "--pool-size=2",
+        "--pool-timeout=3s",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -96,6 +100,7 @@ async fn http_pool_limit() {
 
     // 3. Start long-running requests that fill the pool
     let mut jhs = Vec::new();
+    let started = Instant::now();
     for _ in 0..2 {
         let tcp_stream = TcpStream::connect("127.0.0.1:18080")
             .await
@@ -174,7 +179,55 @@ async fn http_pool_limit() {
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     jh.abort();
 
-    timeout(Duration::from_secs(5), async move {
+    // 4. Start request that gets queued and eventually completes
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let tcp_stream = TcpStream::connect("127.0.0.1:18080")
+        .await
+        .expect("TCP connection failed");
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tcp_stream))
+        .await
+        .expect("HTTP handshake failed");
+    let request = Request::builder()
+        .method("GET")
+        .uri("/")
+        .header(HOST, "test.foobar.tld")
+        .body(http_body_util::Empty::<bytes::Bytes>::new())
+        .unwrap();
+    let jh = tokio::spawn(async move {
+        let jh = tokio::spawn(async move {
+            if let Err(error) = conn.await {
+                eprintln!("Connection failed: {error:?}");
+            }
+        });
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let Ok(response) = timeout(Duration::from_secs(10), async move {
+            sender
+                .send_request(request)
+                .await
+                .expect("Error sending HTTP request")
+        })
+        .await
+        else {
+            panic!("Timeout waiting for request to finish.");
+        };
+        assert_eq!(response.status(), StatusCode::OK);
+        let response_body = String::from_utf8(
+            response
+                .into_body()
+                .collect()
+                .await
+                .expect("Error collecting response")
+                .to_bytes()
+                .into(),
+        )
+        .expect("Invalid response body");
+        assert_eq!(response_body, "Processed");
+        assert!(started.elapsed() > Duration::from_secs(5));
+        jh.abort();
+    });
+    jhs.push(jh);
+
+    timeout(Duration::from_secs(10), async move {
         for jh in jhs {
             jh.await.unwrap();
         }
@@ -207,7 +260,7 @@ impl russh::client::Handler for SshClient {
         let router = Router::new().route(
             "/",
             get(async || {
-                tokio::time::sleep(Duration::from_secs(3)).await;
+                tokio::time::sleep(Duration::from_secs(5)).await;
                 "Processed"
             }),
         );

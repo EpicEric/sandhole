@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use clap::Parser;
 use rand::{Rng, SeedableRng};
@@ -21,10 +24,10 @@ use tokio::{
 
 use crate::common::SandholeHandle;
 
-/// This test ensures that no more alialiased connections than the specified pool limit
-/// are able to connect at the same time.
+/// This test ensures that queued alias connections get a spot
+/// when the pool gets released.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn alias_pool_limit() {
+async fn alias_pool_timeout() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -50,6 +53,7 @@ async fn alias_pool_limit() {
         "--authentication-request-timeout=5s",
         "--http-request-timeout=10s",
         "--pool-size=10",
+        "--pool-timeout=3s",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -104,6 +108,7 @@ async fn alias_pool_limit() {
 
     // 3. Start long-running requests that fill the pool
     let mut jhs = Vec::new();
+    let started = Instant::now();
     for _ in 0..2 {
         let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
             &ChaCha20Rng::from_os_rng().random(),
@@ -181,7 +186,53 @@ async fn alias_pool_limit() {
             .await
             .is_err()
     );
-    timeout(Duration::from_secs(5), async move {
+
+    // 4. Start request that gets queued and eventually completes
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::from_os_rng().random(),
+    ));
+    let ssh_client = SshAliasClient;
+    let mut client_session =
+        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+            .await
+            .expect("Failed to connect to SSH server");
+    assert!(
+        client_session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    client_session
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
+            )
+            .await
+            .expect("SSH authentication failed")
+            .success(),
+        "authentication didn't succeed"
+    );
+    assert!(started.elapsed() < Duration::from_secs(5));
+    let mut channel = client_session
+        .channel_open_direct_tcpip("some.alias", 12345, "::1", 23456)
+        .await
+        .expect("Local forwarding failed");
+    let jh = tokio::spawn(async move {
+        while let Some(msg) = channel.wait().await {
+            if let russh::ChannelMsg::Data { data } = msg {
+                assert_eq!(&data[..], &b"Ping"[..]);
+                assert!(started.elapsed() > Duration::from_secs(5));
+                break;
+            }
+        }
+        drop(client_session);
+    });
+    jhs.push(jh);
+
+    timeout(Duration::from_secs(10), async move {
         for jh in jhs {
             jh.await.unwrap();
         }
@@ -212,7 +263,7 @@ impl russh::client::Handler for SshClient {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(3)).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
             channel.data(&b"Ping"[..]).await.unwrap();
             channel.eof().await.unwrap();
             channel.close().await.unwrap();

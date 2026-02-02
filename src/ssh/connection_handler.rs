@@ -1,15 +1,17 @@
 use std::{
     net::{IpAddr, SocketAddr},
     pin::pin,
-    sync::{
-        Arc, RwLock,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::{Arc, RwLock},
+    time::Duration,
 };
 
 use async_speed_limit::{Limiter, Resource, clock::StandardClock};
 use russh::{ChannelStream, keys::ssh_key::Fingerprint, server::Msg};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::{OwnedSemaphorePermit, Semaphore},
+    time::timeout,
+};
 
 use crate::{
     connection_handler::{ConnectionHandler, ConnectionHttpData},
@@ -20,14 +22,10 @@ use crate::{
 
 // Reference-counted wrapper of an SSH channel stream.
 pub(crate) struct SshChannel {
+    // AsyncRead + AsyncWrite implementer being wrapped.
     inner: Resource<ChannelStream<Msg>, StandardClock>,
-    current_pool_size: Arc<AtomicUsize>,
-}
-
-impl Drop for SshChannel {
-    fn drop(&mut self) {
-        self.current_pool_size.fetch_sub(1, Ordering::Release);
-    }
+    // Pool permit that signals that the connection is being used until it is dropped.
+    _pool_permit: OwnedSemaphorePermit,
 }
 
 impl AsyncRead for SshChannel {
@@ -73,10 +71,10 @@ pub(crate) struct SshTunnelHandler {
     pub(crate) allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
     // Optional extra data available for HTTP tunneling/aliasing connections.
     pub(crate) http_data: Option<Arc<RwLock<ConnectionHttpData>>>,
-    // Maximum amount of simultaneous connections for this handler.
-    pub(crate) max_pool_size: Arc<AtomicUsize>,
-    // Current active connections for this handler.
-    pub(crate) current_pool_size: Arc<AtomicUsize>,
+    // Handler of simultaneous connections for this handler.
+    pub(crate) pool: Arc<Semaphore>,
+    // How long should a connection wait for a spot in the pool before being timed out.
+    pub(crate) pool_timeout: Option<Duration>,
     // Optional IP filtering for this handler's tunneling and aliasing channels.
     pub(crate) ip_filter: Arc<RwLock<Option<IpFilter>>>,
     // Handle to the SSH connection, in order to create remote forwarding channels.
@@ -121,11 +119,20 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
             .as_ref()
             .is_none_or(|filter| filter.is_allowed(ip));
         if tunneling_allowed {
-            let max_pool_size = self.max_pool_size.load(Ordering::Acquire);
-            if self.current_pool_size.fetch_add(1, Ordering::AcqRel) >= max_pool_size {
-                self.current_pool_size.fetch_sub(1, Ordering::Release);
-                return Err(ServerError::PoolLimitReached);
-            }
+            let pool = Arc::clone(&self.pool);
+            let pool_permit = if let Some(duration) = self.pool_timeout {
+                let Ok(Ok(pool_permit)) =
+                    timeout(duration, async move { pool.acquire_owned().await }).await
+                else {
+                    return Err(ServerError::PoolLimitReached);
+                };
+                pool_permit
+            } else {
+                let Ok(pool_permit) = pool.try_acquire_owned() else {
+                    return Err(ServerError::PoolLimitReached);
+                };
+                pool_permit
+            };
             let channel = self
                 .handle
                 .channel_open_forwarded_tcpip(
@@ -138,7 +145,7 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
                 .into_stream();
             Ok(SshChannel {
                 inner: self.limiter.clone().limit(channel),
-                current_pool_size: Arc::clone(&self.current_pool_size),
+                _pool_permit: pool_permit,
             })
         } else {
             Err(ServerError::TunnelingNotAllowed)
@@ -163,11 +170,20 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
         fingerprint: Option<&'_ Fingerprint>,
     ) -> Result<SshChannel, ServerError> {
         if self.can_alias(ip, port, fingerprint) {
-            let max_pool_size = self.max_pool_size.load(Ordering::Acquire);
-            if self.current_pool_size.fetch_add(1, Ordering::AcqRel) >= max_pool_size {
-                self.current_pool_size.fetch_sub(1, Ordering::Release);
-                return Err(ServerError::PoolLimitReached);
-            }
+            let pool = Arc::clone(&self.pool);
+            let pool_permit = if let Some(duration) = self.pool_timeout {
+                let Ok(Ok(pool_permit)) =
+                    timeout(duration, async move { pool.acquire_owned().await }).await
+                else {
+                    return Err(ServerError::PoolLimitReached);
+                };
+                pool_permit
+            } else {
+                let Ok(pool_permit) = pool.try_acquire_owned() else {
+                    return Err(ServerError::PoolLimitReached);
+                };
+                pool_permit
+            };
             let channel = self
                 .handle
                 .channel_open_forwarded_tcpip(
@@ -180,7 +196,7 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
                 .into_stream();
             Ok(SshChannel {
                 inner: self.limiter.clone().limit(channel),
-                current_pool_size: Arc::clone(&self.current_pool_size),
+                _pool_permit: pool_permit,
             })
         } else {
             Err(ServerError::AliasingNotAllowed)

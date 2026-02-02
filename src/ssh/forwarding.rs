@@ -1,7 +1,7 @@
 use std::{
     borrow::Borrow,
     net::SocketAddr,
-    sync::{Arc, atomic::AtomicUsize},
+    sync::{Arc, atomic::Ordering},
 };
 
 use chrono::Utc;
@@ -19,7 +19,7 @@ use russh::{
     keys::ssh_key::Fingerprint,
     server::{Handle, Msg},
 };
-use tokio::{io::copy_bidirectional_with_sizes, time::timeout};
+use tokio::{io::copy_bidirectional_with_sizes, sync::Semaphore, time::timeout};
 
 use crate::{
     SandholeServer,
@@ -250,6 +250,9 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
             return Ok(false);
         }
         // Add handler to SSH connection map
+        let semaphore = Arc::new(Semaphore::new(
+            context.user_data.max_pool_size.load(Ordering::Acquire),
+        ));
         match context.server.ssh.insert(
             address.to_string(),
             *context.peer,
@@ -257,8 +260,8 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
             Arc::new(SshTunnelHandler {
                 allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                 http_data: None,
-                max_pool_size: Arc::clone(&context.user_data.max_pool_size),
-                current_pool_size: Arc::new(AtomicUsize::new(0)),
+                pool: Arc::clone(&semaphore),
+                pool_timeout: context.server.pool_timeout,
                 ip_filter: Arc::clone(&context.user_data.ip_filter),
                 handle,
                 tx: context.tx.clone(),
@@ -328,7 +331,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                 );
                 context.user_data.host_addressing.insert(
                     TcpAlias(address.to_string(), *port as u16),
-                    address.to_string(),
+                    (address.to_string(), semaphore),
                 );
                 Ok(true)
             }
@@ -346,10 +349,10 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
             .host_addressing
             .remove(&BorrowedTcpAlias(address, &port) as &dyn TcpAliasKey)
         {
-            context.server.ssh.remove(&assigned_host, context.peer);
+            context.server.ssh.remove(&assigned_host.0, context.peer);
             #[cfg(not(coverage_nightly))]
             tracing::info!(
-                peer = %context.peer, alias = &assigned_host,
+                peer = %context.peer, alias = &assigned_host.0,
                 "Stopped SSH forwarding.",
             );
             let _ = context.tx.send(
@@ -525,6 +528,9 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 return Ok(false);
             }
             // Add handler to TCP connection map
+            let semaphore = Arc::new(Semaphore::new(
+                context.user_data.max_pool_size.load(Ordering::Acquire),
+            ));
             match context.server.alias.insert(
                 TcpAlias(address.into(), 80),
                 *context.peer,
@@ -532,8 +538,8 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 Arc::new(SshTunnelHandler {
                     allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                     http_data: Some(Arc::clone(&context.user_data.http_data)),
-                    max_pool_size: Arc::clone(&context.user_data.max_pool_size),
-                    current_pool_size: Arc::new(AtomicUsize::new(0)),
+                    pool: Arc::clone(&semaphore),
+                    pool_timeout: context.server.pool_timeout,
                     ip_filter: Arc::clone(&context.user_data.ip_filter),
                     handle,
                     tx: context.tx.clone(),
@@ -576,10 +582,10 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                         )
                         .into_bytes(),
                     );
-                    context
-                        .user_data
-                        .alias_addressing
-                        .insert(TcpAlias(address.into(), 80), TcpAlias(address.into(), 80));
+                    context.user_data.alias_addressing.insert(
+                        TcpAlias(address.into(), 80),
+                        (TcpAlias(address.into(), 80), semaphore),
+                    );
                     Ok(true)
                 }
             }
@@ -597,6 +603,9 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
             {
                 Ok(assigned_host) => {
                     // Add handler to TCP connection map
+                    let semaphore = Arc::new(Semaphore::new(
+                        context.user_data.max_pool_size.load(Ordering::Acquire),
+                    ));
                     match context.server.sni.insert(
                         assigned_host.clone(),
                         *context.peer,
@@ -604,8 +613,8 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                         Arc::new(SshTunnelHandler {
                             allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                             http_data: Some(Arc::clone(&context.user_data.http_data)),
-                            max_pool_size: Arc::clone(&context.user_data.max_pool_size),
-                            current_pool_size: Arc::new(AtomicUsize::new(0)),
+                            pool: Arc::clone(&semaphore),
+                            pool_timeout: context.server.pool_timeout,
                             ip_filter: Arc::clone(&context.user_data.ip_filter),
                             handle,
                             tx: context.tx.clone(),
@@ -651,10 +660,10 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                                 )
                                 .into_bytes(),
                             );
-                            context
-                                .user_data
-                                .host_addressing
-                                .insert(TcpAlias(address.into(), *port as u16), assigned_host);
+                            context.user_data.host_addressing.insert(
+                                TcpAlias(address.into(), *port as u16),
+                                (assigned_host, semaphore),
+                            );
                             Ok(true)
                         }
                     }
@@ -708,6 +717,9 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
             {
                 Ok(assigned_host) => {
                     // Add handler to HTTP connection map
+                    let semaphore = Arc::new(Semaphore::new(
+                        context.user_data.max_pool_size.load(Ordering::Acquire),
+                    ));
                     match context.server.http.insert(
                         assigned_host.clone(),
                         *context.peer,
@@ -715,8 +727,8 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                         Arc::new(SshTunnelHandler {
                             allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                             http_data: Some(Arc::clone(&context.user_data.http_data)),
-                            max_pool_size: Arc::clone(&context.user_data.max_pool_size),
-                            current_pool_size: Arc::new(AtomicUsize::new(0)),
+                            pool: Arc::clone(&semaphore),
+                            pool_timeout: context.server.pool_timeout,
                             ip_filter: Arc::clone(&context.user_data.ip_filter),
                             handle,
                             tx: context.tx.clone(),
@@ -791,10 +803,10 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                                     .into_bytes(),
                                 );
                             }
-                            context
-                                .user_data
-                                .host_addressing
-                                .insert(TcpAlias(address.to_string(), *port as u16), assigned_host);
+                            context.user_data.host_addressing.insert(
+                                TcpAlias(address.to_string(), *port as u16),
+                                (assigned_host, semaphore),
+                            );
                             Ok(true)
                         }
                     }
@@ -838,11 +850,11 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 .alias_addressing
                 .remove(&BorrowedTcpAlias(address, &80) as &dyn TcpAliasKey)
             {
-                let key: &dyn TcpAliasKey = assigned_alias.borrow();
+                let key: &dyn TcpAliasKey = assigned_alias.0.borrow();
                 context.server.alias.remove(key, context.peer);
                 #[cfg(not(coverage_nightly))]
                 tracing::info!(
-                    peer = %context.peer, alias = %assigned_alias.0, port = %assigned_alias.1,
+                    peer = %context.peer, alias = %assigned_alias.0.0, port = %assigned_alias.0.1,
                     "Stopped TCP aliasing.",
                 );
                 let _ = context.tx.send(
@@ -868,10 +880,10 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 .host_addressing
                 .remove(&BorrowedTcpAlias(address, &{ port }) as &dyn TcpAliasKey)
             {
-                context.server.sni.remove(&assigned_alias, context.peer);
+                context.server.sni.remove(&assigned_alias.0, context.peer);
                 #[cfg(not(coverage_nightly))]
                 tracing::info!(
-                    peer = %context.peer, host = %assigned_alias,
+                    peer = %context.peer, host = %assigned_alias.0,
                     "Stopped SNI proxying.",
                 );
                 let _ = context.tx.send(
@@ -894,10 +906,10 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 .host_addressing
                 .remove(&BorrowedTcpAlias(address, &{ port }) as &dyn TcpAliasKey)
             {
-                context.server.http.remove(&assigned_host, context.peer);
+                context.server.http.remove(&assigned_host.0, context.peer);
                 #[cfg(not(coverage_nightly))]
                 tracing::info!(
-                    peer = %context.peer, host = %assigned_host,
+                    peer = %context.peer, host = %assigned_host.0,
                     "Stopped HTTP forwarding.",
                 );
                 let _ = context.tx.send(
@@ -1111,6 +1123,9 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             *port as u16
         };
         // Add handler to alias connection map
+        let semaphore = Arc::new(Semaphore::new(
+            context.user_data.max_pool_size.load(Ordering::Acquire),
+        ));
         match context.server.alias.insert(
             TcpAlias(address.to_string(), assigned_port),
             *context.peer,
@@ -1118,8 +1133,8 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             Arc::new(SshTunnelHandler {
                 allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                 http_data: None,
-                max_pool_size: Arc::clone(&context.user_data.max_pool_size),
-                current_pool_size: Arc::new(AtomicUsize::new(0)),
+                pool: Arc::clone(&semaphore),
+                pool_timeout: context.server.pool_timeout,
                 ip_filter: Arc::clone(&context.user_data.ip_filter),
                 handle,
                 tx: context.tx.clone(),
@@ -1153,7 +1168,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                 // Adding to connection map succeeded.
                 context.user_data.alias_addressing.insert(
                     TcpAlias(address.to_string(), *port as u16),
-                    TcpAlias(address.to_string(), assigned_port),
+                    (TcpAlias(address.to_string(), assigned_port), semaphore),
                 );
                 #[cfg(not(coverage_nightly))]
                 tracing::info!(
@@ -1187,11 +1202,11 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                 .alias_addressing
                 .remove(&BorrowedTcpAlias(address, &{ port }) as &dyn TcpAliasKey)
         {
-            let key: &dyn TcpAliasKey = assigned_alias.borrow();
+            let key: &dyn TcpAliasKey = assigned_alias.0.borrow();
             context.server.alias.remove(key, context.peer);
             #[cfg(not(coverage_nightly))]
             tracing::info!(
-                peer = %context.peer, alias = %assigned_alias.0, port = %assigned_alias.1,
+                peer = %context.peer, alias = %assigned_alias.0.0, port = %assigned_alias.0.1,
                 "Stopped TCP aliasing.",
             );
             let _ = context.tx.send(
@@ -1562,6 +1577,9 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                 *port as u16
             };
             // Add handler to TCP connection map
+            let semaphore = Arc::new(Semaphore::new(
+                context.user_data.max_pool_size.load(Ordering::Acquire),
+            ));
             match context.server.tcp.insert(
                 assigned_port,
                 *context.peer,
@@ -1569,8 +1587,8 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                 Arc::new(SshTunnelHandler {
                     allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                     http_data: None,
-                    max_pool_size: Arc::clone(&context.user_data.max_pool_size),
-                    current_pool_size: Arc::new(AtomicUsize::new(0)),
+                    pool: Arc::clone(&semaphore),
+                    pool_timeout: context.server.pool_timeout,
                     ip_filter: Arc::clone(&context.user_data.ip_filter),
                     handle,
                     tx: context.tx.clone(),
@@ -1606,10 +1624,10 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                 }
                 _ => {
                     // Adding to connection map succeeded.
-                    context
-                        .user_data
-                        .port_addressing
-                        .insert(TcpAlias(address.to_string(), *port as u16), assigned_port);
+                    context.user_data.port_addressing.insert(
+                        TcpAlias(address.to_string(), *port as u16),
+                        (assigned_port, semaphore),
+                    );
                     #[cfg(not(coverage_nightly))]
                     tracing::info!(
                         peer = %context.peer, port = %assigned_port,
@@ -1647,7 +1665,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                 .port_addressing
                 .remove(&BorrowedTcpAlias(address, &{ port }) as &dyn TcpAliasKey)
         {
-            context.server.tcp.remove(&assigned_port, context.peer);
+            context.server.tcp.remove(&assigned_port.0, context.peer);
             #[cfg(not(coverage_nightly))]
             tracing::info!(
                 peer = %context.peer, port = %port,
@@ -1663,7 +1681,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                         .domain
                         .as_deref()
                         .unwrap_or("<Sandhole's IP>"),
-                    &assigned_port,
+                    &assigned_port.0,
                 )
                 .into_bytes(),
             );

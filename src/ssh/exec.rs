@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, mem, net::SocketAddr, sync::Arc};
+use std::{collections::BTreeSet, mem, net::SocketAddr, sync::Arc, time::Duration};
 
 use color_eyre::eyre::eyre;
 use enumflags2::{BitFlags, bitflags};
@@ -403,9 +403,50 @@ impl SshCommand for PoolCommand {
                     .fetch_min(self.0, std::sync::atomic::Ordering::AcqRel);
                 if prev_pool_size < self.0 {
                     return Err(eyre!(
-                        "pool size must be less than or equal to {prev_pool_size}"
+                        "pool size must be less than or equal to previous maximum of {prev_pool_size}"
                     ));
-                };
+                } else if prev_pool_size > self.0 {
+                    let pool_size_diff = prev_pool_size - self.0;
+                    for semaphore in user_data.host_addressing.values().map(|value| &value.1) {
+                        let mut remaining = pool_size_diff;
+                        remaining -= semaphore.forget_permits(remaining);
+                        if remaining > 0 {
+                            let semaphore = Arc::clone(semaphore);
+                            tokio::spawn(async move {
+                                while remaining > 0 {
+                                    tokio::time::sleep(Duration::from_secs(5)).await;
+                                    remaining -= semaphore.forget_permits(remaining);
+                                }
+                            });
+                        }
+                    }
+                    for semaphore in user_data.port_addressing.values().map(|value| &value.1) {
+                        let mut remaining = pool_size_diff;
+                        remaining -= semaphore.forget_permits(remaining);
+                        if remaining > 0 {
+                            let semaphore = Arc::clone(semaphore);
+                            tokio::spawn(async move {
+                                while remaining > 0 {
+                                    tokio::time::sleep(Duration::from_secs(5)).await;
+                                    remaining -= semaphore.forget_permits(remaining);
+                                }
+                            });
+                        }
+                    }
+                    for semaphore in user_data.alias_addressing.values().map(|value| &value.1) {
+                        let mut remaining = pool_size_diff;
+                        remaining -= semaphore.forget_permits(remaining);
+                        if remaining > 0 {
+                            let semaphore = Arc::clone(semaphore);
+                            tokio::spawn(async move {
+                                while remaining > 0 {
+                                    tokio::time::sleep(Duration::from_secs(5)).await;
+                                    remaining -= semaphore.forget_permits(remaining);
+                                }
+                            });
+                        }
+                    }
+                }
                 context.commands.insert(self.flag());
                 Ok(())
             }

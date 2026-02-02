@@ -11,7 +11,7 @@ use std::{
 use ahash::RandomState;
 use async_speed_limit::Limiter;
 use ipnet::IpNet;
-use tokio::time::sleep;
+use tokio::{sync::Semaphore, time::sleep};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -88,11 +88,11 @@ pub(crate) struct UserData {
     // Identifier for the user, used for creating quota tokens.
     pub(crate) quota_key: TokenHolder,
     // Map to keep track of opened host-based connections (HTTP and SSH), to clean up when the forwarding is canceled.
-    pub(crate) host_addressing: HashMap<TcpAlias, String, RandomState>,
+    pub(crate) host_addressing: HashMap<TcpAlias, (String, Arc<Semaphore>), RandomState>,
     // Map to keep track of opened port-based connections (TCP), to clean up when the forwarding is canceled.
-    pub(crate) port_addressing: HashMap<TcpAlias, u16, RandomState>,
+    pub(crate) port_addressing: HashMap<TcpAlias, (u16, Arc<Semaphore>), RandomState>,
     // Map to keep track of opened alias-based connections (aliases), to clean up when the forwarding is canceled.
-    pub(crate) alias_addressing: HashMap<TcpAlias, TcpAlias, RandomState>,
+    pub(crate) alias_addressing: HashMap<TcpAlias, (TcpAlias, Arc<Semaphore>), RandomState>,
     // IPs allowed to connect to this user's services.
     pub(crate) allowlist: Option<Vec<IpNet>>,
     // IPs disallowed from connecting to this user's services.
