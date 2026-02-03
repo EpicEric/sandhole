@@ -27,7 +27,7 @@ aws-lc-rs = "1.15.3"
 axum = { version = "0.8.8", default-features = false }
 block-id = "0.2.1"
 bon = "3.8.2"
-bytes = "1.11.0"
+bytes = "1.11.1"
 bytesize = "2.3.1"
 chrono = "0.4.43"
 clap = { version = "4.5.56", features = ["derive", "string"] }
