@@ -329,8 +329,6 @@ where
     protocol: Protocol,
     // Configuration on which type of channel to retrieve from the handler.
     proxy_type: ProxyType,
-    // Pool size for connections reuse per handler.
-    pool_size: usize,
     // Buffer size for bidirectional copying.
     buffer_size: usize,
     // Optional duration until an outgoing request is canceled.
@@ -753,7 +751,7 @@ where
                             v.2.lock().expect("not poisoned").take();
                         })
                         .or_insert_with(|| {
-                            let (sender, receiver) = async_channel::bounded(proxy_data.pool_size);
+                            let (sender, receiver) = async_channel::unbounded();
                             (sender, receiver, Arc::default())
                         })
                         .downgrade();
@@ -1109,8 +1107,7 @@ where
                                 v.2.lock().expect("not poisoned").take();
                             })
                             .or_insert_with(|| {
-                                let (sender, receiver) =
-                                    async_channel::bounded(proxy_data.pool_size);
+                                let (sender, receiver) = async_channel::unbounded();
                                 (sender, receiver, Arc::default())
                             })
                             .downgrade();
@@ -1254,7 +1251,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Http { port: 80 })
                     .proxy_type(ProxyType::Tunneling)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1300,7 +1296,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Http { port: 80 })
                     .proxy_type(ProxyType::Tunneling)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1346,7 +1341,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Http { port: 80 })
                     .proxy_type(ProxyType::Tunneling)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1412,7 +1406,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::TlsRedirect { from: 80, to: 443 })
                     .proxy_type(ProxyType::Tunneling)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1481,7 +1474,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::TlsRedirect { from: 80, to: 8443 })
                     .proxy_type(ProxyType::Tunneling)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1551,7 +1543,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Http { port: 80 })
                     .proxy_type(ProxyType::Tunneling)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1620,7 +1611,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Http { port: 80 })
                     .proxy_type(ProxyType::Tunneling)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -1715,7 +1705,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Https { port: 443 })
                     .proxy_type(ProxyType::Tunneling)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .http_request_timeout(Duration::from_millis(500))
                     .disable_http_logs(false)
@@ -1806,7 +1795,6 @@ mod proxy_handler_tests {
                         }))
                         .protocol(Protocol::Https { port: 443 })
                         .proxy_type(ProxyType::Tunneling)
-                        .pool_size(128)
                         .buffer_size(8_000)
                         .http_request_timeout(Duration::from_millis(500))
                         .disable_http_logs(false)
@@ -1919,7 +1907,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Https { port: 443 })
                     .proxy_type(ProxyType::Tunneling)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .http_request_timeout(Duration::from_millis(500))
                     .disable_http_logs(false)
@@ -2020,7 +2007,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Https { port: 443 })
                     .proxy_type(ProxyType::Tunneling)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -2122,7 +2108,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Https { port: 443 })
                     .proxy_type(ProxyType::Tunneling)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -2223,7 +2208,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Https { port: 443 })
                     .proxy_type(ProxyType::Tunneling)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -2323,7 +2307,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Http { port: 80 })
                     .proxy_type(ProxyType::Aliasing)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -2424,7 +2407,6 @@ mod proxy_handler_tests {
                     }))
                     .protocol(Protocol::Https { port: 443 })
                     .proxy_type(ProxyType::Tunneling)
-                    .pool_size(128)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .build(),
@@ -2520,7 +2502,6 @@ mod proxy_handler_tests {
                         }))
                         .protocol(Protocol::Https { port: 443 })
                         .proxy_type(ProxyType::Tunneling)
-                        .pool_size(128)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .build(),
@@ -2639,7 +2620,6 @@ mod proxy_handler_tests {
                         }))
                         .protocol(Protocol::Https { port: 443 })
                         .proxy_type(ProxyType::Tunneling)
-                        .pool_size(128)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .build(),
@@ -2749,7 +2729,6 @@ mod proxy_handler_tests {
                         }))
                         .protocol(Protocol::Https { port: 443 })
                         .proxy_type(ProxyType::Tunneling)
-                        .pool_size(128)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .build(),
@@ -2876,7 +2855,6 @@ mod proxy_handler_tests {
                         }))
                         .protocol(Protocol::Https { port: 443 })
                         .proxy_type(ProxyType::Tunneling)
-                        .pool_size(128)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .build(),
@@ -2953,7 +2931,6 @@ mod proxy_handler_tests {
                         }))
                         .protocol(Protocol::Https { port: 443 })
                         .proxy_type(ProxyType::Tunneling)
-                        .pool_size(128)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .build(),

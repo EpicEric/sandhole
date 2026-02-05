@@ -117,12 +117,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .into());
         }
     }
-    let pool_size: usize = config.pool_size.into();
-    if pool_size > 1024 {
-        return Err(
-            ServerError::InvalidConfig("Cannot set --pool-size greater than 1024".into()).into(),
-        );
-    }
     let http_request_timeout = config.http_request_timeout;
     let tcp_connection_timeout = config.tcp_connection_timeout;
     let buffer_size = usize::try_from(config.buffer_size)
@@ -623,7 +617,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             })
             // Always use aliasing channels instead of tunneling channels.
             .proxy_type(ProxyType::Aliasing)
-            .pool_size(pool_size)
             .has_pool_queue(config.pool_timeout.is_some())
             .buffer_size(buffer_size)
             .maybe_http_request_timeout(http_request_timeout)
@@ -664,7 +657,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         disable_tcp: config.disable_tcp,
         disable_aliasing: config.disable_aliasing,
         buffer_size,
-        pool_size,
+        pool_size: usize::from(config.pool_size),
         pool_timeout: config.pool_timeout,
         rate_limit: config
             .rate_limit_per_user
@@ -726,7 +719,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 })
                 // Always use tunneling channels.
                 .proxy_type(ProxyType::Tunneling)
-                .pool_size(pool_size)
                 .has_pool_queue(config.pool_timeout.is_some())
                 .buffer_size(buffer_size)
                 .maybe_http_request_timeout(http_request_timeout)
@@ -806,7 +798,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 })
                 // Always use tunneling channels.
                 .proxy_type(ProxyType::Tunneling)
-                .pool_size(pool_size)
                 .has_pool_queue(config.pool_timeout.is_some())
                 .buffer_size(buffer_size)
                 .maybe_http_request_timeout(http_request_timeout)

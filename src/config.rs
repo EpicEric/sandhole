@@ -386,10 +386,11 @@ pub struct ApplicationConfig {
     pub buffer_size: u32,
 
     /// Maximum pool size for simultaneous connections per proxied service.
-    /// The maximum is 1024.
+    /// The maximum is 65535.
     ///
-    /// A higher value will lead to higher memory consumption, and may cause disruption on services.
-    #[arg(long, default_value_t = 128, value_name = "SIZE")]
+    /// A high value may cause disruption on services,
+    /// while a low value may lead to denial-of-service.
+    #[arg(long, default_value_t = 256, value_name = "SIZE")]
     pub pool_size: u16,
 
     /// How long to wait for a connection to be available in the pool before being timed out.
@@ -564,7 +565,7 @@ mod application_config_tests {
                 ip_allowlist: None,
                 ip_blocklist: None,
                 buffer_size: 32_768,
-                pool_size: 128,
+                pool_size: 256,
                 pool_timeout: None,
                 ssh_keepalive_interval: Duration::from_secs(15),
                 ssh_keepalive_max: 3,
@@ -625,7 +626,7 @@ mod application_config_tests {
             "--ip-allowlist=10.0.0.0/8",
             "--ip-blocklist=10.1.0.0/16,10.2.0.0/16",
             "--buffer-size=4KB",
-            "--pool-size=1024",
+            "--pool-size=2048",
             "--pool-timeout=9s",
             "--ssh-keepalive-interval=10s",
             "--ssh-keepalive-max=2",
@@ -688,7 +689,7 @@ mod application_config_tests {
                     IpNet::from_str("10.2.0.0/16").unwrap()
                 ]),
                 buffer_size: 4_000,
-                pool_size: 1_024,
+                pool_size: 2_048,
                 pool_timeout: Some(Duration::from_secs(9)),
                 ssh_keepalive_interval: Duration::from_secs(10),
                 ssh_keepalive_max: 2,

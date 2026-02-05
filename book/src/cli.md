@@ -290,12 +290,12 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
       <b>--pool-size</b> &lt;SIZE&gt;
           Maximum pool size for simultaneous connections per proxied service.
-          The maximum is 1024.
+          The maximum is 65535.
 
-          A higher value will lead to higher memory consumption, and may cause
-          disruption on services.
+          A high value may cause disruption on services, while a low value may
+          lead to denial-of-service.
 
-          [default: 128]
+          [default: 256]
 
       <b>--pool-timeout</b> &lt;DURATION&gt;
           How long to wait for a connection to be available in the pool
