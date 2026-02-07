@@ -97,14 +97,15 @@ in
           {
             domain = "sandhole.com.br";
             acme-contact-email = "admin@sandhole.com.br";
-            ssh-port = 22;
-            user-keys-directory = ./sandhole-user-keys;
             connect-ssh-on-https-port = true;
             load-balancing = "replace";
             allow-requested-subdomains = true;
-            disable-tcp = true;
-            ip-allowlist = "192.168.0.1,2001:db1::/32";
-            idle-connection-timeout = "10s";
+            allow-requested-ports = true;
+            random-subdomain-filter-profanities = true;
+            force-https = true;
+            directory-poll-interval = "10s";
+            pool-size = 1024;
+            pool-timeout = "10s";
           }
         '';
       };
@@ -114,7 +115,7 @@ in
   config = lib.mkIf cfg.enable {
     assertions = [
       {
-        assertion = ((cfg.settings.domain or null) != null) != (cfg.settings.no-domain or false);
+        assertion = (cfg.settings.domain or null != null) != (cfg.settings.no-domain or false);
         message = "Sandhole requires exactly one of `services.sandhole.settings.domain` or `services.sandhole.settings.no-domain` to be set";
       }
     ];
