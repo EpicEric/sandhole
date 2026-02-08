@@ -4,7 +4,6 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     crane.url = "github:ipetkov/crane";
-    flake-utils.url = "github:numtide/flake-utils";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -16,18 +15,41 @@
       self,
       nixpkgs,
       crane,
-      flake-utils,
       rust-overlay,
       ...
     }:
-    flake-utils.lib.eachDefaultSystemPassThrough (system: {
+    let
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
+
+      eachSystem =
+        f:
+        (builtins.foldl' (
+          acc: system:
+          let
+            fSystem = f system;
+          in
+          builtins.foldl' (
+            acc': attr:
+            acc'
+            // {
+              ${attr} = (acc'.${attr} or { }) // fSystem.${attr};
+            }
+          ) acc (builtins.attrNames fSystem)
+        ) { } systems);
+    in
+    {
       nixosModules = {
         default = self.nixosModules.sandhole;
         sandhole =
           { lib, ... }:
           {
             imports = [ ./nixos/module.nix ];
-            services.sandhole.package = lib.mkDefault self.packages.${system}.default;
+            services.sandhole.package = lib.mkDefault self.packages.${builtins.currentSystem}.default;
           };
         sandhole-websites =
           { ... }:
@@ -35,14 +57,15 @@
             imports = [ ./nixos/sandhole-websites.nix ];
           };
       };
+
       overlays = {
         default = self.overlays.sandhole;
         sandhole = final: prev: {
-          sandhole = self.packages.${system}.default;
+          sandhole = self.packages.${builtins.currentSystem}.default;
         };
       };
-    })
-    // flake-utils.lib.eachDefaultSystem (
+    }
+    // eachSystem (
       system:
       let
         rustChannel = "stable";
@@ -138,7 +161,7 @@
         };
       in
       {
-        packages = {
+        packages.${system} = {
           inherit sandhole;
           default = sandhole;
           _book = sandhole-book;
@@ -146,21 +169,19 @@
           _docs = optionsDoc.optionsCommonMark;
         };
 
-        apps.default =
-          (flake-utils.lib.mkApp {
-            drv = sandhole;
-          })
-          // {
-            meta = {
-              description = "Expose HTTP/SSH/TCP services through SSH port forwarding";
-              homepage = "https://sandhole.com.br";
-              license = lib.licenses.mit;
-              mainProgram = "sandhole";
-              platforms = lib.platforms.linux ++ lib.platforms.darwin;
-            };
+        apps.${system}.default = {
+          name = "sandhole";
+          drv = sandhole;
+          meta = {
+            description = "Expose HTTP/SSH/TCP services through SSH port forwarding";
+            homepage = "https://sandhole.com.br";
+            license = lib.licenses.mit;
+            mainProgram = "sandhole";
+            platforms = lib.platforms.linux ++ lib.platforms.darwin;
           };
+        };
 
-        checks = {
+        checks.${system} = {
           inherit sandhole;
 
           sandhole-clippy = craneLib.cargoClippy (
@@ -190,7 +211,7 @@
           );
         };
 
-        devShells.default = craneLib.devShell {
+        devShells.${system}.default = craneLib.devShell {
           checks = self.checks.${system};
 
           inputsFrom = [ sandhole ];
