@@ -12,12 +12,18 @@ boolean
 
 
 *Default:*
-` false `
+
+```nix
+false
+```
 
 
 
 *Example:*
-` true `
+
+```nix
+true
+```
 
 
 
@@ -35,7 +41,10 @@ package
 
 
 *Default:*
-` pkgs.sandhole `
+
+```nix
+pkgs.sandhole
+```
 
 
 
@@ -53,7 +62,10 @@ string
 
 
 *Default:*
-` "sandhole" `
+
+```nix
+"sandhole"
+```
 
 
 
@@ -74,12 +86,18 @@ boolean
 
 
 *Default:*
-` false `
+
+```nix
+false
+```
 
 
 
 *Example:*
-` true `
+
+```nix
+true
+```
 
 
 
@@ -102,7 +120,7 @@ attribute set of (null or boolean or (unsigned integer, meaning >=0) or absolute
 
 *Default:*
 
-```
+```nix
 {
   disable-http = false;
   disable-https = false;
@@ -110,6 +128,7 @@ attribute set of (null or boolean or (unsigned integer, meaning >=0) or absolute
   domain = null;
   http-port = 80;
   https-port = 443;
+  no-domain = false;
   ssh-port = 2222;
 }
 ```
@@ -118,18 +137,19 @@ attribute set of (null or boolean or (unsigned integer, meaning >=0) or absolute
 
 *Example:*
 
-```
+```nix
 {
   domain = "sandhole.com.br";
   acme-contact-email = "admin@sandhole.com.br";
-  ssh-port = 22;
-  user-keys-directory = ./sandhole-user-keys;
   connect-ssh-on-https-port = true;
   load-balancing = "replace";
   allow-requested-subdomains = true;
-  disable-tcp = true;
-  ip-allowlist = "192.168.0.1,2001:db1::/32";
-  idle-connection-timeout = "10s";
+  allow-requested-ports = true;
+  random-subdomain-filter-profanities = true;
+  force-https = true;
+  directory-poll-interval = "10s";
+  pool-size = 1024;
+  pool-timeout = "10s";
 }
 
 ```
@@ -150,6 +170,9 @@ string
 
 
 *Default:*
-` "sandhole" `
+
+```nix
+"sandhole"
+```
 
 

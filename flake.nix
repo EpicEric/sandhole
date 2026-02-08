@@ -24,13 +24,15 @@
       nixosModules = {
         default = self.nixosModules.sandhole;
         sandhole =
-          {
-            lib,
-            ...
-          }:
+          { lib, ... }:
           {
             imports = [ ./nixos/module.nix ];
             services.sandhole.package = lib.mkDefault self.packages.${system}.default;
+          };
+        sandhole-websites =
+          { ... }:
+          {
+            imports = [ ./nixos/sandhole-websites.nix ];
           };
       };
       overlays = {
