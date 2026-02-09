@@ -46,10 +46,10 @@
       nixosModules = {
         default = self.nixosModules.sandhole;
         sandhole =
-          { lib, ... }:
+          { lib, pkgs, ... }:
           {
             imports = [ ./nixos/module.nix ];
-            services.sandhole.package = lib.mkDefault self.packages.${builtins.currentSystem}.default;
+            services.sandhole.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.default;
           };
         sandhole-websites =
           { ... }:
@@ -60,8 +60,8 @@
 
       overlays = {
         default = self.overlays.sandhole;
-        sandhole = final: prev: {
-          sandhole = self.packages.${builtins.currentSystem}.default;
+        sandhole = _: prev: {
+          sandhole = self.packages.${prev.stdenv.hostPlatform.system}.default;
         };
       };
     }
