@@ -140,7 +140,7 @@
           nativeBuildInputs = [ pkgs.to-html ];
           buildCommand = ''
             mkdir $out
-            to-html --no-prompt "${sandhole}/bin/sandhole --help" > $out/cli.html
+            to-html --no-prompt "${lib.getExe sandhole} --help" > $out/cli.html
           '';
         };
 
@@ -170,9 +170,10 @@
         };
 
         apps.${system}.default = {
-          name = "sandhole";
-          drv = sandhole;
+          type = "app";
+          program = lib.getExe sandhole;
           meta = {
+            name = "sandhole";
             description = "Expose HTTP/SSH/TCP services through SSH port forwarding";
             homepage = "https://sandhole.com.br";
             license = lib.licenses.mit;
