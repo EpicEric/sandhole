@@ -35,15 +35,27 @@ async fn config_no_write_permissions_for_certificates_dir() {
         "sandhole",
         "--domain=foobar.tld",
         "--user-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
+        &(format!(
+            "{}/tests/data/user_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--admin-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys"),
+        &(format!(
+            "{}/tests/data/admin_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--certificates-directory",
         &temp_dir_path("unwritable_certificates"),
         "--private-key-file",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh"),
+        &(format!(
+            "{}/tests/data/server_keys/ssh",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--acme-cache-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
+        &(format!(
+            "{}/tests/data/acme_cache",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--listen-address=127.0.0.1",
         "--ssh-port=18022",
         "--disable-http",

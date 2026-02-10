@@ -32,15 +32,30 @@ async fn ipv6_blocklist_by_user() {
         "sandhole",
         "--domain=foobar.tld",
         "--user-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
+        &(format!(
+            "{}/tests/data/user_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--admin-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys"),
+        &(format!(
+            "{}/tests/data/admin_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--certificates-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates"),
+        &(format!(
+            "{}/tests/data/certificates",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--private-key-file",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh"),
+        &(format!(
+            "{}/tests/data/server_keys/ssh",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--acme-cache-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
+        &(format!(
+            "{}/tests/data/acme_cache",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--disable-directory-creation",
         "--listen-address=::",
         "--ssh-port=18022",
@@ -66,7 +81,8 @@ async fn ipv6_blocklist_by_user() {
 
     // 2. Start SSH client that will set ip-allowlist and ip-blocklist
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
@@ -171,7 +187,8 @@ async fn ipv6_blocklist_by_user() {
 
     // 5. Start SSH client that will be blocked from aliasing to the service
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/key2"),
         None,
     )
     .expect("Missing file key2");
@@ -203,7 +220,8 @@ async fn ipv6_blocklist_by_user() {
 
     // 6. Start SSH client that will be allowed to alias to the service
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/key2"),
         None,
     )
     .expect("Missing file key2");

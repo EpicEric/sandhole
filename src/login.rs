@@ -112,7 +112,6 @@ mod api_login_tests {
     use std::{
         net::{IpAddr, Ipv4Addr, SocketAddr},
         path::PathBuf,
-        str::FromStr,
         sync::Arc,
     };
 
@@ -216,10 +215,10 @@ mod api_login_tests {
         let mut mock = MockConfigurer::new();
         let mut root_store = RootCertStore::empty();
         root_store.add_parsable_certificates(
-            CertificateDer::pem_file_iter(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/data/ca/rootCA.pem"
-            ))
+            CertificateDer::pem_file_iter(
+                PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                    .join("tests/data/ca/rootCA.pem"),
+            )
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
             .expect("Failed to parse client certificates"),
         );
@@ -253,16 +252,16 @@ mod api_login_tests {
             .unwrap()
             .with_no_client_auth()
             .with_single_cert(
-                CertificateDer::pem_file_iter(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/tests/data/certificates/localhost/fullchain.pem"
-                ))
+                CertificateDer::pem_file_iter(
+                    PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                        .join("tests/data/certificates/localhost/fullchain.pem"),
+                )
                 .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
                 .expect("Failed to parse server certificates"),
-                PrivateKeyDer::from_pem_file(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/tests/data/certificates/localhost/privkey.pem"
-                ))
+                PrivateKeyDer::from_pem_file(
+                    PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                        .join("tests/data/certificates/localhost/privkey.pem"),
+                )
                 .expect("Failed to parse server key"),
             )
             .expect("Failed to build server config"),
@@ -499,8 +498,7 @@ mod api_login_tests {
         let mut root_store = RootCertStore::empty();
         root_store.add_parsable_certificates(
             CertificateDer::pem_file_iter(
-                PathBuf::from_str(env!("CARGO_MANIFEST_DIR"))
-                    .unwrap()
+                PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
                     .join("tests/data/ca/rootCA.pem"),
             )
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
@@ -548,8 +546,7 @@ mod api_login_tests {
         let mut root_store = RootCertStore::empty();
         root_store.add_parsable_certificates(
             CertificateDer::pem_file_iter(
-                PathBuf::from_str(env!("CARGO_MANIFEST_DIR"))
-                    .unwrap()
+                PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
                     .join("tests/data/ca/rootCA.pem"),
             )
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
@@ -575,15 +572,13 @@ mod api_login_tests {
             .with_no_client_auth()
             .with_single_cert(
                 CertificateDer::pem_file_iter(
-                    PathBuf::from_str(env!("CARGO_MANIFEST_DIR"))
-                        .unwrap()
+                    PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
                         .join("tests/data/certificates/localhost/fullchain.pem"),
                 )
                 .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
                 .expect("Failed to parse server certificates"),
                 PrivateKeyDer::from_pem_file(
-                    PathBuf::from_str(env!("CARGO_MANIFEST_DIR"))
-                        .unwrap()
+                    PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
                         .join("tests/data/certificates/localhost/privkey.pem"),
                 )
                 .expect("Failed to parse server key"),

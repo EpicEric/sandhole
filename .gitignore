@@ -1,4 +1,5 @@
 /.direnv
+/.nixos*
 /cli.html
 /deploy
 /flamegraph.svg

@@ -246,7 +246,8 @@ o6ioYnJQHPsfaym/DY0seYghtg==
         mock.expect_state().never();
         let mut resolver = AcmeResolver::new(
             mock,
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache/").into(),
+            std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/acme_cache/"),
             "foobar@sandhole.com.br".into(),
             true,
         );
@@ -308,7 +309,8 @@ o6ioYnJQHPsfaym/DY0seYghtg==
             .return_once(|_, _, _, _| mock_state);
         let mut resolver = AcmeResolver::new(
             mock,
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache/").into(),
+            std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/acme_cache/"),
             "foobar@sandhole.com.br".into(),
             true,
         );
@@ -324,10 +326,10 @@ o6ioYnJQHPsfaym/DY0seYghtg==
         // Test SNI resolution for the valid domain
         let mut root_store = RootCertStore::empty();
         root_store.add_parsable_certificates(
-            CertificateDer::pem_file_iter(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/data/ca/rootCA.pem"
-            ))
+            CertificateDer::pem_file_iter(
+                std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                    .join("tests/data/ca/rootCA.pem"),
+            )
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
             .expect("Failed to parse certificates"),
         );

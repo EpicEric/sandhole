@@ -25,15 +25,30 @@ async fn admin_prometheus() {
         "sandhole",
         "--domain=foobar.tld",
         "--user-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
+        &(format!(
+            "{}/tests/data/user_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--admin-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys"),
+        &(format!(
+            "{}/tests/data/admin_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--certificates-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates"),
+        &(format!(
+            "{}/tests/data/certificates",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--private-key-file",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh"),
+        &(format!(
+            "{}/tests/data/server_keys/ssh",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--acme-cache-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
+        &(format!(
+            "{}/tests/data/acme_cache",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--disable-directory-creation",
         "--listen-address=127.0.0.1",
         "--ssh-port=18022",
@@ -59,7 +74,8 @@ async fn admin_prometheus() {
 
     // 2. Start SSH admin client that will local forward the Prometheus service
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/admin"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/admin"),
         None,
     )
     .expect("Missing file admin");

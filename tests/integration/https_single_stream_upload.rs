@@ -45,15 +45,30 @@ async fn https_single_stream_upload() {
         "sandhole",
         "--domain=foobar.tld",
         "--user-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
+        &(format!(
+            "{}/tests/data/user_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--admin-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys"),
+        &(format!(
+            "{}/tests/data/admin_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--certificates-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates"),
+        &(format!(
+            "{}/tests/data/certificates",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--private-key-file",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh"),
+        &(format!(
+            "{}/tests/data/server_keys/ssh",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--acme-cache-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
+        &(format!(
+            "{}/tests/data/acme_cache",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--disable-directory-creation",
         "--listen-address=127.0.0.1",
         "--ssh-port=18022",
@@ -79,7 +94,8 @@ async fn https_single_stream_upload() {
 
     // 2. Start SSH client that will be proxied
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
@@ -123,10 +139,10 @@ async fn https_single_stream_upload() {
     // 3. Connect to the HTTPS port of our proxy with a single stream
     let mut root_store = RootCertStore::empty();
     root_store.add_parsable_certificates(
-        CertificateDer::pem_file_iter(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/data/ca/rootCA.pem"
-        ))
+        CertificateDer::pem_file_iter(
+            std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/ca/rootCA.pem"),
+        )
         .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
         .expect("Failed to parse certificates"),
     );

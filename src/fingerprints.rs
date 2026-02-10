@@ -256,21 +256,19 @@ impl FingerprintsValidator {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod fingerprints_validator_tests {
-    use std::{path::PathBuf, str::FromStr, time::Duration};
+    use std::{path::PathBuf, time::Duration};
 
     use russh::keys::{HashAlg, parse_public_key_base64};
 
     use super::{AuthenticationType, FingerprintsValidator};
 
-    static USER_KEYS_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys");
-    static ADMIN_KEYS_DIRECTORY: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys");
-
     #[test_log::test(tokio::test)]
     async fn authenticates_user_keys() {
         let validator = FingerprintsValidator::watch(
-            USER_KEYS_DIRECTORY.parse().unwrap(),
-            ADMIN_KEYS_DIRECTORY.parse().unwrap(),
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/user_keys"),
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/admin_keys"),
             Duration::from_secs(30),
         )
         .await
@@ -314,8 +312,10 @@ mod fingerprints_validator_tests {
     #[test_log::test(tokio::test)]
     async fn gets_data_for_fingerprints() {
         let validator = FingerprintsValidator::watch(
-            USER_KEYS_DIRECTORY.parse().unwrap(),
-            ADMIN_KEYS_DIRECTORY.parse().unwrap(),
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/user_keys"),
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/admin_keys"),
             Duration::from_secs(30),
         )
         .await
@@ -346,9 +346,8 @@ mod fingerprints_validator_tests {
         assert_eq!(admin_key_data.algorithm.as_str(), "ssh-ed25519");
         assert_eq!(
             admin_key_data.file,
-            PathBuf::from_str(env!("CARGO_MANIFEST_DIR"))
-                .unwrap()
-                .join("tests/data/admin_keys/admin.pub")
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/admin_keys/admin.pub"),
         );
 
         let user_one_key_data = validator
@@ -359,9 +358,8 @@ mod fingerprints_validator_tests {
         assert_eq!(user_one_key_data.algorithm.as_str(), "ssh-ed25519");
         assert_eq!(
             user_one_key_data.file,
-            PathBuf::from_str(env!("CARGO_MANIFEST_DIR"))
-                .unwrap()
-                .join("tests/data/user_keys/keys_1_2.pub")
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/user_keys/keys_1_2.pub"),
         );
 
         let user_two_key_data = validator
@@ -372,9 +370,8 @@ mod fingerprints_validator_tests {
         assert_eq!(user_two_key_data.algorithm.as_str(), "ssh-rsa");
         assert_eq!(
             user_two_key_data.file,
-            PathBuf::from_str(env!("CARGO_MANIFEST_DIR"))
-                .unwrap()
-                .join("tests/data/user_keys/keys_1_2.pub")
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/user_keys/keys_1_2.pub"),
         );
 
         assert!(

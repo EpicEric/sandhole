@@ -34,15 +34,30 @@ async fn http_addressing_profanities_domain() {
         "sandhole",
         "--domain=safe.tld",
         "--user-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
+        &(format!(
+            "{}/tests/data/user_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--admin-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys"),
+        &(format!(
+            "{}/tests/data/admin_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--certificates-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates"),
+        &(format!(
+            "{}/tests/data/certificates",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--private-key-file",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh"),
+        &(format!(
+            "{}/tests/data/server_keys/ssh",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--acme-cache-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
+        &(format!(
+            "{}/tests/data/acme_cache",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--disable-directory-creation",
         "--listen-address=127.0.0.1",
         "--ssh-port=18022",
@@ -69,7 +84,8 @@ async fn http_addressing_profanities_domain() {
 
     // 2. Start SSH client that will be proxied with a profane name
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");

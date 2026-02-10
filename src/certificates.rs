@@ -245,6 +245,7 @@ impl ResolvesServerCert for CertificateResolver {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod certificate_resolver_tests {
     use std::{
+        path::PathBuf,
         sync::{Arc, RwLock},
         time::Duration,
     };
@@ -255,8 +256,6 @@ mod certificate_resolver_tests {
 
     use super::{CertificateResolver, DummyAlpnChallengeResolver, MockAlpnChallengeResolver};
 
-    static CERTIFICATES_DIRECTORY: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates");
     // Certificate is valid for "foobar.tld" and "*.foobar.tld"
     static DOMAINS_FOOBAR: &[&str] = &["foobar.tld", "something.foobar.tld", "other.foobar.tld"];
     // Certificate is valid for "localhost"
@@ -280,7 +279,8 @@ mod certificate_resolver_tests {
     #[test_log::test(tokio::test)]
     async fn allows_valid_domains() {
         let resolver = CertificateResolver::watch(
-            CERTIFICATES_DIRECTORY.parse().unwrap(),
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/certificates"),
             RwLock::new(Box::new(DummyAlpnChallengeResolver)),
             Duration::from_secs(30),
         )
@@ -303,7 +303,8 @@ mod certificate_resolver_tests {
     #[test_log::test(tokio::test)]
     async fn forbids_invalid_domains() {
         let resolver = CertificateResolver::watch(
-            CERTIFICATES_DIRECTORY.parse().unwrap(),
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/certificates"),
             RwLock::new(Box::new(DummyAlpnChallengeResolver)),
             Duration::from_secs(30),
         )
@@ -335,12 +336,10 @@ mod certificate_resolver_tests {
         fs::create_dir_all(certs_dir.as_path())
             .await
             .expect("unable to create foobar.tld tempdir");
-        fs::write(
+        fs::copy(
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/certificates/foobar.tld/privkey.pem"),
             certs_dir.join("privkey.pem"),
-            include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/data/certificates/foobar.tld/privkey.pem"
-            )),
         )
         .await
         .expect("unable to copy privkey.pem to tempdir");
@@ -375,12 +374,10 @@ mod certificate_resolver_tests {
         fs::create_dir_all(certs_dir.as_path())
             .await
             .expect("unable to create foobar.tld tempdir");
-        fs::write(
+        fs::copy(
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/certificates/foobar.tld/fullchain.pem"),
             certs_dir.join("fullchain.pem"),
-            include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/data/certificates/foobar.tld/fullchain.pem"
-            )),
         )
         .await
         .expect("unable to copy fullchain.pem to tempdir");
@@ -418,12 +415,10 @@ mod certificate_resolver_tests {
         fs::write(certs_dir.join("fullchain.pem"), b"invalid certificate")
             .await
             .expect("unable to write fullchain.pem to tempdir");
-        fs::write(
+        fs::copy(
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/certificates/foobar.tld/privkey.pem"),
             certs_dir.join("privkey.pem"),
-            include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/data/certificates/foobar.tld/privkey.pem"
-            )),
         )
         .await
         .expect("unable to copy privkey.pem to tempdir");
@@ -458,12 +453,10 @@ mod certificate_resolver_tests {
         fs::create_dir_all(certs_dir.as_path())
             .await
             .expect("unable to create foobar.tld tempdir");
-        fs::write(
+        fs::copy(
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/certificates/foobar.tld/fullchain.pem"),
             certs_dir.join("fullchain.pem"),
-            include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/data/certificates/foobar.tld/fullchain.pem"
-            )),
         )
         .await
         .expect("unable to copy fullchain.pem to tempdir");
@@ -493,7 +486,8 @@ mod certificate_resolver_tests {
 
         let resolver = Arc::new(
             CertificateResolver::watch(
-                CERTIFICATES_DIRECTORY.parse().unwrap(),
+                PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                    .join("tests/data/certificates"),
                 RwLock::new(Box::new(mock)),
                 Duration::from_secs(30),
             )

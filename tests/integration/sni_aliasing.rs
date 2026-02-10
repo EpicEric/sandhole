@@ -33,16 +33,6 @@ use tower::Service;
 
 use crate::common::SandholeHandle;
 
-// Certificate for sandhole.com.br with custom CA
-const TLS_CERTIFICATE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/tests/data/custom_certificate/fullchain.pem"
-));
-const TLS_KEY: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/tests/data/custom_certificate/privkey.pem"
-));
-
 /// This test ensures that local forwarding works for SNI proxies.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn sni_aliasing() {
@@ -51,15 +41,30 @@ async fn sni_aliasing() {
         "sandhole",
         "--domain=foobar.tld",
         "--user-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
+        &(format!(
+            "{}/tests/data/user_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--admin-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys"),
+        &(format!(
+            "{}/tests/data/admin_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--certificates-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates"),
+        &(format!(
+            "{}/tests/data/certificates",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--private-key-file",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh"),
+        &(format!(
+            "{}/tests/data/server_keys/ssh",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--acme-cache-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
+        &(format!(
+            "{}/tests/data/acme_cache",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--disable-directory-creation",
         "--listen-address=127.0.0.1",
         "--ssh-port=18022",
@@ -85,7 +90,8 @@ async fn sni_aliasing() {
 
     // 2. Start SSH client that will be proxied with SNI
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
@@ -133,10 +139,10 @@ async fn sni_aliasing() {
     // 3. Alias to our SNI proxy
     let mut root_store = RootCertStore::empty();
     root_store.add_parsable_certificates(
-        CertificateDer::pem_file_iter(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/data/ca/rootCA.pem"
-        ))
+        CertificateDer::pem_file_iter(
+            std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("tests/data/ca/rootCA.pem"),
+        )
         .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
         .expect("Failed to parse certificates"),
     );
@@ -251,10 +257,18 @@ impl russh::client::Handler for SshClient {
         tokio::spawn(async move {
             let router = Router::new().route("/sni-proxy", get(async || "Hello from SNI proxy!"));
             let service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
-            let certs = CertificateDer::pem_slice_iter(TLS_CERTIFICATE.as_bytes())
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap();
-            let key = PrivateKeyDer::from_pem_slice(TLS_KEY.as_bytes()).unwrap();
+            let certs = CertificateDer::pem_file_iter(
+                std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                    .join("tests/data/custom_certificate/fullchain.pem"),
+            )
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+            let key = PrivateKeyDer::from_pem_file(
+                std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                    .join("tests/data/custom_certificate/privkey.pem"),
+            )
+            .unwrap();
             let config = rustls::ServerConfig::builder()
                 .with_no_client_auth()
                 .with_single_cert(certs, key)

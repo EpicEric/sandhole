@@ -31,15 +31,30 @@ async fn alias_http_aliases() {
         "sandhole",
         "--domain=foobar.tld",
         "--user-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/user_keys"),
+        &(format!(
+            "{}/tests/data/user_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--admin-keys-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/admin_keys"),
+        &(format!(
+            "{}/tests/data/admin_keys",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--certificates-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/certificates"),
+        &(format!(
+            "{}/tests/data/certificates",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--private-key-file",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/server_keys/ssh"),
+        &(format!(
+            "{}/tests/data/server_keys/ssh",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--acme-cache-directory",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/acme_cache"),
+        &(format!(
+            "{}/tests/data/acme_cache",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )),
         "--disable-directory-creation",
         "--listen-address=127.0.0.1",
         "--ssh-port=18022",
@@ -66,7 +81,8 @@ async fn alias_http_aliases() {
     // 2. Start SSH clients that will be proxied via alias for specific fingerprints
     // 2a. Tunnel first, then exec allowed-fingerprints
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
@@ -114,7 +130,8 @@ async fn alias_http_aliases() {
     assert_eq!(channel_id, channel.id());
     // 2b. exec allowed-fingerprints first, then alias
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
@@ -164,7 +181,8 @@ async fn alias_http_aliases() {
     // 3. Start SSH client that will be proxied via alias for all fingerprints
     // 3a. Tunnel first, then exec tcp-alias
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/key2"),
         None,
     )
     .expect("Missing file key2");
@@ -203,7 +221,8 @@ async fn alias_http_aliases() {
     assert_eq!(channel_id, channel.id());
     // 3b. exec tcp-alias first, then alias
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/key2"),
         None,
     )
     .expect("Missing file key2");
@@ -243,7 +262,8 @@ async fn alias_http_aliases() {
 
     // 4. Local-forward with valid key
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");

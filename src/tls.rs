@@ -24,7 +24,7 @@ pub(crate) async fn peek_sni_and_alpn(buf: &[u8]) -> Option<TlsPeekData> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod peek_sni_and_alpn_tests {
-    use std::sync::Arc;
+    use std::{path::PathBuf, sync::Arc};
 
     use rustls_pki_types::pem::PemObject;
     use tokio::io::{AsyncReadExt, duplex};
@@ -41,10 +41,10 @@ mod peek_sni_and_alpn_tests {
     async fn fails_on_plain_message() {
         let mut root_store = rustls::RootCertStore::empty();
         root_store.add_parsable_certificates(
-            rustls_pki_types::CertificateDer::pem_file_iter(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/data/ca/rootCA.pem"
-            ))
+            rustls_pki_types::CertificateDer::pem_file_iter(
+                PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                    .join("tests/data/ca/rootCA.pem"),
+            )
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
             .expect("Failed to parse client certificates"),
         );
@@ -77,10 +77,10 @@ mod peek_sni_and_alpn_tests {
     async fn fails_on_missing_sni() {
         let mut root_store = rustls::RootCertStore::empty();
         root_store.add_parsable_certificates(
-            rustls_pki_types::CertificateDer::pem_file_iter(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/data/ca/rootCA.pem"
-            ))
+            rustls_pki_types::CertificateDer::pem_file_iter(
+                PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                    .join("tests/data/ca/rootCA.pem"),
+            )
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
             .expect("Failed to parse client certificates"),
         );
@@ -114,10 +114,10 @@ mod peek_sni_and_alpn_tests {
     async fn returns_sni_data() {
         let mut root_store = rustls::RootCertStore::empty();
         root_store.add_parsable_certificates(
-            rustls_pki_types::CertificateDer::pem_file_iter(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/data/ca/rootCA.pem"
-            ))
+            rustls_pki_types::CertificateDer::pem_file_iter(
+                PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                    .join("tests/data/ca/rootCA.pem"),
+            )
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
             .expect("Failed to parse client certificates"),
         );
@@ -152,10 +152,10 @@ mod peek_sni_and_alpn_tests {
     async fn returns_sni_and_alpn_data() {
         let mut root_store = rustls::RootCertStore::empty();
         root_store.add_parsable_certificates(
-            rustls_pki_types::CertificateDer::pem_file_iter(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/data/ca/rootCA.pem"
-            ))
+            rustls_pki_types::CertificateDer::pem_file_iter(
+                PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                    .join("tests/data/ca/rootCA.pem"),
+            )
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
             .expect("Failed to parse client certificates"),
         );

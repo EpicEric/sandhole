@@ -115,7 +115,8 @@ async fn lib_configure_from_scratch() {
 
     // 3. Start SSH client that is not recognized
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key1"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/key1"),
         None,
     )
     .expect("Missing file key1");
@@ -144,10 +145,8 @@ async fn lib_configure_from_scratch() {
 
     // 4. Add key for SSH client that will be recognized
     fs::copy(
-        concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/data/user_keys/keys_1_2.pub"
-        ),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/user_keys/keys_1_2.pub"),
         temp_dir.join("user_keys/keys_1_2.pub"),
     )
     .await
@@ -155,7 +154,8 @@ async fn lib_configure_from_scratch() {
     // Wait for debounce on user pubkeys watcher (1s) + time to process the file
     sleep(Duration::from_millis(4_000)).await;
     let key = load_secret_key(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/private_keys/key2"),
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests/data/private_keys/key2"),
         None,
     )
     .expect("Missing file key2");
