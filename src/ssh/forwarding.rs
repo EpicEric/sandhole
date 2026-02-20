@@ -126,14 +126,21 @@ impl Forwarder {
         context: &mut RemoteForwardingContext<'_>,
         address: &str,
         port: u16,
+        ssh_port: u16,
+        http_port: Option<u16>,
+        https_port: Option<u16>,
     ) -> Result<bool, russh::Error> {
         match port {
-            22 => {
+            port if port == 22 || port == ssh_port => {
                 SshForwardingHandler
                     .cancel_remote_forwarding(context, address, port)
                     .await
             }
-            80 | 443 => {
+            port if port == 80
+                || port == 443
+                || http_port.is_some_and(|http_port| port == http_port)
+                || https_port.is_some_and(|https_port| port == https_port) =>
+            {
                 HttpForwardingHandler
                     .cancel_remote_forwarding(context, address, port)
                     .await
@@ -159,7 +166,7 @@ impl Forwarder {
         originator_port: u16,
         channel: Channel<Msg>,
     ) -> Result<bool, russh::Error> {
-        if port == context.server.ssh_port {
+        if port == 22 || port == context.server.ssh_port {
             SshForwardingHandler
                 .local_forwarding(
                     context,
@@ -170,7 +177,11 @@ impl Forwarder {
                     channel,
                 )
                 .await
-        } else if port == context.server.http_port || port == context.server.https_port {
+        } else if port == 80
+            || port == 443
+            || port == context.server.http_port
+            || port == context.server.https_port
+        {
             HttpForwardingHandler
                 .local_forwarding(
                     context,
