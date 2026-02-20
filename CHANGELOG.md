@@ -19,6 +19,7 @@
 ### Changed
 
 - Lower default `--directory-poll-interval` value from 30 seconds to 15 seconds.
+- Use SNI to improve HTTPS performance.
 - Update Docker base image.
 - Update dependencies.
 
