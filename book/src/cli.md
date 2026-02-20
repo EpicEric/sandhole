@@ -30,8 +30,8 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           [default: ./deploy/user_keys/]
 
       <b>--admin-keys-directory</b> &lt;DIRECTORY&gt;
-          Directory containing public keys of admin users. Each file must
-          contain at least one key
+          Directory containing public keys of admin users. Each file must contain
+          at least one key
 
           [default: ./deploy/admin_keys/]
 
@@ -119,8 +119,6 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           Beware that this can lead to domain takeovers if misused!
 
-          [default: txt]
-
           Possible values:
           - <b>all</b>:   Allow any hostnames unconditionally, including the
                    main domain
@@ -131,14 +129,14 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           - <b>none</b>:  Don&#39;t allow user-provided hostnames, enforce
                    subdomains
 
+          [default: txt]
+
       <b>--load-balancing</b> &lt;STRATEGY&gt;
           Strategy for load-balancing when multiple services request the same
           hostname/port.
 
           By default, traffic towards matching hostnames/ports will be
           load-balanced.
-
-          [default: allow]
 
           Possible values:
           - <b>allow</b>:   Load-balance with all available handlers
@@ -147,17 +145,19 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           - <b>deny</b>:    Don&#39;t load-balance; Deny the new handler if
                      there&#39;s an existing one
 
+          [default: allow]
+
       <b>--load-balancing-algorithm</b> &lt;ALGORITHM&gt;
           Algorithm to use for service selection when load-balancing.
 
           By default, traffic will be randomly distributed between services.
 
-          [default: random]
-
           Possible values:
           - <b>random</b>:      Choose randomly
           - <b>round-robin</b>: Round robin
           - <b>ip-hash</b>:     Choose based on IP hash
+
+          [default: random]
 
       <b>--txt-record-prefix</b> &lt;PREFIX&gt;
           Prefix for TXT DNS records containing key fingerprints, for
@@ -228,8 +228,8 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
       <b>--random-subdomain-value-file</b> &lt;FILE&gt;
           Set a file containing a U64 value for random subdomains for use in
-          conjunction with `--random-subdomain-seed` to allow binding to the same
-          random address between Sandhole restarts.
+          conjunction with `--random-subdomain-seed` to allow binding to the
+          same random address between Sandhole restarts.
 
           Beware that this can lead to collisions if misused!
 
@@ -251,7 +251,8 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           - <b>ip-and-user</b>: From IP address, SSH user, and requested address.
                          Recommended if unsure
           - <b>user</b>:        From SSH user and requested address
-          - <b>fingerprint</b>: From SSH user, key fingerprint, and requested address
+          - <b>fingerprint</b>: From SSH user, key fingerprint, and requested
+                         address
           - <b>address</b>:     From SSH connection socket (address + port) and
                          requested address
 
@@ -282,7 +283,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           unknown IPs to connect, unless --ip-allowlist is set
 
       <b>--buffer-size</b> &lt;SIZE&gt;
-          Size to use for bidirectional buffers, in bytes.
+          Size to use for bidirectional buffers.
 
           A higher value will lead to higher memory consumption.
 
@@ -298,11 +299,20 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           [default: 256]
 
       <b>--pool-timeout</b> &lt;DURATION&gt;
-          How long to wait for a connection to be available in the pool
-          before being timed out.
+          How long to wait for a connection to be available in the pool before
+          being timed out.
 
           By default, connections are immediately timed out when the pool is
           exhausted.
+
+      <b>--max-simultaneous-connections-per-ip</b> &lt;SIZE&gt;
+          Maximum number of simultaneous connections per IP to a proxied
+          service. The maximum is 65535.
+
+          A low value may lead to client side disruptions, while a high value
+          may lead to denial-of-service.
+
+          [default: 16]
 
       <b>--ssh-keepalive-interval</b> &lt;DURATION&gt;
           How long to wait between each keepalive message that is sent to an
@@ -316,8 +326,8 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           A value of zero disables timeouts.
 
-          The timeout is equal to this value plus one,
-          times `--ssh-keepalive-interval`.
+          The timeout is equal to this value plus one, times
+          `--ssh-keepalive-interval`.
 
           [default: 3]
 

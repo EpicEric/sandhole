@@ -8,6 +8,7 @@
 - Add `--pool-size` CLI flag.
 - Add `--pool-timeout` CLI flag.
 - Add `--no-domain` CLI flag.
+- Add `--max-simultaneous-connections-per-ip` CLI flag.
 - Add `pool` option for remote forwarding connections.
 - Add keepalive mechanism for proxied HTTP connections.
 

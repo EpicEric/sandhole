@@ -1,4 +1,4 @@
 {
   system ? builtins.currentSystem,
 }:
-(import ./nix/lib.nix { inherit system; }).sandhole
+(import ./nix { inherit system; }).sandhole

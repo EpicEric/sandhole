@@ -163,7 +163,7 @@ async fn http_pool_timeout() {
         jhs.push(jh);
     }
 
-    // 3. Start request that gets rate-limited from pool exhaustion
+    // 4. Start request that gets rate-limited from pool exhaustion
     tokio::time::sleep(Duration::from_millis(500)).await;
     let tcp_stream = TcpStream::connect("127.0.0.1:18080")
         .await
@@ -195,7 +195,7 @@ async fn http_pool_timeout() {
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     jh.abort();
 
-    // 4. Start request that gets queued and eventually completes
+    // 5. Start request that gets queued and eventually completes
     tokio::time::sleep(Duration::from_millis(1000)).await;
     let tcp_stream = TcpStream::connect("127.0.0.1:18080")
         .await

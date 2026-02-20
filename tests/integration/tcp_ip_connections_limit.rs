@@ -18,10 +18,10 @@ use tokio::{
 
 use crate::common::SandholeHandle;
 
-/// This test ensures that queued connections get a spot
-/// when the pool gets released.
+/// This test ensures that no more TCP connections from the same IP
+/// than the specified limit are able to connect at the same time.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn tcp_pool_timeout() {
+async fn tcp_ip_connections_limit() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -52,7 +52,7 @@ async fn tcp_pool_timeout() {
             std::env::var("CARGO_MANIFEST_DIR").unwrap()
         )),
         "--disable-directory-creation",
-        "--listen-address=127.0.0.1",
+        "--listen-address=::",
         "--ssh-port=18022",
         "--http-port=18080",
         "--https-port=18443",
@@ -60,8 +60,7 @@ async fn tcp_pool_timeout() {
         "--allow-requested-ports",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
-        "--pool-size=2",
-        "--pool-timeout=3s",
+        "--max-simultaneous-connections-per-ip=1",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -105,23 +104,19 @@ async fn tcp_pool_timeout() {
         .await
         .expect("tcpip_forward failed");
 
-    // 3. Start long-running requests that fill the pool
+    // 3. Start long-running request that takes the spot for the IP
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let mut jhs = Vec::new();
     let started = Instant::now();
-    for _ in 0..2 {
-        let mut tcp_stream = TcpStream::connect("127.0.0.1:12345")
-            .await
-            .expect("TCP connection failed");
-        let jh = tokio::spawn(async move {
-            let mut data = [0u8; 10];
-            tcp_stream.read_exact(&mut data).await.unwrap();
-            assert_eq!(data, b"0123456789"[..]);
-        });
-        jhs.push(jh);
-    }
+    let mut tcp_stream = TcpStream::connect("127.0.0.1:12345")
+        .await
+        .expect("TCP connection failed");
+    let jh = tokio::spawn(async move {
+        let mut data = [0u8; 10];
+        tcp_stream.read_exact(&mut data).await.unwrap();
+        assert_eq!(data, b"0123456789"[..]);
+    });
 
-    // 4. Start request that gets rate-limited from pool exhaustion
+    // 4. Start request that gets rate-limited from IP connection exhaustion
     tokio::time::sleep(Duration::from_millis(500)).await;
     let mut tcp_stream = TcpStream::connect("127.0.0.1:12345")
         .await
@@ -129,27 +124,22 @@ async fn tcp_pool_timeout() {
     let mut data = [0u8; 10];
     assert!(tcp_stream.read_exact(&mut data).await.is_err());
 
-    // 5. Start request that gets queued and eventually completes
+    // 5. Start request from different IP that succeeds
     tokio::time::sleep(Duration::from_millis(1000)).await;
-    let mut tcp_stream = TcpStream::connect("127.0.0.1:12345")
+    let mut tcp_stream = TcpStream::connect("[::1]:12345")
         .await
         .expect("TCP connection failed");
-    let jh = tokio::spawn(async move {
-        let mut data = [0u8; 10];
-        assert!(started.elapsed() < Duration::from_secs(5));
-        tcp_stream.read_exact(&mut data).await.unwrap();
-        assert!(started.elapsed() > Duration::from_secs(5));
-        assert_eq!(data, b"0123456789"[..]);
-    });
-    jhs.push(jh);
+    let mut data = [0u8; 10];
+    assert!(started.elapsed() < Duration::from_secs(5));
+    tcp_stream.read_exact(&mut data).await.unwrap();
+    assert!(started.elapsed() > Duration::from_secs(5));
+    assert_eq!(data, b"0123456789"[..]);
 
     timeout(Duration::from_secs(10), async move {
-        for jh in jhs {
-            jh.await.unwrap();
-        }
+        jh.await.unwrap();
     })
     .await
-    .expect("timeout waiting for join handles to finish");
+    .expect("timeout waiting for join handle to finish");
 }
 
 struct SshClient;

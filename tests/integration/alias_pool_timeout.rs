@@ -168,7 +168,7 @@ async fn alias_pool_timeout() {
         jhs.push(jh);
     }
 
-    // 3. Start request that gets rate-limited from pool exhaustion
+    // 4. Start request that gets rate-limited from pool exhaustion
     tokio::time::sleep(Duration::from_millis(500)).await;
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
         &ChaCha20Rng::from_os_rng().random(),
@@ -203,7 +203,7 @@ async fn alias_pool_timeout() {
             .is_err()
     );
 
-    // 4. Start request that gets queued and eventually completes
+    // 5. Start request that gets queued and eventually completes
     tokio::time::sleep(Duration::from_millis(1000)).await;
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
         &ChaCha20Rng::from_os_rng().random(),

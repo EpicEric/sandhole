@@ -158,7 +158,7 @@ async fn http_pool_limit() {
         jhs.push(jh);
     }
 
-    // 3. Start request that gets rate-limited from pool exhaustion
+    // 4. Start request that gets rate-limited from pool exhaustion
     tokio::time::sleep(Duration::from_millis(500)).await;
     let tcp_stream = TcpStream::connect("127.0.0.1:18080")
         .await

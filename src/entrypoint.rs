@@ -658,6 +658,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         disable_aliasing: config.disable_aliasing,
         buffer_size,
         pool_size: usize::from(config.pool_size),
+        max_connections_per_ip: usize::from(config.max_simultaneous_connections_per_ip),
         pool_timeout: config.pool_timeout,
         rate_limit: config
             .rate_limit_per_user
