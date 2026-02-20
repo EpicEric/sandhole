@@ -10,6 +10,7 @@ mod admin_restricted_aliases;
 mod admin_window_change;
 mod alias_aliasing_tunnel;
 mod alias_cannot_be_localhost;
+mod alias_http2;
 mod alias_http_aliases;
 mod alias_ip_connections_limit;
 mod alias_local_forward_existing_http;

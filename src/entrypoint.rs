@@ -56,8 +56,8 @@ use crate::{
     error::ServerError,
     fingerprints::FingerprintsValidator,
     http::{
-        DomainRedirect, Protocol, ProxyData, ProxyType, http2_handler, http11_handler,
-        proxy_handler,
+        DomainRedirect, Protocol, ProxyData, ProxyType, http2::https_2_handler,
+        http11::https_11_handler, proxy_handler,
     },
     ip::{IpFilter, IpFilterConfig},
     quota::{DummyQuotaHandler, QuotaHandler, QuotaMap},
@@ -999,7 +999,7 @@ async fn handle_https_connection(
                     // Create a Hyper service and serve over the accepted TLS connection.
                     let io = TokioIo::new(stream);
                     let service = service_fn(move |req: Request<Incoming>| {
-                        http2_handler(
+                        https_2_handler(
                             req,
                             address,
                             Arc::clone(&proxy_data),
@@ -1030,7 +1030,7 @@ async fn handle_https_connection(
                     // Create a Hyper service and serve over the accepted TLS connection.
                     let io = TokioIo::new(stream);
                     let service = service_fn(move |req: Request<Incoming>| {
-                        http11_handler(
+                        https_11_handler(
                             req,
                             address,
                             Arc::clone(&proxy_data),

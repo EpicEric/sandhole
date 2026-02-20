@@ -887,6 +887,17 @@ impl Handler for ServerHandler {
             | AuthenticatedData::Admin { user_data, .. } => user_data,
             AuthenticatedData::None { .. } => return Err(russh::Error::Disconnect),
         };
+        let ssh_port = self.server.ssh_port;
+        let http_port = if self.server.disable_http {
+            None
+        } else {
+            Some(self.server.http_port)
+        };
+        let https_port = if self.server.disable_https {
+            None
+        } else {
+            Some(self.server.https_port)
+        };
         Forwarder::cancel_remote_forwarding(
             &mut RemoteForwardingContext {
                 server: &mut self.server,
@@ -898,6 +909,9 @@ impl Handler for ServerHandler {
             },
             address.trim(),
             port as u16,
+            ssh_port,
+            http_port,
+            https_port,
         )
         .await
     }

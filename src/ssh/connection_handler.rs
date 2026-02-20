@@ -246,7 +246,7 @@ impl SshTunnelHandler {
                 .ip_connections
                 .entry(ip)
                 .or_insert(Arc::new(Semaphore::new(self.max_connections_per_ip)));
-            Arc::clone(&entry.value())
+            Arc::clone(entry.value())
         };
         let Ok(_permit) = semaphore.try_acquire_owned() else {
             return Err(ServerError::IpConnectionLimitReached);
