@@ -5,7 +5,9 @@ use std::{
     time::Duration,
 };
 
+use ahash::RandomState;
 use async_speed_limit::{Limiter, Resource, clock::StandardClock};
+use dashmap::DashMap;
 use russh::{ChannelStream, keys::ssh_key::Fingerprint, server::Msg};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -20,10 +22,25 @@ use crate::{
     ssh::{FingerprintFn, ServerHandlerSender},
 };
 
+struct IpConnectionGuard {
+    ip: IpAddr,
+    _permit: OwnedSemaphorePermit,
+    ip_connections: Arc<DashMap<IpAddr, Arc<Semaphore>, RandomState>>,
+}
+
+impl Drop for IpConnectionGuard {
+    fn drop(&mut self) {
+        self.ip_connections
+            .remove_if(&self.ip, |_, semaphore| Arc::strong_count(semaphore) == 1);
+    }
+}
+
 // Reference-counted wrapper of an SSH channel stream.
 pub(crate) struct SshChannel {
     // AsyncRead + AsyncWrite implementer being wrapped.
     inner: Resource<ChannelStream<Msg>, StandardClock>,
+    // IP connection guard that the connection is being used until it is dropped.
+    _ip_connection_guard: IpConnectionGuard,
     // Pool permit that signals that the connection is being used until it is dropped.
     _pool_permit: OwnedSemaphorePermit,
 }
@@ -75,6 +92,10 @@ pub(crate) struct SshTunnelHandler {
     pub(crate) pool: Arc<Semaphore>,
     // How long should a connection wait for a spot in the pool before being timed out.
     pub(crate) pool_timeout: Option<Duration>,
+    // Track number of active connections per IP.
+    pub(crate) ip_connections: Arc<DashMap<IpAddr, Arc<Semaphore>, RandomState>>,
+    // Maximum connections allowed per IP.
+    pub(crate) max_connections_per_ip: usize,
     // Optional IP filtering for this handler's tunneling and aliasing channels.
     pub(crate) ip_filter: Arc<RwLock<Option<IpFilter>>>,
     // Handle to the SSH connection, in order to create remote forwarding channels.
@@ -119,6 +140,7 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
             .as_ref()
             .is_none_or(|filter| filter.is_allowed(ip));
         if tunneling_allowed {
+            let ip_connection_guard = self.acquire_ip_guard(ip)?;
             let pool = Arc::clone(&self.pool);
             let pool_permit = if let Some(duration) = self.pool_timeout {
                 let Ok(Ok(pool_permit)) =
@@ -145,6 +167,7 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
                 .into_stream();
             Ok(SshChannel {
                 inner: self.limiter.clone().limit(channel),
+                _ip_connection_guard: ip_connection_guard,
                 _pool_permit: pool_permit,
             })
         } else {
@@ -170,6 +193,7 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
         fingerprint: Option<&'_ Fingerprint>,
     ) -> Result<SshChannel, ServerError> {
         if self.can_alias(ip, port, fingerprint) {
+            let ip_connection_guard = self.acquire_ip_guard(ip)?;
             let pool = Arc::clone(&self.pool);
             let pool_permit = if let Some(duration) = self.pool_timeout {
                 let Ok(Ok(pool_permit)) =
@@ -196,6 +220,7 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
                 .into_stream();
             Ok(SshChannel {
                 inner: self.limiter.clone().limit(channel),
+                _ip_connection_guard: ip_connection_guard,
                 _pool_permit: pool_permit,
             })
         } else {
@@ -211,5 +236,25 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
                 .expect("not poisoned")
                 .clone(),
         )
+    }
+}
+
+impl SshTunnelHandler {
+    fn acquire_ip_guard(&self, ip: IpAddr) -> Result<IpConnectionGuard, ServerError> {
+        let semaphore = {
+            let entry = self
+                .ip_connections
+                .entry(ip)
+                .or_insert(Arc::new(Semaphore::new(self.max_connections_per_ip)));
+            Arc::clone(&entry.value())
+        };
+        let Ok(_permit) = semaphore.try_acquire_owned() else {
+            return Err(ServerError::IpConnectionLimitReached);
+        };
+        Ok(IpConnectionGuard {
+            ip,
+            ip_connections: Arc::clone(&self.ip_connections),
+            _permit,
+        })
     }
 }

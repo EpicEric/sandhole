@@ -154,6 +154,8 @@ pub(crate) struct SandholeServer {
     pub(crate) buffer_size: usize,
     // Pool size for SSH handlers.
     pub(crate) pool_size: usize,
+    // Maximum simultaneous connections per IP for SSH handlers.
+    pub(crate) max_connections_per_ip: usize,
     // Rate limit per second for services of a single user.
     pub(crate) rate_limit: f64,
     // How long until a login API request is timed out.

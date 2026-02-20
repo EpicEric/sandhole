@@ -55,27 +55,20 @@
     // eachSystem (
       system:
       let
-        inherit (import ./nix/lib.nix { inherit system; })
-          sandhole
-          sandhole-book
-          sandhole-cli
-          optionsDoc
-          lib
+        inherit (import ./nix { inherit system; })
+          pkgs
+          packages
           checks
+          shell
           ;
+        inherit (pkgs) lib;
       in
       {
-        packages.${system} = {
-          inherit sandhole;
-          default = sandhole;
-          _book = sandhole-book;
-          _cli = sandhole-cli;
-          _docs = optionsDoc.optionsCommonMark;
-        };
+        packages.${system} = packages;
 
         apps.${system}.default = {
           type = "app";
-          program = lib.getExe sandhole;
+          program = lib.getExe self.packages.${system}.default;
           meta = {
             name = "sandhole";
             description = "Expose HTTP/SSH/TCP services through SSH port forwarding";
@@ -88,7 +81,7 @@
 
         checks.${system} = checks;
 
-        devShells.${system}.default = import ./shell.nix { inherit system; };
+        devShells.${system}.default = shell;
       }
     );
 }

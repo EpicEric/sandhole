@@ -399,6 +399,14 @@ pub struct ApplicationConfig {
     #[arg(long, value_parser = validate_duration, value_name = "DURATION")]
     pub pool_timeout: Option<Duration>,
 
+    /// Maximum number of simultaneous connections per IP to a proxied service.
+    /// The maximum is 65535.
+    ///
+    /// A low value may lead to client side disruptions,
+    /// while a high value may lead to denial-of-service.
+    #[arg(long, default_value_t = 16, value_name = "SIZE")]
+    pub max_simultaneous_connections_per_ip: u16,
+
     /// How long to wait between each keepalive message that is sent to an unresponsive SSH connection.
     #[arg(long, default_value = "15s", value_parser = validate_duration, value_name = "DURATION")]
     pub ssh_keepalive_interval: Duration,
@@ -567,6 +575,7 @@ mod application_config_tests {
                 buffer_size: 32_768,
                 pool_size: 256,
                 pool_timeout: None,
+                max_simultaneous_connections_per_ip: 16,
                 ssh_keepalive_interval: Duration::from_secs(15),
                 ssh_keepalive_max: 3,
                 directory_poll_interval: Duration::from_secs(15),
@@ -628,6 +637,7 @@ mod application_config_tests {
             "--buffer-size=4KB",
             "--pool-size=2048",
             "--pool-timeout=9s",
+            "--max-simultaneous-connections-per-ip=32",
             "--ssh-keepalive-interval=10s",
             "--ssh-keepalive-max=2",
             "--directory-poll-interval=10s",
@@ -691,6 +701,7 @@ mod application_config_tests {
                 buffer_size: 4_000,
                 pool_size: 2_048,
                 pool_timeout: Some(Duration::from_secs(9)),
+                max_simultaneous_connections_per_ip: 32,
                 ssh_keepalive_interval: Duration::from_secs(10),
                 ssh_keepalive_max: 2,
                 directory_poll_interval: Duration::from_secs(10),

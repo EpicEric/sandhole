@@ -29,6 +29,8 @@ pub(crate) enum ServerError {
     AliasingNotAllowed,
     #[error("Pool limit reached")]
     PoolLimitReached,
+    #[error("IP connection limit reached")]
+    IpConnectionLimitReached,
     #[error("SSH error: {0}")]
     Ssh(#[from] russh::Error),
 }

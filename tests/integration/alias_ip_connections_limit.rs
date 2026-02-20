@@ -3,28 +3,24 @@ use std::{sync::Arc, time::Duration};
 use clap::Parser;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     Channel,
     client::{Msg, Session},
     keys::ssh_key::private::Ed25519Keypair,
 };
-use russh::{
-    ChannelId,
-    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
-};
 use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
-    sync::oneshot,
     time::{sleep, timeout},
 };
 
 use crate::common::SandholeHandle;
 
-/// This test ensures that no more aliased connections than the specified pool limit
-/// are able to connect at the same time.
+/// This test ensures that no more aliased connections from the same IP
+/// than the specified limit are able to connect at the same time.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn alias_pool_limit() {
+async fn alias_ip_connections_limit() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -55,7 +51,7 @@ async fn alias_pool_limit() {
             std::env::var("CARGO_MANIFEST_DIR").unwrap()
         )),
         "--disable-directory-creation",
-        "--listen-address=127.0.0.1",
+        "--listen-address=::",
         "--ssh-port=18022",
         "--http-port=18080",
         "--https-port=18443",
@@ -63,7 +59,7 @@ async fn alias_pool_limit() {
         "--bind-hostnames=all",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
-        "--pool-size=10",
+        "--max-simultaneous-connections-per-ip=1",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -84,8 +80,7 @@ async fn alias_pool_limit() {
         None,
     )
     .expect("Missing file key1");
-    let (tx, rx) = oneshot::channel();
-    let ssh_client = SshClient(Some(tx));
+    let ssh_client = SshClient;
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
         .await
         .expect("Failed to connect to SSH server");
@@ -107,67 +102,54 @@ async fn alias_pool_limit() {
         .tcpip_forward("some.alias", 12345)
         .await
         .expect("tcpip_forward failed");
-    let channel = session
-        .channel_open_session()
-        .await
-        .expect("channel_open_session_failed");
-    channel.exec(true, "pool=2").await.expect("exec failed");
-    let Ok(channel_id) = timeout(Duration::from_secs(2), async { rx.await.unwrap() }).await else {
-        panic!("Timeout waiting for server to reply.");
-    };
-    assert_eq!(channel_id, channel.id());
 
-    // 3. Start long-running requests that fill the pool
-    let mut jhs = Vec::new();
-    for _ in 0..2 {
-        let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::from_os_rng().random(),
-        ));
-        let ssh_client = SshAliasClient;
-        let mut client_session =
-            russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
-                .await
-                .expect("Failed to connect to SSH server");
-        assert!(
-            client_session
-                .authenticate_publickey(
-                    "user",
-                    PrivateKeyWithHashAlg::new(
-                        Arc::new(key),
-                        client_session
-                            .best_supported_rsa_hash()
-                            .await
-                            .unwrap()
-                            .flatten()
-                    )
-                )
-                .await
-                .expect("SSH authentication failed")
-                .success(),
-            "authentication didn't succeed"
-        );
-        let mut channel = client_session
-            .channel_open_direct_tcpip("some.alias", 12345, "::1", 23456)
+    // 3. Start long-running request that takes the spot for the IP
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::from_os_rng().random(),
+    ));
+    let ssh_client = SshClient;
+    let mut client_session =
+        russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
             .await
-            .expect("Local forwarding failed");
-        let jh = tokio::spawn(async move {
-            while let Some(msg) = channel.wait().await {
-                if let russh::ChannelMsg::Data { data } = msg {
-                    assert_eq!(&data[..], &b"Ping"[..]);
-                    break;
-                }
+            .expect("Failed to connect to SSH server");
+    assert!(
+        client_session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    client_session
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
+            )
+            .await
+            .expect("SSH authentication failed")
+            .success(),
+        "authentication didn't succeed"
+    );
+    let mut channel = client_session
+        .channel_open_direct_tcpip("some.alias", 12345, "::1", 23456)
+        .await
+        .expect("Local forwarding failed");
+    let jh = tokio::spawn(async move {
+        while let Some(msg) = channel.wait().await {
+            if let russh::ChannelMsg::Data { data } = msg {
+                assert_eq!(&data[..], &b"Ping"[..]);
+                break;
             }
-            drop(client_session);
-        });
-        jhs.push(jh);
-    }
+        }
+        drop(client_session);
+    });
 
-    // 3. Start request that gets rate-limited from pool exhaustion
+    // 4. Start request that gets rate-limited from IP connection exhaustion
     tokio::time::sleep(Duration::from_millis(500)).await;
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
         &ChaCha20Rng::from_os_rng().random(),
     ));
-    let ssh_client = SshAliasClient;
+    let ssh_client = SshClient;
     let mut client_session =
         russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
             .await
@@ -196,16 +178,49 @@ async fn alias_pool_limit() {
             .await
             .is_err()
     );
+
+    // 5. Start request from different IP that succeeds
+    let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+        &ChaCha20Rng::from_os_rng().random(),
+    ));
+    let ssh_client = SshClient;
+    let mut client_session = russh::client::connect(Default::default(), "[::1]:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
+    assert!(
+        client_session
+            .authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    client_session
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
+                )
+            )
+            .await
+            .expect("SSH authentication failed")
+            .success(),
+        "authentication didn't succeed"
+    );
+    assert!(
+        client_session
+            .channel_open_direct_tcpip("some.alias", 12345, "::1", 23456)
+            .await
+            .is_ok(),
+        "local forwarding failed"
+    );
+
     timeout(Duration::from_secs(5), async move {
-        for jh in jhs {
-            jh.await.unwrap();
-        }
+        jh.await.unwrap();
     })
     .await
-    .expect("timeout waiting for join handles to finish");
+    .expect("timeout waiting for join handle to finish");
 }
 
-struct SshClient(Option<oneshot::Sender<ChannelId>>);
+struct SshClient;
 
 impl russh::client::Handler for SshClient {
     type Error = color_eyre::eyre::Error;
@@ -233,29 +248,5 @@ impl russh::client::Handler for SshClient {
             channel.close().await.unwrap();
         });
         Ok(())
-    }
-
-    async fn channel_success(
-        &mut self,
-        channel: ChannelId,
-        _session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        if let Some(tx) = self.0.take() {
-            tx.send(channel).unwrap();
-        };
-        Ok(())
-    }
-}
-
-struct SshAliasClient;
-
-impl russh::client::Handler for SshAliasClient {
-    type Error = color_eyre::eyre::Error;
-
-    async fn check_server_key(
-        &mut self,
-        _key: &russh::keys::PublicKey,
-    ) -> Result<bool, Self::Error> {
-        Ok(true)
     }
 }
