@@ -2,7 +2,7 @@
   system ? builtins.currentSystem,
 }:
 let
-  inherit (import ./lib.nix { inherit system; }) pkgs craneLib;
+  inherit (import ./nix/lib.nix { inherit system; }) pkgs craneLib;
 in
 craneLib.devShell {
   packages = [

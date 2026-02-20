@@ -12,8 +12,6 @@ let
 
   name = "sandhole";
 
-  stateDir = "/var/lib/${name}";
-
   sshPort = cfg.settings.ssh-port or 2222;
 
   httpPort = if cfg.settings.disable-http or false then null else cfg.settings.http-port or 80;
@@ -22,15 +20,6 @@ let
 
   needsPrivilegedPorts =
     sshPort < 1024 || (httpPort != null && httpPort < 1024) || (httpsPort != null && httpsPort < 1024);
-
-  settingsType = types.nullOr (
-    types.oneOf [
-      types.bool
-      types.ints.unsigned
-      types.path
-      types.str
-    ]
-  );
 in
 
 {
@@ -72,22 +61,102 @@ in
       };
 
       settings = lib.mkOption {
-        type = types.attrsOf settingsType;
-        # Default values for the CLI
-        default = {
-          domain = null;
-          no-domain = false;
-          ssh-port = 2222;
-          http-port = 80;
-          https-port = 443;
-          disable-http = false;
-          disable-https = false;
-          disable-tcp = false;
+        type = types.submodule {
+          freeformType = types.attrsOf (
+            types.nullOr (
+              types.oneOf [
+                types.bool
+                types.ints.unsigned
+                types.path
+                types.str
+              ]
+            )
+          );
+
+          options = {
+            domain = lib.mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              example = "nixos.org";
+              description = ''
+                The root domain of the application.
+              '';
+            };
+
+            no-domain = lib.mkOption {
+              type = types.bool;
+              default = false;
+              example = true;
+              description = ''
+                Whether to run Sandhole without a root domain.
+
+                This option disables subdomains.
+              '';
+            };
+
+            ssh-port = lib.mkOption {
+              type = types.port;
+              default = 2222;
+              example = 22;
+              description = ''
+                Port to listen for SSH connections.
+              '';
+            };
+
+            http-port = lib.mkOption {
+              type = types.port;
+              default = 80;
+              description = ''
+                Port to listen for HTTP connections.
+              '';
+            };
+
+            https-port = lib.mkOption {
+              type = types.port;
+              default = 443;
+              description = ''
+                Port to listen for HTTPS connections.
+              '';
+            };
+
+            disable-http = lib.mkOption {
+              type = types.bool;
+              default = false;
+              example = true;
+              description = ''
+                Disable all HTTP tunneling. By default, this is enabled globally.
+              '';
+            };
+
+            disable-https = lib.mkOption {
+              type = types.bool;
+              default = false;
+              example = true;
+              description = ''
+                Disable all HTTPS tunneling. By default, this is enabled globally.
+              '';
+            };
+
+            disable-tcp = lib.mkOption {
+              type = types.bool;
+              default = false;
+              example = true;
+              description = ''
+                Disable all TCP port tunneling except HTTP. By default, this is enabled globally.
+
+                ::: {.warning}
+                If this option is false or unset and `services.sandhole.openFirewall` is true,
+                all unprivileged TCP ports (i.e. >= 1024) will be opened.
+                :::
+              '';
+            };
+          };
         };
+        default = { };
         description = ''
           Attribute set of command line options for Sandhole, without the leading hyphens.
 
-          If Sandhole is enabled, then `services.sandhole.settings.domain` must be set.
+          If Sandhole is enabled, then either `services.sandhole.settings.domain` or `services.sandhole.settings.no-domain` must be set.
 
           ::: {.note}
           For all available settings, see [the Sandhole documentation](https://sandhole.com.br/cli.html).
@@ -137,7 +206,7 @@ in
         Restart = "always";
         StateDirectory = name;
         StateDirectoryMode = "0750";
-        WorkingDirectory = stateDir;
+        WorkingDirectory = "/var/lib/${name}";
         AmbientCapabilities = lib.optional needsPrivilegedPorts "CAP_NET_BIND_SERVICE";
         CapabilityBoundingSet = lib.optional needsPrivilegedPorts "CAP_NET_BIND_SERVICE";
         # Hardening

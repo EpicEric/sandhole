@@ -4,7 +4,7 @@
   rustVersion ? "latest",
 }:
 let
-  sources = import ./npins;
+  sources = import ../npins;
 
   pkgs = import sources.nixpkgs {
     inherit system;
@@ -18,12 +18,12 @@ let
   );
 
   src = lib.fileset.toSource {
-    root = ./.;
+    root = ../.;
     fileset = lib.fileset.unions [
-      (craneLib.fileset.commonCargoSources ./.)
-      ./README.md
-      ./.config/nextest.toml
-      ./tests/data
+      (craneLib.fileset.commonCargoSources ../.)
+      ../README.md
+      ../.config/nextest.toml
+      ../tests/data
     ];
   };
 
@@ -54,9 +54,12 @@ let
         { config, ... }:
         {
           options =
-            (import ./nix/modules/sandhole.nix {
-              inherit pkgs lib;
-              config = config;
+            (import ./modules/sandhole.nix {
+              inherit
+                pkgs
+                lib
+                config
+                ;
             }).options;
         }
       )
@@ -89,11 +92,11 @@ in
   sandhole-book = pkgs.stdenv.mkDerivation {
     name = "sandhole-book";
     src = lib.fileset.toSource {
-      root = ./.;
+      root = ../.;
       fileset = lib.fileset.unions [
-        ./book/book.toml
-        ./book/src
-        ./book/theme
+        ../book/book.toml
+        ../book/src
+        ../book/theme
       ];
     };
     nativeBuildInputs = [ pkgs.mdbook ];

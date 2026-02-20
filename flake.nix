@@ -55,7 +55,7 @@
     // eachSystem (
       system:
       let
-        inherit (import ./lib.nix { inherit system; })
+        inherit (import ./nix/lib.nix { inherit system; })
           sandhole
           sandhole-book
           sandhole-cli
