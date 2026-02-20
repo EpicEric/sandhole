@@ -55,7 +55,10 @@ use crate::{
     droppable_handle::DroppableHandle,
     error::ServerError,
     fingerprints::FingerprintsValidator,
-    http::{DomainRedirect, Protocol, ProxyData, ProxyType, proxy_handler},
+    http::{
+        DomainRedirect, Protocol, ProxyData, ProxyType, http2_handler, http11_handler,
+        proxy_handler,
+    },
     ip::{IpFilter, IpFilterConfig},
     quota::{DummyQuotaHandler, QuotaHandler, QuotaMap},
     reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
@@ -985,40 +988,100 @@ async fn handle_https_connection(
         }
         return;
     };
-    let tunnel_handler = sandhole.http.get(&sni, ip);
-    let is_http2 = match tunnel_handler.as_ref() {
-        Some(conn) => conn.http_data().map(|data| data.http2).unwrap_or_default(),
-        None => false,
-    };
-    let server_config = if is_http2 {
-        http2_server_config
-    } else {
-        http11_server_config
-    };
-    match TlsAcceptor::from(server_config).accept(stream).await {
-        Ok(stream) => {
-            // Create a Hyper service and serve over the accepted TLS connection.
-            let io = TokioIo::new(stream);
-            let service = service_fn(move |req: Request<Incoming>| {
-                proxy_handler(req, address, None, Arc::clone(&proxy_data))
-            });
-            let mut server = auto::Builder::new(TokioExecutor::new());
-            server.http1().pipeline_flush(true);
-            let conn = server.serve_connection_with_upgrades(io, service);
-            match sandhole.tcp_connection_timeout {
-                Some(duration) => {
-                    let _ = timeout(duration, conn).await;
+    if let Some(tunnel_handler) = sandhole.http.get(&sni, ip) {
+        let is_http2 = tunnel_handler
+            .http_data()
+            .map(|data| data.http2)
+            .unwrap_or_default();
+        if is_http2 {
+            match TlsAcceptor::from(http2_server_config).accept(stream).await {
+                Ok(stream) => {
+                    // Create a Hyper service and serve over the accepted TLS connection.
+                    let io = TokioIo::new(stream);
+                    let service = service_fn(move |req: Request<Incoming>| {
+                        http2_handler(
+                            req,
+                            address,
+                            Arc::clone(&proxy_data),
+                            Arc::clone(&tunnel_handler),
+                            sni.clone(),
+                        )
+                    });
+                    let mut server = auto::Builder::new(TokioExecutor::new());
+                    server.http1().pipeline_flush(true);
+                    let conn = server.serve_connection_with_upgrades(io, service);
+                    match sandhole.tcp_connection_timeout {
+                        Some(duration) => {
+                            let _ = timeout(duration, conn).await;
+                        }
+                        None => {
+                            let _ = conn.await;
+                        }
+                    }
                 }
-                None => {
-                    let _ = conn.await;
+                Err(error) => {
+                    #[cfg(not(coverage_nightly))]
+                    tracing::warn!(%error, %address, "Error establishing TLS connection.");
+                }
+            };
+        } else {
+            match TlsAcceptor::from(http11_server_config).accept(stream).await {
+                Ok(stream) => {
+                    // Create a Hyper service and serve over the accepted TLS connection.
+                    let io = TokioIo::new(stream);
+                    let service = service_fn(move |req: Request<Incoming>| {
+                        http11_handler(
+                            req,
+                            address,
+                            Arc::clone(&proxy_data),
+                            Arc::clone(&tunnel_handler),
+                            sni.clone(),
+                        )
+                    });
+                    let mut server = auto::Builder::new(TokioExecutor::new());
+                    server.http1().pipeline_flush(true);
+                    let conn = server.serve_connection_with_upgrades(io, service);
+                    match sandhole.tcp_connection_timeout {
+                        Some(duration) => {
+                            let _ = timeout(duration, conn).await;
+                        }
+                        None => {
+                            let _ = conn.await;
+                        }
+                    }
+                }
+                Err(error) => {
+                    #[cfg(not(coverage_nightly))]
+                    tracing::warn!(%error, %address, "Error establishing TLS connection.");
+                }
+            };
+        };
+    } else {
+        match TlsAcceptor::from(http11_server_config).accept(stream).await {
+            Ok(stream) => {
+                // Create a Hyper service and serve over the accepted TLS connection.
+                let io = TokioIo::new(stream);
+                let service = service_fn(move |req: Request<Incoming>| {
+                    proxy_handler(req, address, None, Arc::clone(&proxy_data))
+                });
+                let mut server = auto::Builder::new(TokioExecutor::new());
+                server.http1().pipeline_flush(true);
+                let conn = server.serve_connection_with_upgrades(io, service);
+                match sandhole.tcp_connection_timeout {
+                    Some(duration) => {
+                        let _ = timeout(duration, conn).await;
+                    }
+                    None => {
+                        let _ = conn.await;
+                    }
                 }
             }
-        }
-        Err(error) => {
-            #[cfg(not(coverage_nightly))]
-            tracing::warn!(%error, %address, "Error establishing TLS connection.");
-        }
-    };
+            Err(error) => {
+                #[cfg(not(coverage_nightly))]
+                tracing::warn!(%error, %address, "Error establishing TLS connection.");
+            }
+        };
+    }
 }
 
 struct HandleSshConnectionConfig<'a> {
