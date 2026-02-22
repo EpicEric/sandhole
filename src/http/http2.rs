@@ -6,7 +6,7 @@ use crate::{
     http::{
         ArcProxyData, HttpError, HttpLog, Protocol, ProxyData, ProxyResponse, ProxyType,
         TimedResponse, X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PORT, X_FORWARDED_PROTO,
-        append_to_header, http_log,
+        append_to_header, http_log, proxy_handler_inner,
     },
     keepalive::KeepaliveAlias,
     telemetry::{TELEMETRY_COUNTER_HTTP_REQUESTS, TELEMETRY_KEY_HOSTNAME},
@@ -71,7 +71,8 @@ where
         return Err(HttpError::MissingHostHeader);
     };
     if host != host_uri {
-        return Err(HttpError::MismatchedHostHeader);
+        // Fallback to legacy behavior
+        return proxy_handler_inner(request, tcp_address, None, proxy_data).await;
     };
 
     let ip = tcp_address.ip().to_canonical();

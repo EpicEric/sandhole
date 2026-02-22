@@ -243,8 +243,6 @@ pub(crate) enum HttpError {
     MissingHostHeader,
     #[error("Invalid Host header")]
     InvalidHostHeader,
-    #[error("Mismatched Host header")]
-    MismatchedHostHeader,
     #[error("Invalid HTTP version {0:?}")]
     InvalidHttpVersion(Version),
     #[error("Invalid URI: {0:?}")]
@@ -276,7 +274,6 @@ impl IntoResponse for HttpError {
             HttpError::HeaderToStrError(_)
             | HttpError::MissingUriHost
             | HttpError::MissingHostHeader
-            | HttpError::MismatchedHostHeader
             | HttpError::InvalidHostHeader
             | HttpError::InvalidHttpVersion(_)
             | HttpError::InvalidUri(_)
@@ -478,7 +475,7 @@ where
 }
 
 #[inline]
-async fn proxy_handler_inner<B, M, H, T>(
+pub(crate) async fn proxy_handler_inner<B, M, H, T>(
     mut request: Request<B>,
     tcp_address: SocketAddr,
     fingerprint: Option<Fingerprint>,
