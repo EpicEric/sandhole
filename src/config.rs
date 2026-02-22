@@ -386,12 +386,12 @@ pub struct ApplicationConfig {
     pub buffer_size: u32,
 
     /// Maximum pool size for simultaneous connections per proxied service.
-    /// The maximum is 65535.
+    /// The maximum is 536870911.
     ///
     /// A high value may cause disruption on services,
     /// while a low value may lead to denial-of-service.
-    #[arg(long, default_value_t = 256, value_name = "SIZE")]
-    pub pool_size: u16,
+    #[arg(long, default_value_t = 65_536, value_name = "SIZE")]
+    pub pool_size: usize,
 
     /// How long to wait for a connection to be available in the pool before being timed out.
     ///
@@ -404,7 +404,7 @@ pub struct ApplicationConfig {
     ///
     /// A low value may lead to client side disruptions,
     /// while a high value may lead to denial-of-service.
-    #[arg(long, default_value_t = 16, value_name = "SIZE")]
+    #[arg(long, default_value_t = 64, value_name = "SIZE")]
     pub max_simultaneous_connections_per_ip: u16,
 
     /// How long to wait between each keepalive message that is sent to an unresponsive SSH connection.
@@ -573,9 +573,9 @@ mod application_config_tests {
                 ip_allowlist: None,
                 ip_blocklist: None,
                 buffer_size: 32_768,
-                pool_size: 256,
+                pool_size: 65_536,
                 pool_timeout: None,
-                max_simultaneous_connections_per_ip: 16,
+                max_simultaneous_connections_per_ip: 64,
                 ssh_keepalive_interval: Duration::from_secs(15),
                 ssh_keepalive_max: 3,
                 directory_poll_interval: Duration::from_secs(15),

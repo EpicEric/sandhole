@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Bad Request on HTTP redirects to different hosts of the same instance.
+
+### Changed
+
+- Increase defaults for `--pool-size` and `--max-simultaneous-connections-per-ip`.
+
 ## 0.9.0 (2026-02-21)
 
 ### Added
