@@ -6,14 +6,14 @@ use crate::{
     http::{
         ArcProxyData, HttpError, HttpLog, Protocol, ProxyData, ProxyResponse, ProxyType,
         TimedResponse, X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PORT, X_FORWARDED_PROTO,
-        append_to_header, http_log, proxy_handler_inner,
+        append_to_header, http_log, http11::handle_http11_request, proxy_handler_inner,
     },
     keepalive::KeepaliveAlias,
     telemetry::{TELEMETRY_COUNTER_HTTP_REQUESTS, TELEMETRY_KEY_HOSTNAME},
 };
 
 use axum::{body::Body as AxumBody, response::IntoResponse};
-use http::{Uri, header::CONNECTION, uri::Authority};
+use http::{Uri, Version, header::CONNECTION, uri::Authority};
 use hyper::{Request, Response, StatusCode, body::Body};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use metrics::counter;
@@ -100,16 +100,33 @@ where
         .unwrap_or(host_clone.as_str());
 
     let key = KeepaliveAlias(host.clone(), ip, None);
-    handle_http2_request(
-        request,
-        tcp_address,
-        proxy_data,
-        handler,
-        request_host,
-        key,
-        timer,
-    )
-    .await
+    match request.version() {
+        Version::HTTP_11 => {
+            handle_http11_request(
+                request,
+                tcp_address,
+                proxy_data,
+                handler,
+                request_host,
+                key,
+                timer,
+            )
+            .await
+        }
+        Version::HTTP_2 => {
+            handle_http2_request(
+                request,
+                tcp_address,
+                proxy_data,
+                handler,
+                request_host,
+                key,
+                timer,
+            )
+            .await
+        }
+        _ => panic!(),
+    }
 }
 
 pub(crate) async fn handle_http2_request<B, M, H, T>(
