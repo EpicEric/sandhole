@@ -239,8 +239,8 @@ pub(crate) enum HttpError {
     HeaderToStrError(#[from] http::header::ToStrError),
     #[error("Missing URI host")]
     MissingUriHost,
-    #[error("Missing Host header")]
-    MissingHostHeader,
+    #[error("Missing Host for request")]
+    MissingHost,
     #[error("Invalid Host header")]
     InvalidHostHeader,
     #[error("Invalid HTTP version {0:?}")]
@@ -273,7 +273,7 @@ impl IntoResponse for HttpError {
         match self {
             HttpError::HeaderToStrError(_)
             | HttpError::MissingUriHost
-            | HttpError::MissingHostHeader
+            | HttpError::MissingHost
             | HttpError::InvalidHostHeader
             | HttpError::InvalidHttpVersion(_)
             | HttpError::InvalidUri(_)
@@ -504,7 +504,7 @@ where
                     .ok_or(HttpError::InvalidHostHeader)?,
                 Err(_) => return Err(HttpError::InvalidHostHeader),
             },
-            None => return Err(HttpError::MissingHostHeader),
+            None => return Err(HttpError::MissingHost),
         },
         version => return Err(HttpError::InvalidHttpVersion(version)),
     };

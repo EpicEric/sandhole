@@ -84,7 +84,7 @@ where
                     .ok_or(HttpError::InvalidHostHeader)?,
                 Err(_) => return Err(HttpError::InvalidHostHeader),
             },
-            None => return Err(HttpError::MissingHostHeader),
+            None => return Err(HttpError::MissingHost),
         },
         version => return Err(HttpError::InvalidHttpVersion(version)),
     };
@@ -465,6 +465,7 @@ where
                     // Return sender to pool
                     tokio::spawn(async move {
                         let _ = pool.send((sender, tx)).await;
+                        drop(_guard);
                     });
                 })),
             }));

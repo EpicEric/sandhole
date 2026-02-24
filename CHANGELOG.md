@@ -5,6 +5,7 @@
 ### Fixed
 
 - Bad Request on HTTP redirects to different hosts of the same instance.
+- Pool guards getting dropped too soon.
 
 ### Changed
 

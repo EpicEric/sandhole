@@ -6,7 +6,12 @@ use std::{
 };
 
 use color_eyre::eyre::Context;
-use hyper::{Request, body::Incoming, service::service_fn};
+use hyper::{
+    Request,
+    body::Incoming,
+    server::conn::{http1, http2},
+    service::service_fn,
+};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
@@ -992,7 +997,8 @@ async fn handle_https_connection(
         let is_http2 = tunnel_handler
             .http_data()
             .map(|data| data.http2)
-            .unwrap_or_default();
+            .unwrap_or_default()
+            && alpn.iter().any(|protocol| protocol == b"h2");
         if is_http2 {
             match TlsAcceptor::from(http2_server_config).accept(stream).await {
                 Ok(stream) => {
@@ -1007,9 +1013,8 @@ async fn handle_https_connection(
                             sni.clone(),
                         )
                     });
-                    let mut server = auto::Builder::new(TokioExecutor::new());
-                    server.http1().pipeline_flush(true);
-                    let conn = server.serve_connection_with_upgrades(io, service);
+                    let server = http2::Builder::new(TokioExecutor::new());
+                    let conn = server.serve_connection(io, service);
                     match sandhole.tcp_connection_timeout {
                         Some(duration) => {
                             let _ = timeout(duration, conn).await;
@@ -1038,9 +1043,9 @@ async fn handle_https_connection(
                             sni.clone(),
                         )
                     });
-                    let mut server = auto::Builder::new(TokioExecutor::new());
-                    server.http1().pipeline_flush(true);
-                    let conn = server.serve_connection_with_upgrades(io, service);
+                    let mut server = http1::Builder::new();
+                    server.pipeline_flush(true);
+                    let conn = server.serve_connection(io, service).with_upgrades();
                     match sandhole.tcp_connection_timeout {
                         Some(duration) => {
                             let _ = timeout(duration, conn).await;

@@ -41,7 +41,7 @@ where
     <B as Body>::Data: Send + Sync + 'static,
     <B as Body>::Error: Error + Send + Sync + 'static,
 {
-    match http2_handler_inner(request, tcp_address, proxy_data, handler, host).await {
+    match https_2_handler_inner(request, tcp_address, proxy_data, handler, host).await {
         Ok(response) => Ok(match response {
             ProxyResponse::Axum(response) => response,
             ProxyResponse::Proxy(response) => response.into_response(),
@@ -51,7 +51,7 @@ where
 }
 
 #[inline]
-async fn http2_handler_inner<B, M, H, T>(
+async fn https_2_handler_inner<B, M, H, T>(
     mut request: Request<B>,
     tcp_address: SocketAddr,
     proxy_data: Arc<ProxyData<B, M, H, T>>,
@@ -68,7 +68,7 @@ where
 {
     let timer = Instant::now();
     let Some(host_uri) = request.uri().host() else {
-        return Err(HttpError::MissingHostHeader);
+        return Err(HttpError::MissingHost);
     };
     if host != host_uri {
         // Fallback to legacy behavior
@@ -314,6 +314,7 @@ where
                 // Send sender to pool
                 tokio::spawn(async move {
                     let _ = pool.send((sender, tx)).await;
+                    drop(_guard);
                 });
             })),
         }));
