@@ -292,7 +292,7 @@ impl Handler for ServerHandler {
             .authenticate_fingerprint(&fingerprint);
         match authentication {
             // If key is unknown, allow connecting for the purposes of local forwarding.
-            AuthenticationType::None => {
+            AuthenticationType::None if !self.server.authenticate_any_key_as_user => {
                 if self.server.disable_aliasing {
                     return Ok(Auth::Reject {
                         proceed_with_methods: None,
@@ -306,7 +306,7 @@ impl Handler for ServerHandler {
                     }
                 }
             }
-            AuthenticationType::User => {
+            AuthenticationType::None | AuthenticationType::User => {
                 // Add this session to the public key sessions, allowing it to be canceled via the admin TUI.
                 let limiter = {
                     let mut user_sessions =

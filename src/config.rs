@@ -265,6 +265,14 @@ pub struct ApplicationConfig {
     #[arg(long, default_value_t = false)]
     pub allow_requested_ports: bool,
 
+    /// Any non-admin key that authenticates will have user privileges, being able to forward services.
+    /// This effectively turns Sandhole into a public reverse proxy.
+    ///
+    /// ANYONE that can reach your server's SSH port will be able to create new keys and proxy services under your instance.
+    /// Be sure that you know what you're doing before enabling this option.
+    #[arg(long, default_value_t = false)]
+    pub authenticate_any_key_as_user: bool,
+
     /// Disable all HTTP tunneling. By default, this is enabled globally.
     #[arg(long, default_value_t = false)]
     pub disable_http: bool,
@@ -555,6 +563,7 @@ mod application_config_tests {
                 txt_record_prefix: "_sandhole".into(),
                 allow_requested_subdomains: false,
                 allow_requested_ports: false,
+                authenticate_any_key_as_user: false,
                 disable_http: false,
                 disable_https: false,
                 disable_sni: false,
@@ -617,6 +626,7 @@ mod application_config_tests {
             "--txt-record-prefix=_prefix",
             "--allow-requested-subdomains",
             "--allow-requested-ports",
+            "--authenticate-any-key-as-user",
             "--disable-http",
             "--disable-https",
             "--disable-sni",
@@ -678,6 +688,7 @@ mod application_config_tests {
                 txt_record_prefix: "_prefix".into(),
                 allow_requested_subdomains: true,
                 allow_requested_ports: true,
+                authenticate_any_key_as_user: true,
                 disable_http: true,
                 disable_https: true,
                 disable_sni: true,

@@ -176,6 +176,15 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
       <b>--allow-requested-ports</b>
           Allow user-requested ports. By default, ports are always random
 
+      <b>--authenticate-any-key-as-user</b>
+          Any non-admin key that authenticates will have user privileges,
+          being able to forward services. This effectively turns Sandhole
+          into a public reverse proxy.
+
+          ANYONE that can reach your server&#39;s SSH port will be able to
+          create new keys and proxy services under your instance. Be sure
+          that you know what you&#39;re doing before enabling this option.
+
       <b>--disable-http</b>
           Disable all HTTP tunneling. By default, this is enabled globally
 

@@ -140,6 +140,8 @@ pub(crate) struct SandholeServer {
     pub(crate) ssh_port: u16,
     // If true, allows users to select the TCP ports assigned by tcp_handler.
     pub(crate) force_random_ports: bool,
+    // If true, any SSH key is authenticated as a user instead of not authenticating.
+    pub(crate) authenticate_any_key_as_user: bool,
     // If true, HTTP is disabled.
     pub(crate) disable_http: bool,
     // If true, HTTPS is disabled.

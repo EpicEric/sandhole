@@ -24,6 +24,7 @@ mod alias_timeout;
 mod auth_ignore_user_actions;
 mod auth_prevent_unauthorized_actions;
 mod auth_self_hosted_login_api;
+mod config_authenticate_any_key_as_user;
 mod config_disable_aliasing;
 mod config_disable_http;
 mod config_disable_https;
