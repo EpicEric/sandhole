@@ -24,6 +24,14 @@ Expose HTTP/SSH/TCP services through SSH port forwarding. A self-hosted ngrok / 
 - A terminal-based admin interface to view and manage current connections.
 - Written in Rust, with comprehensive testing of most features.
 
+## Try it!
+
+To expose a local HTTP service running on port 4321:
+
+```sh
+ssh -i path/to/key -R 80:localhost:4321 demo.sandhole.com.br
+```
+
 ## Status
 
 Sandhole is mostly feature-complete, but still receives occasional updates and fixes. Contributions are welcome, but try it in production at your own risk.
