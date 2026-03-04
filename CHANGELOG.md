@@ -2,7 +2,13 @@
 
 ## Unreleased
 
+### Added
+
 - Add `--authenticate-any-key-as-user` CLI flag.
+
+### Changed
+
+- Update dependencies.
 
 ## 0.9.1 (2026-02-24)
 
