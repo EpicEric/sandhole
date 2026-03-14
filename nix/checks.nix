@@ -1,11 +1,11 @@
 {
-  cargo-nextest,
   cargoArtifacts,
   commonArgs,
   craneLib,
+  pkgs,
   sandhole,
   src,
-  testers,
+  ...
 }:
 {
   inherit sandhole;
@@ -36,7 +36,7 @@
           inherit cargoArtifacts;
           pname = "sandhole-nextest-archive";
           doCheck = false;
-          nativeBuildInputs = (commonArgs.nativeBuildInputs or [ ]) ++ [ cargo-nextest ];
+          nativeBuildInputs = (commonArgs.nativeBuildInputs or [ ]) ++ [ pkgs.cargo-nextest ];
           buildPhaseCargoCommand = ''
             cargo nextest archive --archive-format tar-zst --archive-file archive.tar.zst
           '';
@@ -47,7 +47,7 @@
         }
       );
     in
-    testers.runNixOSTest {
+    pkgs.testers.runNixOSTest {
       name = "sandhole-nextest";
       nodes = {
         machine =

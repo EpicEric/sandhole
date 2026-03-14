@@ -1,12 +1,10 @@
 {
-  lib,
-  mdbook,
-  nixosOptionsDoc,
+  pkgs,
   sandhole,
-  stdenv,
-  to-html,
+  ...
 }:
 let
+  inherit (pkgs) lib;
   evalOptions = lib.evalModules {
     modules = [
       (
@@ -16,13 +14,14 @@ let
             (import ./modules/sandhole.nix {
               inherit
                 pkgs
-                lib
                 config
                 ;
+              inherit (pkgs) lib;
             }).options;
         }
       )
     ];
+    specialArgs = { inherit pkgs; };
   };
 in
 {
@@ -30,19 +29,19 @@ in
   default = sandhole;
 
   _docs =
-    (nixosOptionsDoc {
+    (pkgs.nixosOptionsDoc {
       options = removeAttrs evalOptions.options [ "_module" ];
     }).optionsCommonMark;
 
-  _cli = stdenv.mkDerivation {
+  _cli = pkgs.stdenv.mkDerivation {
     name = "sandhole-cli.html";
-    nativeBuildInputs = [ to-html ];
+    nativeBuildInputs = [ pkgs.to-html ];
     buildCommand = ''
       to-html --no-prompt "${lib.getExe sandhole} --help" > $out
     '';
   };
 
-  _book = stdenv.mkDerivation {
+  _book = pkgs.stdenv.mkDerivation {
     name = "sandhole-book";
     src = lib.fileset.toSource {
       root = ../.;
@@ -52,7 +51,7 @@ in
         ../book/theme
       ];
     };
-    nativeBuildInputs = [ mdbook ];
+    nativeBuildInputs = [ pkgs.mdbook ];
     buildPhase = ''
       mdbook build book --dest-dir $out
     '';

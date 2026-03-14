@@ -7,9 +7,6 @@ test $RUST_LOG="sandhole=debug":
 clippy:
     cargo clippy --all-targets --fix --allow-dirty --allow-staged && cargo fmt --all
 
-clippy-nightly:
-    cargo +nightly clippy --all-targets --fix --allow-dirty --allow-staged && cargo fmt --all
-
 book:
     mdbook serve book --open
 

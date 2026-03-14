@@ -1,21 +1,16 @@
 {
   system ? builtins.currentSystem,
-  rustChannel ? "stable",
-  rustVersion ? "latest",
-}:
-let
-  sources = import ../npins;
-
-  pkgs = import sources.nixpkgs {
+  sources ? import ../npins,
+  pkgs ? import sources.nixpkgs {
     inherit system;
     overlays = [ (import sources.rust-overlay) ];
-  };
-
+  },
+  craneLib ? (import sources.crane { inherit pkgs; }).overrideToolchain (
+    p: p.rust-bin.stable.latest.default
+  ),
+}:
+let
   inherit (pkgs) lib;
-
-  craneLib = (import sources.crane { inherit pkgs; }).overrideToolchain (
-    p: p.rust-bin.${rustChannel}.${rustVersion}.default
-  );
 
   src = lib.fileset.toSource {
     root = ../.;
@@ -52,13 +47,9 @@ in
   inherit pkgs sandhole;
 
   packages = import ./packages.nix {
-    inherit sandhole;
-    inherit (pkgs)
-      lib
-      mdbook
-      nixosOptionsDoc
-      stdenv
-      to-html
+    inherit
+      pkgs
+      sandhole
       ;
   };
 
@@ -67,12 +58,9 @@ in
       cargoArtifacts
       commonArgs
       craneLib
+      pkgs
       sandhole
       src
-      ;
-    inherit (pkgs)
-      cargo-nextest
-      testers
       ;
   };
 
