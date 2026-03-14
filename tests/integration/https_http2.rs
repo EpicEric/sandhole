@@ -138,12 +138,11 @@ async fn https_http2() {
         .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
         .expect("Failed to parse certificates"),
     );
-    let tls_config = Arc::new(
-        rustls::ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth(),
-    );
-    let connector = TlsConnector::from(tls_config);
+    let mut tls_config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    tls_config.alpn_protocols = vec![b"h2".to_vec()];
+    let connector = TlsConnector::from(Arc::new(tls_config));
     let tcp_stream = TcpStream::connect("127.0.0.1:18443")
         .await
         .expect("TCP connection failed");

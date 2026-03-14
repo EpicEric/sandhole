@@ -56,7 +56,7 @@ use crate::{
     error::ServerError,
     fingerprints::FingerprintsValidator,
     http::{
-        DomainRedirect, Protocol, ProxyData, ProxyType, http2::https_2_handler,
+        DomainRedirect, HttpLogFormat, Protocol, ProxyData, ProxyType, http2::https_2_handler,
         http11::https_11_handler, proxy_handler,
     },
     ip::{IpFilter, IpFilterConfig},
@@ -122,6 +122,14 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     }
     let http_request_timeout = config.http_request_timeout;
     let tcp_connection_timeout = config.tcp_connection_timeout;
+    #[cfg(feature = "duper")]
+    let log_format = if config.duper_logs {
+        HttpLogFormat::Duper
+    } else {
+        HttpLogFormat::Default
+    };
+    #[cfg(not(feature = "duper"))]
+    let log_format = HttpLogFormat::Default;
     let buffer_size = usize::try_from(config.buffer_size)
         .with_context(|| "Cannot convert buffer size to usize")?;
     // Initialize crypto and credentials
@@ -625,7 +633,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .maybe_http_request_timeout(http_request_timeout)
             .maybe_websocket_timeout(tcp_connection_timeout)
             .disable_http_logs(config.disable_http_logs)
-            .duper_logs(config.duper_logs)
+            .log_format(log_format)
             .build(),
     );
     let mut sandhole = Arc::new(SandholeServer {
@@ -730,7 +738,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 .maybe_http_request_timeout(http_request_timeout)
                 .maybe_websocket_timeout(tcp_connection_timeout)
                 .disable_http_logs(config.disable_http_logs)
-                .duper_logs(config.duper_logs)
+                .log_format(log_format)
                 .build(),
         );
         DroppableHandle(tokio::spawn(async move {
@@ -810,7 +818,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 .maybe_http_request_timeout(http_request_timeout)
                 .maybe_websocket_timeout(tcp_connection_timeout)
                 .disable_http_logs(config.disable_http_logs)
-                .duper_logs(config.duper_logs)
+                .log_format(log_format)
                 .build(),
         );
         let sandhole_clone = Arc::clone(&sandhole);
@@ -934,7 +942,6 @@ async fn handle_https_connection(
         });
         return;
     }
-    #[cfg_attr(not(feature = "acme"), expect(unused_variables))]
     let Some(TlsPeekData { sni, alpn }) = peek_sni_and_alpn(&buf[..n]).await else {
         return;
     };

@@ -289,7 +289,7 @@ where
                             .build(),
                         Some(tx),
                         proxy_data.disable_http_logs,
-                        proxy_data.duper_logs,
+                        proxy_data.log_format,
                     );
                     return Err(HttpError::RequestTimeout);
                 }
@@ -313,7 +313,7 @@ where
                             .build(),
                         Some(tx),
                         proxy_data.disable_http_logs,
-                        proxy_data.duper_logs,
+                        proxy_data.log_format,
                     );
                     return Err(error.into_error().into());
                 }
@@ -329,7 +329,7 @@ where
                     http_log_builder.elapsed_time(timer.elapsed()).build(),
                     Some(tx.clone()),
                     proxy_data.disable_http_logs,
-                    proxy_data.duper_logs,
+                    proxy_data.log_format,
                 );
                 // Send sender to pool
                 tokio::spawn(async move {
