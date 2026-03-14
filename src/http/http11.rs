@@ -97,7 +97,7 @@ where
 
     // Read protocol information for X-Forwarded headers
     let Protocol::Https { port } = proxy_data.protocol else {
-        unreachable!("HTTPS-only");
+        unreachable!("HTTPS-only handler");
     };
 
     // Add proxied info to the proper headers, but don't overwrite any existing proxy headers
@@ -219,6 +219,7 @@ where
                             .build(),
                         Some(tx),
                         proxy_data.disable_http_logs,
+                        proxy_data.duper_logs,
                     );
                     return Err(HttpError::RequestTimeout);
                 }
@@ -280,6 +281,7 @@ where
                             http_log_builder.elapsed_time(timer.elapsed()).build(),
                             Some(tx),
                             proxy_data.disable_http_logs,
+                            proxy_data.duper_logs,
                         )
                     })),
                 }))
@@ -293,6 +295,7 @@ where
                             http_log_builder.elapsed_time(timer.elapsed()).build(),
                             Some(tx),
                             proxy_data.disable_http_logs,
+                            proxy_data.duper_logs,
                         )
                     })),
                 }))
@@ -422,6 +425,7 @@ where
                                 .build(),
                             Some(tx),
                             proxy_data.disable_http_logs,
+                            proxy_data.duper_logs,
                         );
                         return Err(HttpError::RequestTimeout);
                     }
@@ -445,6 +449,7 @@ where
                                 .build(),
                             Some(tx),
                             proxy_data.disable_http_logs,
+                            proxy_data.duper_logs,
                         );
                         return Err(error.into_error().into());
                     }
@@ -461,6 +466,7 @@ where
                         http_log_builder.elapsed_time(timer.elapsed()).build(),
                         Some(tx.clone()),
                         proxy_data.disable_http_logs,
+                        proxy_data.duper_logs,
                     );
                     // Return sender to pool
                     tokio::spawn(async move {

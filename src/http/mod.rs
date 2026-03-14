@@ -45,7 +45,7 @@ use hyper::{
     header::HOST,
 };
 use metrics::{counter, histogram};
-use owo_colors::{OwoColorize, Style};
+use owo_colors::{OwoColorize, Stream, Style};
 use russh::keys::ssh_key::Fingerprint;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -129,7 +129,12 @@ struct HttpLog {
 }
 
 // Pretty-print an HTTP log with ANSI
-fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: bool) {
+fn http_log(
+    data: HttpLog,
+    tx: Option<ServerHandlerSender>,
+    disable_http_logs: bool,
+    duper_logs: bool,
+) {
     let HttpLog {
         ip,
         status,
@@ -163,20 +168,41 @@ fn http_log(data: HttpLog, tx: Option<ServerHandlerSender>, disable_http_logs: b
         _ => Style::new().black().on_blue().bold(),
     };
     let duration = pretty_duration::pretty_duration(&elapsed_time, None);
-    let line = format!(
-        "{} {} {} => {} {}",
-        format!("[{status}]").style(status_style),
-        format!(" {method} ").style(method_style),
-        host,
-        uri,
-        format!("({ip}) {duration}").dimmed()
-    );
-    #[cfg(not(coverage_nightly))]
-    tracing::info!("{line}");
+    if duper_logs {
+        let duration_nanos = elapsed_time.as_nanos();
+        let duper_duration = format!(
+            "Duration('PT{}.{:09}S')",
+            duration_nanos / 1_000_000_000,
+            duration_nanos % 1_000_000_000
+        );
+        #[cfg(not(coverage_nightly))]
+        tracing::info!(%status, %method, %host, %uri, %ip, "$duper.duration" = duper_duration, "Proxied HTTP request.");
+    } else {
+        let tracing_line = format!(
+            "{} {} {} => {} {}",
+            format!("[{status}]")
+                .if_supports_color(Stream::Stdout, |text| text.style(status_style)),
+            format!(" {method} ")
+                .if_supports_color(Stream::Stdout, |text| text.style(method_style)),
+            host,
+            uri,
+            format!("({ip}) {duration}").if_supports_color(Stream::Stdout, |text| text.dimmed())
+        );
+        #[cfg(not(coverage_nightly))]
+        tracing::info!("{tracing_line}");
+    }
     if !disable_http_logs {
         let _ = tx.map(|tx| {
-            let time = chrono::Utc::now().to_rfc3339();
-            tx.send(format!("{} {}\r\n", time.dimmed(), line).into_bytes())
+            let colored_line = format!(
+                "{} {} {} {} => {} {}\r\n",
+                chrono::Utc::now().to_rfc3339().dimmed(),
+                format!("[{status}]").style(status_style),
+                format!(" {method} ").style(method_style),
+                host,
+                uri,
+                format!("({ip}) {duration}").dimmed()
+            );
+            tx.send(colored_line.into_bytes())
         });
     }
 }
@@ -327,6 +353,8 @@ where
     websocket_timeout: Option<Duration>,
     // If set, disables sending HTTP logs to the handler.
     disable_http_logs: bool,
+    // If set, local HTTP logs are output in the Duper format.
+    duper_logs: bool,
     #[builder(skip)]
     _phantom_data: PhantomData<(H, T)>,
 }
@@ -529,6 +557,7 @@ where
                     .build(),
                 None,
                 proxy_data.disable_http_logs,
+                proxy_data.duper_logs,
             );
             return Ok(ProxyResponse::Axum(response));
         }
@@ -576,6 +605,7 @@ where
                     .build(),
                 None,
                 proxy_data.disable_http_logs,
+                proxy_data.duper_logs,
             );
             return Ok(ProxyResponse::Axum(response));
         }
@@ -705,6 +735,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -750,6 +781,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -795,6 +827,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -860,6 +893,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -928,6 +962,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -997,6 +1032,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -1065,6 +1101,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -1160,6 +1197,7 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .http_request_timeout(Duration::from_millis(500))
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -1250,6 +1288,7 @@ mod proxy_handler_tests {
                         .buffer_size(8_000)
                         .http_request_timeout(Duration::from_millis(500))
                         .disable_http_logs(false)
+                        .duper_logs(false)
                         .build(),
                 ),
             )
@@ -1362,6 +1401,7 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .http_request_timeout(Duration::from_millis(500))
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -1461,6 +1501,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -1562,6 +1603,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -1662,6 +1704,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -1761,6 +1804,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Aliasing)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -1861,6 +1905,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
+                    .duper_logs(false)
                     .build(),
             ),
         )
@@ -1956,6 +2001,7 @@ mod proxy_handler_tests {
                         .proxy_type(ProxyType::Tunneling)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
+                        .duper_logs(false)
                         .build(),
                 ),
             )
@@ -2074,6 +2120,7 @@ mod proxy_handler_tests {
                         .proxy_type(ProxyType::Tunneling)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
+                        .duper_logs(false)
                         .build(),
                 ),
             )
@@ -2183,6 +2230,7 @@ mod proxy_handler_tests {
                         .proxy_type(ProxyType::Tunneling)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
+                        .duper_logs(false)
                         .build(),
                 ),
             )
@@ -2309,6 +2357,7 @@ mod proxy_handler_tests {
                         .proxy_type(ProxyType::Tunneling)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
+                        .duper_logs(false)
                         .build(),
                 ),
             )
@@ -2385,6 +2434,7 @@ mod proxy_handler_tests {
                         .proxy_type(ProxyType::Tunneling)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
+                        .duper_logs(false)
                         .build(),
                 ),
             )

@@ -8,17 +8,24 @@ async fn main() -> color_eyre::Result<()> {
 
     let config = ApplicationConfig::parse();
 
+    let env_filter = tracing_subscriber::EnvFilter::builder()
+        .with_default_directive(tracing::level_filters::LevelFilter::INFO.into())
+        .from_env_lossy();
+    let log_layer = if config.duper_logs {
+        tracing_duper::DuperLayer::new()
+            .with_filter(env_filter)
+            .boxed()
+    } else {
+        tracing_subscriber::fmt::Layer::default()
+            .compact()
+            .with_timer(tracing_subscriber::fmt::time::ChronoUtc::rfc_3339())
+            .with_ansi_sanitization(false)
+            .with_filter(env_filter)
+            .boxed()
+    };
+
     tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::Layer::default()
-                .compact()
-                .with_timer(tracing_subscriber::fmt::time::ChronoUtc::rfc_3339())
-                .with_filter(
-                    tracing_subscriber::EnvFilter::builder()
-                        .with_default_directive(tracing::level_filters::LevelFilter::INFO.into())
-                        .from_env_lossy(),
-                ),
-        )
+        .with(log_layer)
         .with(tracing_error::ErrorLayer::default())
         .try_init()?;
 

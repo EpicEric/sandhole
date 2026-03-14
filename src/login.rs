@@ -11,7 +11,6 @@ use crate::error::ServerError;
 
 // Parsed data for login HTTP requests.
 pub(crate) struct ApiLogin<C> {
-    //
     configurer: PhantomData<C>,
     // Endpoint of the login API
     endpoint: String,
@@ -55,11 +54,9 @@ impl<C: Configurer> ApiLogin<C> {
         timeout: Option<Duration>,
     ) -> color_eyre::Result<Self> {
         // Parse data from the URL
-        let mut client_builder = Client::builder().hickory_dns(true).user_agent(concat!(
-            env!("CARGO_PKG_NAME"),
-            "/",
-            env!("CARGO_PKG_VERSION")
-        ));
+        let mut client_builder = Client::builder()
+            .hickory_dns(true)
+            .user_agent(concat!("Sandhole/", env!("CARGO_PKG_VERSION")));
         if let Some(timeout) = timeout {
             client_builder = client_builder.timeout(timeout);
         }

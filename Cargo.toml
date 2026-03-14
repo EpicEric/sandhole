@@ -14,10 +14,11 @@ categories = ["network-programming", "web-programming", "authentication"]
 exclude = [".github", "book", "docker-compose-example", "tests/data"]
 
 [features]
-default = ["login", "rustrict", "prometheus", "acme"]
+default = ["acme", "duper", "login", "prometheus", "rustrict"]
+acme = ["dep:rustls-acme"]
+duper = ["dep:tracing_duper"]
 login = ["dep:reqwest"]
 prometheus = ["dep:metrics-exporter-prometheus"]
-acme = ["dep:rustls-acme"]
 
 [dependencies]
 ahash = "0.8.12"
@@ -26,11 +27,11 @@ async-speed-limit = { version = "0.4.2", features = ["tokio"] }
 aws-lc-rs = "1.16.1"
 axum = { version = "0.8.8", default-features = false }
 block-id = "0.2.1"
-bon = "3.9.0"
+bon = "3.9.1"
 bytes = "1.11.1"
 bytesize = "2.3.1"
 chrono = "0.4.44"
-clap = { version = "4.5.60", features = ["derive", "string"] }
+clap = { version = "4.6.0", features = ["derive", "string"] }
 color-eyre = "0.6.5"
 crossterm = { version = "0.29.0", default-features = false }
 dashmap = "6.1.0"
@@ -47,7 +48,7 @@ itertools = "0.14.0"
 metrics = "0.24.3"
 metrics-exporter-prometheus = { version = "0.18.1", optional = true }
 notify = "8.2.0"
-owo-colors = "4.3.0"
+owo-colors = { version = "4.3.0", features = [ "supports-colors" ] }
 pretty-duration = "0.1.1"
 rand = { version = "0.9.2", default-features = false, features = [
   "std",
@@ -82,16 +83,17 @@ serde = { version = "1.0.228", default-features = false, features = [
   "serde_derive",
 ] }
 serde_json = "1.0.149"
-socket2 = "0.6.2"
-sysinfo = "0.38.3"
+socket2 = "0.6.3"
+sysinfo = "0.38.4"
 thiserror = "2.0.18"
 tokio = { version = "1.50.0", features = ["full"] }
 tokio-rustls = "0.26.4"
 tokio-stream = "0.1.18"
 tokio-util = "0.7.18"
 tracing = "0.1.44"
+tracing_duper = { version = "0.1.1", optional = true }
 tracing-error = "0.2.1"
-tracing-subscriber = { version = "=0.3.19", features = [
+tracing-subscriber = { version = "0.3.23", features = [
   "env-filter",
   "fmt",
   "chrono",
@@ -108,14 +110,13 @@ insta = { version = "1.46.3", features = ["yaml"] }
 mockall = "0.14.0"
 nix = "0.31.2"
 regex = "1.12.3"
-test-log = { version = "=0.2.18", features = ["trace", "color"] }
-test-log-macros = "=0.2.18"
+test-log = { version = "0.2.19", features = ["trace", "color"] }
 tokio-tungstenite = "0.28.0"
 tower = "0.5.3"
 vt100-ctt = { version = "0.17.1", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
-openssl = { version = "0.10.75", features = ["vendored"] }
+openssl = { version = "0.10.76", features = ["vendored"] }
 
 [profile.release]
 strip = true

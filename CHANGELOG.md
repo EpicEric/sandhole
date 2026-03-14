@@ -5,6 +5,12 @@
 ### Added
 
 - Add `--authenticate-any-key-as-user` CLI flag.
+- Add `--duper-logs` CLI flag.
+- Support `NO_COLOR`.
+
+### Fixed
+
+- Check ALPN for HTTP/2 handlers.
 
 ### Changed
 

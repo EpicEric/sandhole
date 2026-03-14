@@ -625,6 +625,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .maybe_http_request_timeout(http_request_timeout)
             .maybe_websocket_timeout(tcp_connection_timeout)
             .disable_http_logs(config.disable_http_logs)
+            .duper_logs(config.duper_logs)
             .build(),
     );
     let mut sandhole = Arc::new(SandholeServer {
@@ -729,6 +730,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 .maybe_http_request_timeout(http_request_timeout)
                 .maybe_websocket_timeout(tcp_connection_timeout)
                 .disable_http_logs(config.disable_http_logs)
+                .duper_logs(config.duper_logs)
                 .build(),
         );
         DroppableHandle(tokio::spawn(async move {
@@ -808,6 +810,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 .maybe_http_request_timeout(http_request_timeout)
                 .maybe_websocket_timeout(tcp_connection_timeout)
                 .disable_http_logs(config.disable_http_logs)
+                .duper_logs(config.duper_logs)
                 .build(),
         );
         let sandhole_clone = Arc::clone(&sandhole);
@@ -993,7 +996,8 @@ async fn handle_https_connection(
         let is_http2 = tunnel_handler
             .http_data()
             .map(|data| data.http2)
-            .unwrap_or_default();
+            .unwrap_or_default()
+            && alpn.iter().any(|alpn| alpn == b"h2");
         if is_http2 {
             match TlsAcceptor::from(http2_server_config).accept(stream).await {
                 Ok(stream) => {
