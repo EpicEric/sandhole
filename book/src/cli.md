@@ -283,6 +283,9 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           Beware that this can lead to false positives being blocked!
 
+      <b>--duper-logs</b>
+          Outputs logs in the Duper format
+
       <b>--ip-allowlist</b> &lt;CIDR&gt;
           Comma-separated list of IP networks to allow. Setting this will block
           unknown IPs from connecting
