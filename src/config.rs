@@ -64,6 +64,19 @@ pub enum LoadBalancingAlgorithm {
     IpHash,
 }
 
+// Format to use for logs.
+#[doc(hidden)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum LogFormat {
+    /// Default (compact, ANSI-formatted, single-line).
+    Default,
+    /// JSON format.
+    Json,
+    /// Duper format.
+    #[cfg(feature = "duper")]
+    Duper,
+}
+
 #[derive(Debug, Args, PartialEq)]
 #[group(required = true, multiple = false)]
 pub struct Domain {
@@ -372,10 +385,14 @@ pub struct ApplicationConfig {
     #[arg(long, default_value_t = false)]
     pub requested_subdomain_filter_profanities: bool,
 
-    /// Outputs logs in the Duper format.
-    #[cfg(feature = "duper")]
-    #[arg(long, default_value_t = false)]
-    pub duper_logs: bool,
+    /// Which format to output logs in.
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = LogFormat::Default,
+        value_name = "FORMAT"
+    )]
+    pub log_format: LogFormat,
 
     /// Comma-separated list of IP networks to allow.
     /// Setting this will block unknown IPs from connecting.
@@ -530,7 +547,7 @@ mod application_config_tests {
     use clap::Parser;
     use ipnet::IpNet;
 
-    use crate::config::{Domain, LoadBalancingAlgorithm};
+    use crate::config::{Domain, LoadBalancingAlgorithm, LogFormat};
 
     use super::{ApplicationConfig, BindHostnames, LoadBalancingStrategy, RandomSubdomainSeed};
 
@@ -584,7 +601,7 @@ mod application_config_tests {
                 random_subdomain_filter_profanities: false,
                 requested_domain_filter_profanities: false,
                 requested_subdomain_filter_profanities: false,
-                duper_logs: false,
+                log_format: LogFormat::Default,
                 ip_allowlist: None,
                 ip_blocklist: None,
                 buffer_size: 32_768,
@@ -648,7 +665,7 @@ mod application_config_tests {
             "--random-subdomain-filter-profanities",
             "--requested-domain-filter-profanities",
             "--requested-subdomain-filter-profanities",
-            "--duper-logs",
+            "--log-format=duper",
             "--ip-allowlist=10.0.0.0/8",
             "--ip-blocklist=10.1.0.0/16,10.2.0.0/16",
             "--buffer-size=4KB",
@@ -711,7 +728,7 @@ mod application_config_tests {
                 random_subdomain_filter_profanities: true,
                 requested_domain_filter_profanities: true,
                 requested_subdomain_filter_profanities: true,
-                duper_logs: true,
+                log_format: LogFormat::Duper,
                 ip_allowlist: Some(vec![IpNet::from_str("10.0.0.0/8").unwrap()]),
                 ip_blocklist: Some(vec![
                     IpNet::from_str("10.1.0.0/16").unwrap(),

@@ -34,7 +34,7 @@ use crate::{
 #[doc(hidden)]
 pub use crate::{
     config::{
-        ApplicationConfig, BindHostnames, LoadBalancingAlgorithm, LoadBalancingStrategy,
+        ApplicationConfig, BindHostnames, LoadBalancingAlgorithm, LoadBalancingStrategy, LogFormat,
         RandomSubdomainSeed,
     },
     entrypoint::entrypoint,

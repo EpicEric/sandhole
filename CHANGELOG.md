@@ -5,7 +5,7 @@
 ### Added
 
 - Add `--authenticate-any-key-as-user` CLI flag.
-- Add `--duper-logs` CLI flag.
+- Add `--log-format` CLI flag.
 - Support `NO_COLOR`.
 
 ### Fixed

@@ -1,5 +1,5 @@
 use clap::Parser;
-use sandhole::{ApplicationConfig, entrypoint};
+use sandhole::{ApplicationConfig, LogFormat, entrypoint};
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -11,25 +11,22 @@ async fn main() -> color_eyre::Result<()> {
     let env_filter = tracing_subscriber::EnvFilter::builder()
         .with_default_directive(tracing::level_filters::LevelFilter::INFO.into())
         .from_env_lossy();
-    #[cfg(feature = "duper")]
-    let log_layer = if config.duper_logs {
-        tracing_duper::DuperLayer::new()
-            .with_filter(env_filter)
-            .boxed()
-    } else {
-        tracing_subscriber::fmt::Layer::default()
+    let log_layer = match config.log_format {
+        LogFormat::Default => tracing_subscriber::fmt::Layer::default()
             .compact()
             .with_timer(tracing_subscriber::fmt::time::ChronoUtc::rfc_3339())
             .with_ansi_sanitization(false)
             .with_filter(env_filter)
-            .boxed()
+            .boxed(),
+        #[cfg(feature = "duper")]
+        LogFormat::Duper => tracing_duper::DuperLayer::new()
+            .with_filter(env_filter)
+            .boxed(),
+        LogFormat::Json => tracing_subscriber::fmt::Layer::default()
+            .json()
+            .with_filter(env_filter)
+            .boxed(),
     };
-    #[cfg(not(feature = "duper"))]
-    let log_layer = tracing_subscriber::fmt::Layer::default()
-        .compact()
-        .with_timer(tracing_subscriber::fmt::time::ChronoUtc::rfc_3339())
-        .with_ansi_sanitization(false)
-        .with_filter(env_filter);
 
     tracing_subscriber::registry()
         .with(log_layer)

@@ -94,9 +94,10 @@ tracing = "0.1.44"
 tracing_duper = { version = "0.1.1", optional = true }
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.23", features = [
+  "chrono",
   "env-filter",
   "fmt",
-  "chrono",
+  "json",
 ] }
 trie-rs = "0.4.2"
 webpki-roots = "1"

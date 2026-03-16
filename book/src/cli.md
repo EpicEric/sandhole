@@ -283,8 +283,15 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           Beware that this can lead to false positives being blocked!
 
-      <b>--duper-logs</b>
-          Outputs logs in the Duper format
+      <b>--log-format</b> &lt;FORMAT&gt;
+          Which format to output logs in
+
+          Possible values:
+          - <b>default</b>: Default (compact, ANSI-formatted, single-line)
+          - <b>json</b>:    JSON format
+          - <b>duper</b>:   Duper format
+          
+          [default: default]
 
       <b>--ip-allowlist</b> &lt;CIDR&gt;
           Comma-separated list of IP networks to allow. Setting this will block

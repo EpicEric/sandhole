@@ -56,7 +56,7 @@ use crate::{
     error::ServerError,
     fingerprints::FingerprintsValidator,
     http::{
-        DomainRedirect, HttpLogFormat, Protocol, ProxyData, ProxyType, http2::https_2_handler,
+        DomainRedirect, Protocol, ProxyData, ProxyType, http2::https_2_handler,
         http11::https_11_handler, proxy_handler,
     },
     ip::{IpFilter, IpFilterConfig},
@@ -122,14 +122,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     }
     let http_request_timeout = config.http_request_timeout;
     let tcp_connection_timeout = config.tcp_connection_timeout;
-    #[cfg(feature = "duper")]
-    let log_format = if config.duper_logs {
-        HttpLogFormat::Duper
-    } else {
-        HttpLogFormat::Default
-    };
-    #[cfg(not(feature = "duper"))]
-    let log_format = HttpLogFormat::Default;
+    let log_format = config.log_format;
     let buffer_size = usize::try_from(config.buffer_size)
         .with_context(|| "Cannot convert buffer size to usize")?;
     // Initialize crypto and credentials

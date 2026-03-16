@@ -14,6 +14,7 @@ pub(crate) mod http11;
 pub(crate) mod http2;
 
 use crate::{
+    config::LogFormat,
     connection_handler::ConnectionHandler,
     connections::ConnectionGetByHttpHost,
     error::ServerError,
@@ -128,22 +129,12 @@ struct HttpLog {
     elapsed_time: Duration,
 }
 
-// How HTTP logs should be printed.
-#[derive(Clone, Copy)]
-pub(crate) enum HttpLogFormat {
-    // Print as a formatted line.
-    Default,
-    // Print in the Duper format.
-    #[cfg(feature = "duper")]
-    Duper,
-}
-
 // Pretty-print an HTTP log with ANSI
 fn http_log(
     data: HttpLog,
     tx: Option<ServerHandlerSender>,
     disable_http_logs: bool,
-    log_format: HttpLogFormat,
+    log_format: LogFormat,
 ) {
     let HttpLog {
         ip,
@@ -179,7 +170,7 @@ fn http_log(
     };
     let duration = pretty_duration::pretty_duration(&elapsed_time, None);
     match log_format {
-        HttpLogFormat::Default => {
+        LogFormat::Default => {
             let tracing_line = format!(
                 "{} {} {} => {} {}",
                 format!("[{status}]")
@@ -195,7 +186,7 @@ fn http_log(
             tracing::info!("{tracing_line}");
         }
         #[cfg(feature = "duper")]
-        HttpLogFormat::Duper => {
+        LogFormat::Duper => {
             let duration_nanos = elapsed_time.as_nanos();
             let duper_duration = format!(
                 "Duration('PT{}.{:09}S')",
@@ -204,6 +195,10 @@ fn http_log(
             );
             #[cfg(not(coverage_nightly))]
             tracing::info!(%status, %method, %host, %uri, %ip, "$duper.duration" = duper_duration, "Proxied HTTP request.");
+        }
+        LogFormat::Json => {
+            #[cfg(not(coverage_nightly))]
+            tracing::info!(%status, %method, %host, %uri, %ip,  %duration, "Proxied HTTP request.");
         }
     }
     if !disable_http_logs {
@@ -368,8 +363,8 @@ where
     websocket_timeout: Option<Duration>,
     // If set, disables sending HTTP logs to the handler.
     disable_http_logs: bool,
-    // The format to output HTTP logs.
-    log_format: HttpLogFormat,
+    // The format to output HTTP logs in.
+    log_format: LogFormat,
     #[builder(skip)]
     _phantom_data: PhantomData<(H, T)>,
 }
@@ -704,10 +699,9 @@ mod proxy_handler_tests {
     use tower::Service;
 
     use crate::{
-        config::LoadBalancingStrategy,
+        config::{LoadBalancingStrategy, LogFormat},
         connection_handler::{ConnectionHttpData, MockConnectionHandler},
         connections::ConnectionMap,
-        http::HttpLogFormat,
         quota::{DummyQuotaHandler, TokenHolder, UserIdentification},
         reactor::MockConnectionMapReactor,
         ssh::ServerHandlerSender,
@@ -751,7 +745,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -797,7 +791,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -843,7 +837,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -909,7 +903,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -978,7 +972,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -1048,7 +1042,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -1117,7 +1111,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -1213,7 +1207,7 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .http_request_timeout(Duration::from_millis(500))
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -1304,7 +1298,7 @@ mod proxy_handler_tests {
                         .buffer_size(8_000)
                         .http_request_timeout(Duration::from_millis(500))
                         .disable_http_logs(false)
-                        .log_format(HttpLogFormat::Default)
+                        .log_format(LogFormat::Default)
                         .build(),
                 ),
             )
@@ -1417,7 +1411,7 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .http_request_timeout(Duration::from_millis(500))
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -1517,7 +1511,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -1619,7 +1613,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -1720,7 +1714,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -1820,7 +1814,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Aliasing)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -1921,7 +1915,7 @@ mod proxy_handler_tests {
                     .proxy_type(ProxyType::Tunneling)
                     .buffer_size(8_000)
                     .disable_http_logs(false)
-                    .log_format(HttpLogFormat::Default)
+                    .log_format(LogFormat::Default)
                     .build(),
             ),
         )
@@ -2017,7 +2011,7 @@ mod proxy_handler_tests {
                         .proxy_type(ProxyType::Tunneling)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
-                        .log_format(HttpLogFormat::Default)
+                        .log_format(LogFormat::Default)
                         .build(),
                 ),
             )
@@ -2136,7 +2130,7 @@ mod proxy_handler_tests {
                         .proxy_type(ProxyType::Tunneling)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
-                        .log_format(HttpLogFormat::Default)
+                        .log_format(LogFormat::Default)
                         .build(),
                 ),
             )
@@ -2246,7 +2240,7 @@ mod proxy_handler_tests {
                         .proxy_type(ProxyType::Tunneling)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
-                        .log_format(HttpLogFormat::Default)
+                        .log_format(LogFormat::Default)
                         .build(),
                 ),
             )
@@ -2373,7 +2367,7 @@ mod proxy_handler_tests {
                         .proxy_type(ProxyType::Tunneling)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
-                        .log_format(HttpLogFormat::Default)
+                        .log_format(LogFormat::Default)
                         .build(),
                 ),
             )
@@ -2450,7 +2444,7 @@ mod proxy_handler_tests {
                         .proxy_type(ProxyType::Tunneling)
                         .buffer_size(8_000)
                         .disable_http_logs(false)
-                        .log_format(HttpLogFormat::Default)
+                        .log_format(LogFormat::Default)
                         .build(),
                 ),
             )
