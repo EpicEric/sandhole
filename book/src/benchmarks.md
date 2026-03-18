@@ -10,16 +10,16 @@ This page includes some benchmarks comparing Sandhole and competing solutions.
 
 ## Results
 
-| aes256-gcm       | sandhole v0.9.0 | sish v2.20.0 | Speedup |
-| ---------------- | --------------- | ------------ | ------- |
-| HTTPS GET 50MB   | 115.2ms         | 104.8ms      | 0.910x  |
-| HTTPS GET 100MB  | 196.8ms         | 179.6ms      | 0.913x  |
-| HTTPS POST 50MB  | 120.8ms         | 171.8ms      | 1.422x  |
-| HTTPS POST 100MB | 210.6ms         | 260.4ms      | 1.236x  |
+| aes256-gcm       | sandhole v0.9.2-preview | sish v2.22.1 | Speedup |
+| ---------------- | ----------------------- | ------------ | ------- |
+| HTTPS GET 50MB   | 111.8ms                 | 109.2ms      | 0.977x  |
+| HTTPS GET 100MB  | 195.8ms                 | 178.8ms      | 0.913x  |
+| HTTPS POST 50MB  | 125.8ms                 | 137.0ms      | 1.089x  |
+| HTTPS POST 100MB | 224.8ms                 | 236.4ms      | 1.052x  |
 
-| chacha20-poly1305 | sandhole v0.9.0 | sish v2.20.0 | Speedup |
-| ----------------- | --------------- | ------------ | ------- |
-| HTTPS GET 50MB    | 130.6ms         | 144.8ms      | 1.109x  |
-| HTTPS GET 100MB   | 228.4ms         | 245.2ms      | 1.074x  |
-| HTTPS POST 50MB   | 144.4ms         | 195.6ms      | 1.355x  |
-| HTTPS POST 100MB  | 228.0ms         | 307.4ms      | 1.348x  |
+| chacha20-poly1305 | sandhole v0.9.2-preview | sish v2.22.1 | Speedup |
+| ----------------- | ----------------------- | ------------ | ------- |
+| HTTPS GET 50MB    | 112.2ms                 | 139.0ms      | 1.239x  |
+| HTTPS GET 100MB   | 183.8ms                 | 248.2ms      | 1.350x  |
+| HTTPS POST 50MB   | 141.4ms                 | 153.6ms      | 1.086x  |
+| HTTPS POST 100MB  | 254.4ms                 | 271.8ms      | 1.068x  |
