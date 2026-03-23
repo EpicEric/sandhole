@@ -17,6 +17,8 @@ use tokio::{
 
 use crate::common::SandholeHandle;
 
+const CMD_CTRL_C: &[u8] = b"\x03";
+
 /// This test ensures that a proper message is displayed when the admin user
 /// opens the admin interface without allocating a pseudo-terminal (i.e. if
 /// they run `ssh sandhole.com.br admin` without the `-T` flag).
@@ -192,7 +194,7 @@ async fn admin_missing_pty() {
         }
         // 4b. Quit the admin interface with Ctrl-C (ETX)
         writer
-            .write_all(&b"\x03"[..])
+            .write_all(CMD_CTRL_C)
             .await
             .expect("channel write failed");
     })

@@ -1,16 +1,16 @@
-#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+#[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use std::time::Duration;
 use std::{net::IpAddr, sync::Arc};
 
-#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+#[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use bytes::Bytes;
-#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+#[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use http::{HeaderValue, Request, Response, StatusCode, header::CONTENT_TYPE};
-#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+#[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use http_body_util::Full;
-#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+#[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use hyper::body::Incoming;
-#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+#[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
@@ -19,7 +19,7 @@ use hyper_util::{
 use metrics_exporter_prometheus::PrometheusHandle;
 use russh::keys::ssh_key::Fingerprint;
 use tokio::io::DuplexStream;
-#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+#[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use tokio::time::timeout;
 
 use crate::{

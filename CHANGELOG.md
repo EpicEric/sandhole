@@ -6,6 +6,7 @@
 
 - Add `--authenticate-any-key-as-user` CLI flag.
 - Add `--log-format` CLI flag.
+- Add notifications tab to admin interface.
 - Support `NO_COLOR`.
 
 ### Fixed

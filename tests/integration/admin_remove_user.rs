@@ -26,6 +26,12 @@ use tower::Service;
 
 use crate::common::SandholeHandle;
 
+const CMD_SHIFT_TAB: &[u8] = b"\x1b[Z";
+const CMD_DOWN: &[u8] = b"\x1b[B";
+const CMD_DELETE: &[u8] = b"\x1b[3~";
+const CMD_ENTER: &[u8] = b"\r";
+const CMD_CTRL_C: &[u8] = b"\x03";
+
 /// This test follows an admin user that removes a connected user through the
 /// admin interface.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -209,7 +215,7 @@ async fn admin_remove_user() {
             r"HTTP services",
             r"aaa\.foobar\.tld",
             r"SHA256:GehKyA\S*",
-            r"127.0.0.1:\d{4,5}",
+            r"127\.0\.0\.1:\d{4,5}",
             r"custom_user",
             r"127\.0\.0\.1:\d{4,5}",
         ]
@@ -224,11 +230,11 @@ async fn admin_remove_user() {
         }
         // 5b. Select HTTP service and open connected users prompt
         writer
-            .write_all(&b"\x1b[B"[..])
+            .write_all(CMD_DOWN)
             .await
             .expect("channel write failed");
         writer
-            .write_all(&b"\r"[..])
+            .write_all(CMD_ENTER)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -249,15 +255,15 @@ async fn admin_remove_user() {
         }
         // 5c. Select custom_user and open user details prompt
         writer
-            .write_all(&b"\x1b[B"[..])
+            .write_all(CMD_DOWN)
             .await
             .expect("channel write failed");
         writer
-            .write_all(&b"\x1b[B"[..])
+            .write_all(CMD_DOWN)
             .await
             .expect("channel write failed");
         writer
-            .write_all(&b"\r"[..])
+            .write_all(CMD_ENTER)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -277,9 +283,9 @@ async fn admin_remove_user() {
                 break;
             }
         }
-        // 5c. Open removal prompt
+        // 5d. Open removal prompt
         writer
-            .write_all(&b"\x1b[3~"[..])
+            .write_all(CMD_DELETE)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -299,9 +305,9 @@ async fn admin_remove_user() {
                 break;
             }
         }
-        // 5d. Confirm removal
+        // 5e. Confirm removal
         writer
-            .write_all(&b"\r"[..])
+            .write_all(CMD_ENTER)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -321,21 +327,25 @@ async fn admin_remove_user() {
         // Required for updating the admin interface data
         sleep(Duration::from_secs(3)).await;
         assert!(session_2.is_closed(), "user session wasn't terminated");
-        // 5e. Close prompt, head to the TCP tab, and ensure that the window still displays the first service there
+        // 5f. Close prompt, head to the TCP tab, and ensure that the window still displays the first service there
         assert!(
             !session_1.is_closed(),
             "proxy session shouldn't have been terminated"
         );
         writer
-            .write_all(&b"\r"[..])
+            .write_all(CMD_ENTER)
             .await
             .expect("channel write failed");
         writer
-            .write_all(&b"\x1b[Z"[..])
+            .write_all(CMD_SHIFT_TAB)
             .await
             .expect("channel write failed");
         writer
-            .write_all(&b"\x1b[Z"[..])
+            .write_all(CMD_SHIFT_TAB)
+            .await
+            .expect("channel write failed");
+        writer
+            .write_all(CMD_SHIFT_TAB)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -343,7 +353,7 @@ async fn admin_remove_user() {
             r"TCP services",
             r"38080",
             r"SHA256:GehKyA\S*",
-            r"127.0.0.1:\d{4,5}",
+            r"127\.0\.0\.1:\d{4,5}",
         ]
         .into_iter()
         .map(|re| Regex::new(re).expect("Invalid regex"))
@@ -354,13 +364,13 @@ async fn admin_remove_user() {
                 break;
             }
         }
-        // 5f. Select user and open details
+        // 5g. Select user and open details
         writer
-            .write_all(&b"\x1b[B"[..])
+            .write_all(CMD_DOWN)
             .await
             .expect("channel write failed");
         writer
-            .write_all(&b"\r"[..])
+            .write_all(CMD_ENTER)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -381,9 +391,9 @@ async fn admin_remove_user() {
                 break;
             }
         }
-        // 5g. Quit the admin interface with Ctrl-C (ETX)
+        // 5h. Quit the admin interface with Ctrl-C (ETX)
         writer
-            .write_all(&b"\x03"[..])
+            .write_all(CMD_CTRL_C)
             .await
             .expect("channel write failed");
     })

@@ -18,6 +18,14 @@ use tokio::{
 
 use crate::common::SandholeHandle;
 
+const CMD_TAB: &[u8] = b"\t";
+const CMD_SHIFT_TAB: &[u8] = b"\x1b[Z";
+const CMD_ESC: &[u8] = b"\x1b";
+const CMD_UP: &[u8] = b"\x1b[A";
+const CMD_DOWN: &[u8] = b"\x1b[B";
+const CMD_ENTER: &[u8] = b"\r";
+const CMD_CTRL_C: &[u8] = b"\x03";
+
 /// This test interacts with the admin interface and ensures that the displayed
 /// information matches what's expected after each specific key press.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -243,12 +251,12 @@ async fn admin_interface() {
         }
         // 4b. View HTTP user details
         writer
-            .write_all(&b"\x1b[A"[..])
+            .write_all(CMD_UP)
             .await
             .expect("channel write failed");
         sleep(Duration::from_millis(200)).await;
         writer
-            .write_all(&b"\r"[..])
+            .write_all(CMD_ENTER)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -271,12 +279,12 @@ async fn admin_interface() {
         }
         // 4c. Close user details, switch tabs, and validate SNI tab data
         writer
-            .write_all(&b"\x1b"[..])
+            .write_all(CMD_ESC)
             .await
             .expect("channel write failed");
         sleep(Duration::from_millis(200)).await;
         writer
-            .write_all(&b"\t"[..])
+            .write_all(CMD_TAB)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -302,7 +310,7 @@ async fn admin_interface() {
         }
         // 4d. Switch tabs and validate SSH tab data
         writer
-            .write_all(&b"\t"[..])
+            .write_all(CMD_TAB)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -328,12 +336,12 @@ async fn admin_interface() {
         }
         // 4e. View SSH user details
         writer
-            .write_all(&b"\x1b[B"[..])
+            .write_all(CMD_DOWN)
             .await
             .expect("channel write failed");
         sleep(Duration::from_millis(200)).await;
         writer
-            .write_all(&b"\r"[..])
+            .write_all(CMD_ENTER)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -356,12 +364,12 @@ async fn admin_interface() {
         }
         // 4f. Close user details, switch tabs, and validate TCP tab data
         writer
-            .write_all(&b"\x1b"[..])
+            .write_all(CMD_ESC)
             .await
             .expect("channel write failed");
         sleep(Duration::from_millis(200)).await;
         writer
-            .write_all(&b"\t"[..])
+            .write_all(CMD_TAB)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -387,12 +395,12 @@ async fn admin_interface() {
         }
         // 4g. View TCP user details
         writer
-            .write_all(&b"\x1b[A"[..])
+            .write_all(CMD_UP)
             .await
             .expect("channel write failed");
         sleep(Duration::from_millis(200)).await;
         writer
-            .write_all(&b"\r"[..])
+            .write_all(CMD_ENTER)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -415,12 +423,12 @@ async fn admin_interface() {
         }
         // 4h. Close user details, switch tabs, and validate alias tab data
         writer
-            .write_all(&b"\x1b"[..])
+            .write_all(CMD_ESC)
             .await
             .expect("channel write failed");
         sleep(Duration::from_millis(200)).await;
         writer
-            .write_all(&b"\t"[..])
+            .write_all(CMD_TAB)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -446,12 +454,12 @@ async fn admin_interface() {
         }
         // 4i. View TCP user details
         writer
-            .write_all(&b"\x1b[A"[..])
+            .write_all(CMD_UP)
             .await
             .expect("channel write failed");
         sleep(Duration::from_millis(200)).await;
         writer
-            .write_all(&b"\r"[..])
+            .write_all(CMD_ENTER)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -473,12 +481,12 @@ async fn admin_interface() {
         }
         // 4j. Close user details and go back one tab
         writer
-            .write_all(&b"\x1b"[..])
+            .write_all(CMD_ESC)
             .await
             .expect("channel write failed");
         sleep(Duration::from_millis(200)).await;
         writer
-            .write_all(&b"\x1b[Z"[..])
+            .write_all(CMD_SHIFT_TAB)
             .await
             .expect("channel write failed");
         let search_strings: Vec<Regex> = [
@@ -509,7 +517,7 @@ async fn admin_interface() {
             .expect("channel write failed");
         // 4j. Quit the admin interface with Ctrl-C (ETX)
         writer
-            .write_all(&b"\x03"[..])
+            .write_all(CMD_CTRL_C)
             .await
             .expect("channel write failed");
     })

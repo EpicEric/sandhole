@@ -16,7 +16,7 @@ use ratatui::{
     prelude::CrosstermBackend,
     style::{Color, Modifier, Style, Stylize},
     symbols::border,
-    text::{Line, Text},
+    text::{Line, Text, ToSpan},
     widgets::{
         Block, Clear, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
         StatefulWidget, Table, TableState, Tabs, Widget, Wrap,
@@ -26,7 +26,7 @@ use russh::keys::ssh_key::Fingerprint;
 use tokio::{sync::watch, time::sleep};
 
 use crate::{
-    SandholeServer, SystemData,
+    AdminNotification, SandholeServer, SystemData,
     droppable_handle::DroppableHandle,
     fingerprints::{AuthenticationType, KeyData},
     quota::TokenHolderUser,
@@ -52,6 +52,7 @@ impl io::Write for BufferedSender {
 
 #[derive(Clone, Copy)]
 enum Tab {
+    Notifications,
     Http,
     Sni,
     Ssh,
@@ -62,6 +63,7 @@ enum Tab {
 impl Tab {
     fn color(&self) -> Color {
         match self {
+            Tab::Notifications => Color::White,
             Tab::Http => Color::Blue,
             Tab::Sni => Color::Cyan,
             Tab::Ssh => Color::Yellow,
@@ -78,16 +80,27 @@ struct TabData {
 
 impl TabData {
     // Render the tabs at the top of the table
-    fn render(&self, area: Rect, buf: &mut Buffer) {
+    fn render(&self, area: Rect, buf: &mut Buffer, has_notifications: bool) {
         Tabs::new(
             self.tabs
                 .iter()
                 .map(|tab| match tab {
-                    Tab::Http => Line::from("  HTTP  ".black().bg(Tab::Http.color())),
-                    Tab::Sni => Line::from("  SNI  ".black().bg(Tab::Sni.color())),
-                    Tab::Ssh => Line::from("  SSH  ".black().bg(Tab::Ssh.color())),
-                    Tab::Tcp => Line::from("  TCP  ".black().bg(Tab::Tcp.color())),
-                    Tab::Alias => Line::from("  Alias  ".black().bg(Tab::Alias.color())),
+                    Tab::Notifications => {
+                        if has_notifications {
+                            Line::from(vec![
+                                " ".black().bg(tab.color()),
+                                "● ".red().bg(tab.color()),
+                                "Notifs.  ".black().bg(tab.color()),
+                            ])
+                        } else {
+                            Line::from("  Notifs.  ".black().bg(tab.color()))
+                        }
+                    }
+                    Tab::Http => Line::from("  HTTP  ".black().bg(tab.color())),
+                    Tab::Sni => Line::from("  SNI  ".black().bg(tab.color())),
+                    Tab::Ssh => Line::from("  SSH  ".black().bg(tab.color())),
+                    Tab::Tcp => Line::from("  TCP  ".black().bg(tab.color())),
+                    Tab::Alias => Line::from("  Alias  ".black().bg(tab.color())),
                 })
                 .collect::<Vec<_>>(),
         )
@@ -176,14 +189,24 @@ impl AdminState {
             let title =
                 Line::from(concat!(" Sandhole admin v", env!("CARGO_PKG_VERSION"), " ").bold());
             // Display the commands at the bottom
-            let instructions = Line::from(vec![
-                " <Tab> ".blue().bold(),
-                "Change tab ".into(),
-                " <Enter> ".blue().bold(),
-                "Details ".into(),
-                " <Ctrl-C> ".blue().bold(),
-                "Quit ".into(),
-            ]);
+            let instructions =
+                Line::from(if matches!(self.tab.current_tab(), Tab::Notifications) {
+                    vec![
+                        " <Tab> ".blue().bold(),
+                        "Change tab ".into(),
+                        " <Ctrl-C> ".blue().bold(),
+                        "Quit ".into(),
+                    ]
+                } else {
+                    vec![
+                        " <Tab> ".blue().bold(),
+                        "Change tab ".into(),
+                        " <Enter> ".blue().bold(),
+                        "Details ".into(),
+                        " <Ctrl-C> ".blue().bold(),
+                        "Quit ".into(),
+                    ]
+                });
             let block = Block::bordered()
                 .title(title.centered())
                 .title_bottom(instructions.centered())
@@ -197,7 +220,15 @@ impl AdminState {
                 Constraint::Min(0),
             ])
             .areas(area.inner(Margin::new(2, 2)));
-            self.tab.render(tabs_area, buf);
+            let has_notifications = {
+                !self
+                    .server
+                    .admin_notifications
+                    .lock()
+                    .expect("not poisoned")
+                    .is_empty()
+            };
+            self.tab.render(tabs_area, buf, has_notifications);
             self.render_system_data(system_data_area, buf);
             Block::bordered()
                 .border_style(Style::new().fg(self.tab.current_tab().color()))
@@ -340,7 +371,74 @@ impl AdminState {
     // Render the selected tab's contents
     fn render_tab(&mut self, area: Rect, buf: &mut Buffer) {
         let color = self.tab.current_tab().color();
-        let table = match self.tab.current_tab() {
+        match self.tab.current_tab() {
+            Tab::Notifications => {
+                // Get notifications
+                let notifications = {
+                    self.server
+                        .admin_notifications
+                        .lock()
+                        .expect("not poisoned")
+                        .clone()
+                };
+                self.vertical_scroll = self.vertical_scroll.content_length(notifications.len());
+                if notifications.is_empty() {
+                    Paragraph::new(Line::raw("No notifications.").centered())
+                        .wrap(Wrap { trim: true })
+                        .render(area, buf);
+                } else {
+                    // Create rows for each notification
+                    let rows: Vec<Row<'_>> = notifications
+                        .iter()
+                        .map(|notification| match notification {
+                            AdminNotification::ExpiredCertificate(domain) => {
+                                Row::new([Text::from(vec![
+                                    Line::from(vec![
+                                        "● ".red(),
+                                        "Expired TLS certificate for root domain ".to_span(),
+                                        domain.to_span(),
+                                    ]),
+                                    Line::from("  = hint: make sure that ACME is set up properly"),
+                                ])])
+                                .height(2)
+                            }
+                            AdminNotification::InvalidTls(domain) => Row::new([Text::from(vec![
+                                Line::from(vec![
+                                    "● ".red(),
+                                    "Invalid TLS certificate for root domain ".to_span(),
+                                    domain.to_span(),
+                                ]),
+                                Line::from("  = hint: make sure that ACME is set up properly"),
+                            ])])
+                            .height(2),
+                            AdminNotification::NoCertificate(domain) => {
+                                Row::new([Text::from(vec![
+                                    Line::from(vec![
+                                        "● ".red(),
+                                        "No TLS certificate found for root domain ".to_span(),
+                                        domain.to_span(),
+                                    ]),
+                                    Line::from("  = hint: make sure that ACME is set up properly"),
+                                ])])
+                                .height(2)
+                            }
+                        })
+                        .collect();
+                    let title =
+                        Block::new().title(Line::from("Notifications".fg(color).bold()).centered());
+                    let table = Table::new(rows, [Constraint::Fill(1)])
+                        .column_spacing(1)
+                        .block(title)
+                        .row_highlight_style(Style::new().fg(color).reversed());
+                    StatefulWidget::render(table, area, buf, &mut self.table_state);
+                    StatefulWidget::render(
+                        Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+                        area.inner(Margin::new(0, 2)),
+                        buf,
+                        &mut self.vertical_scroll,
+                    );
+                }
+            }
             Tab::Http => {
                 // Get data for HTTP
                 let data = self.server.http_data.lock().expect("not poisoned").clone();
@@ -370,11 +468,18 @@ impl AdminState {
                     .add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("HTTP services".fg(color).bold()).centered());
-                Table::new(rows, constraints)
+                let table = Table::new(rows, constraints)
                     .header(header)
                     .column_spacing(1)
                     .block(title)
-                    .row_highlight_style(Style::new().fg(color).reversed())
+                    .row_highlight_style(Style::new().fg(color).reversed());
+                StatefulWidget::render(table, area, buf, &mut self.table_state);
+                StatefulWidget::render(
+                    Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+                    area.inner(Margin::new(0, 2)),
+                    buf,
+                    &mut self.vertical_scroll,
+                );
             }
             Tab::Sni => {
                 // Get data for aliases
@@ -407,11 +512,18 @@ impl AdminState {
                     .add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("SNI proxies".fg(color).bold()).centered());
-                Table::new(rows, constraints)
+                let table = Table::new(rows, constraints)
                     .header(header)
                     .column_spacing(1)
                     .block(title)
-                    .row_highlight_style(Style::new().fg(color).reversed())
+                    .row_highlight_style(Style::new().fg(color).reversed());
+                StatefulWidget::render(table, area, buf, &mut self.table_state);
+                StatefulWidget::render(
+                    Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+                    area.inner(Margin::new(0, 2)),
+                    buf,
+                    &mut self.vertical_scroll,
+                );
             }
             Tab::Ssh => {
                 // Get data for SSH
@@ -444,11 +556,18 @@ impl AdminState {
                     .add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("SSH services".fg(color).bold()).centered());
-                Table::new(rows, constraints)
+                let table = Table::new(rows, constraints)
                     .header(header)
                     .column_spacing(1)
                     .block(title)
-                    .row_highlight_style(Style::new().fg(color).reversed())
+                    .row_highlight_style(Style::new().fg(color).reversed());
+                StatefulWidget::render(table, area, buf, &mut self.table_state);
+                StatefulWidget::render(
+                    Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+                    area.inner(Margin::new(0, 2)),
+                    buf,
+                    &mut self.vertical_scroll,
+                );
             }
             Tab::Tcp => {
                 // Get data for TCP
@@ -481,11 +600,18 @@ impl AdminState {
                     .add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("TCP services".fg(color).bold()).centered());
-                Table::new(rows, constraints)
+                let table = Table::new(rows, constraints)
                     .header(header)
                     .column_spacing(1)
                     .block(title)
-                    .row_highlight_style(Style::new().fg(color).reversed())
+                    .row_highlight_style(Style::new().fg(color).reversed());
+                StatefulWidget::render(table, area, buf, &mut self.table_state);
+                StatefulWidget::render(
+                    Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+                    area.inner(Margin::new(0, 2)),
+                    buf,
+                    &mut self.vertical_scroll,
+                );
             }
             Tab::Alias => {
                 // Get data for aliases
@@ -520,20 +646,20 @@ impl AdminState {
                     .add_modifier(Modifier::UNDERLINED);
                 let title =
                     Block::new().title(Line::from("Alias services".fg(color).bold()).centered());
-                Table::new(rows, constraints)
+                let table = Table::new(rows, constraints)
                     .header(header)
                     .column_spacing(1)
                     .block(title)
-                    .row_highlight_style(Style::new().fg(color).reversed())
+                    .row_highlight_style(Style::new().fg(color).reversed());
+                StatefulWidget::render(table, area, buf, &mut self.table_state);
+                StatefulWidget::render(
+                    Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+                    area.inner(Margin::new(0, 2)),
+                    buf,
+                    &mut self.vertical_scroll,
+                );
             }
-        };
-        StatefulWidget::render(table, area, buf, &mut self.table_state);
-        StatefulWidget::render(
-            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-            area.inner(Margin::new(0, 2)),
-            buf,
-            &mut self.vertical_scroll,
-        );
+        }
     }
 
     // Render the system information box
@@ -544,6 +670,7 @@ impl AdminState {
             network_tx,
             network_rx,
             cpu_usage,
+            duration,
         } = self
             .server
             .system_data
@@ -572,13 +699,29 @@ impl AdminState {
             )
             .into(),
         ]);
+        let mut duration_micros = duration.as_micros() as u64;
+        if duration_micros == 0 {
+            duration_micros = 1_000_000;
+        }
         let network_tx = Line::from(vec![
             "   TX   ".bold().reversed(),
-            format!(" {}/s", ByteSize::b(network_tx).display().iec_short()).into(),
+            format!(
+                " {}/s",
+                ByteSize::b(network_tx * 1_000_000 / duration_micros)
+                    .display()
+                    .iec_short()
+            )
+            .into(),
         ]);
         let network_rx = Line::from(vec![
             "   RX   ".bold().reversed(),
-            format!(" {}/s", ByteSize::b(network_rx).display().iec_short()).into(),
+            format!(
+                " {}/s",
+                ByteSize::b(network_rx * 1_000_000 / duration_micros)
+                    .display()
+                    .iec_short()
+            )
+            .into(),
         ]);
         Widget::render(block, area, buf);
         Widget::render(cpu_usage, cpu_area, buf);
@@ -618,7 +761,7 @@ impl AdminInterface {
         };
         // Create a channel to listen for user-generated events
         let (change_notifier, mut subscriber) = watch::channel(());
-        let mut tabs = Vec::new();
+        let mut tabs = vec![Tab::Notifications];
         if !server.disable_http {
             tabs.push(Tab::Http);
             if !server.disable_sni {
@@ -640,7 +783,10 @@ impl AdminInterface {
             state: AdminState {
                 server,
                 enabled: true,
-                tab: TabData { tabs, current: 0 },
+                tab: TabData {
+                    current: tabs.len().saturating_sub(1).min(1),
+                    tabs,
+                },
                 is_pty: false,
                 table_state: Default::default(),
                 vertical_scroll: Default::default(),
@@ -882,6 +1028,7 @@ impl AdminInterface {
                     Some(row) => {
                         let users: Option<Vec<TokenHolderUser>> =
                             match interface.state.tab.current_tab() {
+                                Tab::Notifications => None,
                                 Tab::Http => interface
                                     .state
                                     .server
@@ -929,10 +1076,7 @@ impl AdminInterface {
                                     .map(|value| value.0.values().cloned().collect()),
                             };
                         match users {
-                            None => {
-                                interface.state.prompt =
-                                    Some(AdminPrompt::Infobox("No users found!".into()));
-                            }
+                            None => {}
                             Some(users) if users.is_empty() => {
                                 interface.state.prompt =
                                     Some(AdminPrompt::Infobox("No users found!".into()));

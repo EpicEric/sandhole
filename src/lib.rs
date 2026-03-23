@@ -75,6 +75,7 @@ struct SystemData {
     network_tx: u64,
     network_rx: u64,
     cpu_usage: f32,
+    duration: Duration,
 }
 
 // A list of sessions and their cancelation channels.
@@ -87,6 +88,14 @@ type HttpProxyData<C> = Arc<ProxyData<Incoming, Arc<C>, SshTunnelHandler, SshCha
 type TunnelingProxyData = HttpProxyData<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>;
 // HTTP proxy data used by the local forwarding aliasing connections.
 type AliasingProxyData = HttpProxyData<HttpAliasingConnection>;
+
+// Notifications displayed in the admin interface.
+#[derive(Clone)]
+pub(crate) enum AdminNotification {
+    ExpiredCertificate(String),
+    InvalidTls(String),
+    NoCertificate(String),
+}
 
 pub(crate) struct SandholeServer {
     // A unique ID assigned for each SSH session.
@@ -119,6 +128,8 @@ pub(crate) struct SandholeServer {
     pub(crate) alias_data: DataTable<TcpAlias, (BTreeMap<SocketAddr, TokenHolderUser>, u64, f64)>,
     // System data for the admin interface.
     pub(crate) system_data: Arc<Mutex<SystemData>>,
+    // Warnings for the admin interface.
+    pub(crate) admin_notifications: Arc<Mutex<Vec<AdminNotification>>>,
     // HTTP proxy data used by the local forwarding aliasing connections.
     pub(crate) aliasing_proxy_data: AliasingProxyData,
     // Service for validating fingerprint authentications and automatically update its data when the filesystem changes.

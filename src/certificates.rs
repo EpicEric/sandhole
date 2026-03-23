@@ -178,7 +178,7 @@ impl CertificateResolver {
     }
 
     // Find the certificate that matches the given server name
-    fn resolve_server_name(&self, server_name: &str) -> Option<Arc<CertifiedKey>> {
+    pub(crate) fn resolve_server_name(&self, server_name: &str) -> Option<Arc<CertifiedKey>> {
         // Get the server name for the provided address
         let Ok(dns_server_name) = DnsName::try_from(server_name).map(ServerName::DnsName) else {
             return None;

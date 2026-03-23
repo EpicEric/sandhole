@@ -1,4 +1,4 @@
-#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+#[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use std::future;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -18,10 +18,10 @@ use metrics::{
 };
 #[cfg(feature = "prometheus")]
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle, PrometheusRecorder};
-#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+#[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use tokio::time::sleep;
 
-#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+#[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use crate::droppable_handle::DroppableHandle;
 use crate::tcp_alias::TcpAlias;
 
@@ -217,7 +217,7 @@ pub(crate) struct Telemetry {
 }
 
 impl Telemetry {
-    #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
+    #[cfg_attr(not(feature = "prometheus"), allow(unused_variables))]
     pub(crate) fn new(enable_prometheus: bool) -> Self {
         #[cfg(feature = "prometheus")]
         let (prometheus_recorder, join_handle) = if enable_prometheus {
@@ -455,7 +455,7 @@ impl Telemetry {
 }
 
 impl Recorder for Telemetry {
-    #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
+    #[cfg_attr(not(feature = "prometheus"), allow(unused_variables))]
     fn describe_counter(
         &self,
         key: metrics::KeyName,
@@ -468,7 +468,7 @@ impl Recorder for Telemetry {
             .inspect(|recorder| recorder.describe_counter(key, unit, description));
     }
 
-    #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
+    #[cfg_attr(not(feature = "prometheus"), allow(unused_variables))]
     fn describe_gauge(
         &self,
         key: metrics::KeyName,
@@ -481,7 +481,7 @@ impl Recorder for Telemetry {
             .inspect(|recorder| recorder.describe_gauge(key, unit, description));
     }
 
-    #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
+    #[cfg_attr(not(feature = "prometheus"), allow(unused_variables))]
     fn describe_histogram(
         &self,
         key: metrics::KeyName,
@@ -497,7 +497,7 @@ impl Recorder for Telemetry {
     fn register_counter(
         &self,
         key: &metrics::Key,
-        #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
+        #[cfg_attr(not(feature = "prometheus"), allow(unused_variables))]
         metadata: &metrics::Metadata<'_>,
     ) -> metrics::Counter {
         #[cfg(feature = "prometheus")]
@@ -637,7 +637,7 @@ impl Recorder for Telemetry {
     fn register_gauge(
         &self,
         key: &metrics::Key,
-        #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
+        #[cfg_attr(not(feature = "prometheus"), allow(unused_variables))]
         metadata: &metrics::Metadata<'_>,
     ) -> metrics::Gauge {
         #[cfg(feature = "prometheus")]
@@ -746,8 +746,8 @@ impl Recorder for Telemetry {
 
     fn register_histogram(
         &self,
-        #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))] key: &metrics::Key,
-        #[cfg_attr(not(feature = "prometheus"), expect(unused_variables))]
+        #[cfg_attr(not(feature = "prometheus"), allow(unused_variables))] key: &metrics::Key,
+        #[cfg_attr(not(feature = "prometheus"), allow(unused_variables))]
         metadata: &metrics::Metadata<'_>,
     ) -> metrics::Histogram {
         #[cfg(feature = "prometheus")]

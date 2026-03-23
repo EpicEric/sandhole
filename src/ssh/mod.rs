@@ -44,7 +44,7 @@ use russh::{
     keys::{HashAlg, PublicKey, ssh_key::Fingerprint},
     server::{Auth, Handler, Msg, Session},
 };
-#[cfg_attr(not(feature = "login"), expect(unused_imports))]
+#[cfg_attr(not(feature = "login"), allow(unused_imports))]
 use tokio::time::timeout;
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},

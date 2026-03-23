@@ -17,6 +17,8 @@ use tokio::{
 
 use crate::common::SandholeHandle;
 
+const CMD_CTRL_C: &[u8] = b"\x03";
+
 /// This test ensures that the admin interface changes size once the user's
 /// screen reports a screen size change.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -206,7 +208,7 @@ async fn admin_window_change() {
         }
         // 4b. Quit the admin interface with Ctrl-C (ETX)
         writer
-            .write_all(&b"\x03"[..])
+            .write_all(CMD_CTRL_C)
             .await
             .expect("channel write failed");
     })

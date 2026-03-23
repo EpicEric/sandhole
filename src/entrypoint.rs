@@ -2,7 +2,7 @@ use std::{
     future,
     net::SocketAddr,
     sync::{Arc, Mutex, RwLock, atomic::AtomicUsize},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use color_eyre::eyre::Context;
@@ -24,8 +24,9 @@ use russh::{
 use rustls::ServerConfig;
 #[cfg(feature = "acme")]
 use rustls_acme::acme::ACME_TLS_ALPN_NAME;
+use rustls_pki_types::ServerName;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
-#[cfg_attr(not(feature = "acme"), expect(unused_imports))]
+#[cfg_attr(not(feature = "acme"), allow(unused_imports))]
 use tokio::io::AsyncWriteExt;
 use tokio::{
     fs,
@@ -36,6 +37,7 @@ use tokio::{
 };
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
+use webpki::EndEntityCert;
 
 #[cfg(feature = "acme")]
 use crate::acme::{AcmeResolver, AlpnAcmeResolver};
@@ -43,10 +45,10 @@ use crate::acme::{AcmeResolver, AlpnAcmeResolver};
 use crate::admin::connection_handler::get_prometheus_service;
 #[cfg(feature = "login")]
 use crate::login::{ApiLogin, WebpkiVerifierConfigurer};
-#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+#[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use crate::quota::TokenHolder;
 use crate::{
-    BindHostnames, SandholeServer, SystemData, TunnelingProxyData,
+    AdminNotification, BindHostnames, SandholeServer, SystemData, TunnelingProxyData,
     addressing::{AddressDelegator, DnsResolver},
     certificates::{AlpnChallengeResolver, CertificateResolver, DummyAlpnChallengeResolver},
     config::ApplicationConfig,
@@ -73,7 +75,7 @@ use crate::{
     },
     tls::{TlsPeekData, peek_sni_and_alpn},
 };
-#[cfg_attr(not(feature = "prometheus"), expect(unused_imports))]
+#[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use crate::{
     admin::{ADMIN_ALIAS_PORT, connection_handler::AdminAliasHandler},
     tcp_alias::TcpAlias,
@@ -317,19 +319,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     }));
     // Add addressing service with optional profanity filtering
     let addressing = Arc::new({
-        #[cfg(feature = "rustrict")]
-        let builder = AddressDelegator::builder()
-            .resolver(DnsResolver::new())
-            .txt_record_prefix(config.txt_record_prefix)
-            .maybe_root_domain(config.domain.domain.clone())
-            .bind_hostnames(config.bind_hostnames)
-            .force_random_subdomains(!config.allow_requested_subdomains)
-            .maybe_random_subdomain_seed(config.random_subdomain_seed)
-            .random_subdomain_length(config.random_subdomain_length)
-            .random_subdomain_filter_profanities(config.random_subdomain_filter_profanities)
-            .requested_domain_filter_profanities(config.requested_domain_filter_profanities)
-            .requested_subdomain_filter_profanities(config.requested_subdomain_filter_profanities);
-        #[cfg(not(feature = "rustrict"))]
         let builder = AddressDelegator::builder()
             .resolver(DnsResolver::new())
             .txt_record_prefix(config.txt_record_prefix)
@@ -338,6 +327,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .force_random_subdomains(!config.allow_requested_subdomains)
             .maybe_random_subdomain_seed(config.random_subdomain_seed)
             .random_subdomain_length(config.random_subdomain_length);
+        #[cfg(feature = "rustrict")]
+        let builder = builder
+            .random_subdomain_filter_profanities(config.random_subdomain_filter_profanities)
+            .requested_domain_filter_profanities(config.requested_domain_filter_profanities)
+            .requested_subdomain_filter_profanities(config.requested_subdomain_filter_profanities);
         let seed = {
             if let Some(path) = config.random_subdomain_value_file {
                 if config.random_subdomain_value.is_some() {
@@ -564,6 +558,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let mut system_data_interval = interval(Duration::from_millis(1_000));
         system_data_interval.tick().await;
         loop {
+            let start = Instant::now();
             system_data_interval.tick().await;
             system.refresh_specifics(system_refresh);
             networks.refresh(true);
@@ -589,8 +584,48 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 total_memory,
                 network_tx,
                 network_rx,
+                duration: start.elapsed(),
             };
             *data_clone.lock().expect("not poisoned") = data;
+        }
+    });
+    let admin_notifications = Arc::new(Mutex::default());
+    let notifications_clone = Arc::clone(&admin_notifications);
+    let domain_clone = config.domain.domain.clone();
+    let certificates_clone = Arc::clone(&certificates);
+    // Periodically check for problems (every 10 seconds) and update notifications.
+    tokio::spawn(async move {
+        let mut system_data_interval = interval(Duration::from_millis(15_000));
+        let domain_server_name = domain_clone
+            .as_ref()
+            .and_then(|domain| ServerName::try_from(domain.as_str()).ok());
+        system_data_interval.tick().await;
+        loop {
+            let mut notifications = vec![];
+            if !config.disable_https
+                && let Some(domain) = domain_clone.as_ref()
+                && let Some(server_name) = domain_server_name.as_ref()
+            {
+                if let Some(cert_key) = certificates_clone.resolve_server_name(domain)
+                    && let Ok(cert) = cert_key.end_entity_cert()
+                    && let Ok(eec) = EndEntityCert::try_from(cert)
+                {
+                    match eec.verify_is_valid_for_subject_name(server_name) {
+                        Ok(()) => (),
+                        Err(webpki::Error::CertExpired { .. }) => {
+                            notifications
+                                .push(AdminNotification::ExpiredCertificate(domain.clone()));
+                        }
+                        Err(_) => {
+                            notifications.push(AdminNotification::InvalidTls(domain.clone()));
+                        }
+                    }
+                } else {
+                    notifications.push(AdminNotification::NoCertificate(domain.clone()));
+                }
+            }
+            *notifications_clone.lock().expect("not poisoned") = notifications;
+            system_data_interval.tick().await;
         }
     });
 
@@ -645,6 +680,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         tcp_data,
         alias_data,
         system_data,
+        admin_notifications,
         aliasing_proxy_data,
         fingerprints_validator: fingerprints,
         #[cfg(feature = "login")]
