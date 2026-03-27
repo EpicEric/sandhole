@@ -289,15 +289,23 @@ pub(crate) enum HttpError {
     MissingUpgradeHeader,
     #[error("Request timeout")]
     RequestTimeout,
+    #[error("Internal server error: {0:?}")]
+    InternalError(ServerError),
 }
 
 impl From<ServerError> for HttpError {
     fn from(value: ServerError) -> Self {
         match value {
-            // If pool limit was reached, return 429 (no handler is available)
-            ServerError::PoolLimitReached => HttpError::NoHandlerAvailable,
-            // Otherwise, return 404 (they may have an allowlist for fingerprints/IP networks)
-            _ => HttpError::ChannelRequestDenied,
+            // If pool or IP connection limit was reached, return 429 (no handler is available)
+            ServerError::PoolLimitReached | ServerError::IpConnectionLimitReached => {
+                HttpError::NoHandlerAvailable
+            }
+            // If there is an allowlist for fingerprints/IP networks, return 404
+            ServerError::TunnelingNotAllowed | ServerError::AliasingNotAllowed => {
+                HttpError::ChannelRequestDenied
+            }
+            // Otherwise, return 500
+            _ => HttpError::InternalError(value),
         }
     }
 }
@@ -318,7 +326,9 @@ impl IntoResponse for HttpError {
             HttpError::NoHandlerAvailable => StatusCode::TOO_MANY_REQUESTS,
             HttpError::RequestTimeout => StatusCode::GATEWAY_TIMEOUT,
             HttpError::HandlerNotFound | HttpError::ChannelRequestDenied => StatusCode::NOT_FOUND,
-            HttpError::PoolClosed | HttpError::HyperError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            HttpError::PoolClosed | HttpError::HyperError(_) | HttpError::InternalError(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
         }
         .into_response()
     }

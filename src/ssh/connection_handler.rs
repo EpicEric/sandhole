@@ -8,6 +8,7 @@ use std::{
 use ahash::RandomState;
 use async_speed_limit::{Limiter, Resource, clock::StandardClock};
 use dashmap::DashMap;
+use futures_util::future::join;
 use russh::{ChannelStream, keys::ssh_key::Fingerprint, server::Msg};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -140,21 +141,7 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
             .as_ref()
             .is_none_or(|filter| filter.is_allowed(ip));
         if tunneling_allowed {
-            let ip_connection_guard = self.acquire_ip_guard(ip)?;
-            let pool = Arc::clone(&self.pool);
-            let pool_permit = if let Some(duration) = self.pool_timeout {
-                let Ok(Ok(pool_permit)) =
-                    timeout(duration, async move { pool.acquire_owned().await }).await
-                else {
-                    return Err(ServerError::PoolLimitReached);
-                };
-                pool_permit
-            } else {
-                let Ok(pool_permit) = pool.try_acquire_owned() else {
-                    return Err(ServerError::PoolLimitReached);
-                };
-                pool_permit
-            };
+            let (_ip_connection_guard, _pool_permit) = self.get_permits(ip).await?;
             let channel = self
                 .handle
                 .channel_open_forwarded_tcpip(
@@ -167,8 +154,8 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
                 .into_stream();
             Ok(SshChannel {
                 inner: self.limiter.clone().limit(channel),
-                _ip_connection_guard: ip_connection_guard,
-                _pool_permit: pool_permit,
+                _ip_connection_guard,
+                _pool_permit,
             })
         } else {
             Err(ServerError::TunnelingNotAllowed)
@@ -193,21 +180,7 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
         fingerprint: Option<&'_ Fingerprint>,
     ) -> Result<SshChannel, ServerError> {
         if self.can_alias(ip, port, fingerprint) {
-            let ip_connection_guard = self.acquire_ip_guard(ip)?;
-            let pool = Arc::clone(&self.pool);
-            let pool_permit = if let Some(duration) = self.pool_timeout {
-                let Ok(Ok(pool_permit)) =
-                    timeout(duration, async move { pool.acquire_owned().await }).await
-                else {
-                    return Err(ServerError::PoolLimitReached);
-                };
-                pool_permit
-            } else {
-                let Ok(pool_permit) = pool.try_acquire_owned() else {
-                    return Err(ServerError::PoolLimitReached);
-                };
-                pool_permit
-            };
+            let (_ip_connection_guard, _pool_permit) = self.get_permits(ip).await?;
             let channel = self
                 .handle
                 .channel_open_forwarded_tcpip(
@@ -220,8 +193,8 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
                 .into_stream();
             Ok(SshChannel {
                 inner: self.limiter.clone().limit(channel),
-                _ip_connection_guard: ip_connection_guard,
-                _pool_permit: pool_permit,
+                _ip_connection_guard,
+                _pool_permit,
             })
         } else {
             Err(ServerError::AliasingNotAllowed)
@@ -240,21 +213,46 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
 }
 
 impl SshTunnelHandler {
-    fn acquire_ip_guard(&self, ip: IpAddr) -> Result<IpConnectionGuard, ServerError> {
-        let semaphore = {
+    async fn get_permits(
+        &self,
+        ip: IpAddr,
+    ) -> Result<(IpConnectionGuard, OwnedSemaphorePermit), ServerError> {
+        let ip_connection_semaphore = {
             let entry = self
                 .ip_connections
                 .entry(ip)
                 .or_insert(Arc::new(Semaphore::new(self.max_connections_per_ip)));
             Arc::clone(entry.value())
         };
-        let Ok(_permit) = semaphore.try_acquire_owned() else {
-            return Err(ServerError::IpConnectionLimitReached);
+        let pool = Arc::clone(&self.pool);
+        let (ip_connection_permit, pool_permit) = if let Some(duration) = self.pool_timeout {
+            let join_futures = join(
+                ip_connection_semaphore.acquire_owned(),
+                pool.acquire_owned(),
+            );
+            match timeout(duration, join_futures).await {
+                Ok((Ok(ip_connection_permit), Ok(pool_permit))) => {
+                    (ip_connection_permit, pool_permit)
+                }
+                Ok((Err(_), _)) => return Err(ServerError::IpConnectionLimitReached),
+                _ => return Err(ServerError::PoolLimitReached),
+            }
+        } else {
+            let Ok(ip_connection_permit) = ip_connection_semaphore.try_acquire_owned() else {
+                return Err(ServerError::IpConnectionLimitReached);
+            };
+            let Ok(pool_permit) = pool.try_acquire_owned() else {
+                return Err(ServerError::PoolLimitReached);
+            };
+            (ip_connection_permit, pool_permit)
         };
-        Ok(IpConnectionGuard {
-            ip,
-            ip_connections: Arc::clone(&self.ip_connections),
-            _permit,
-        })
+        Ok((
+            IpConnectionGuard {
+                ip,
+                ip_connections: Arc::clone(&self.ip_connections),
+                _permit: ip_connection_permit,
+            },
+            pool_permit,
+        ))
     }
 }

@@ -12,6 +12,7 @@
 ### Fixed
 
 - Check ALPN for HTTP/2 handlers.
+- Await for IP connection permit when creating a tunneling/aliasing channel.
 
 ### Changed
 
