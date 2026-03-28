@@ -62,6 +62,9 @@ jobs:
           rustup toolchain install ${RUST_VERSION}
           rustup override set ${RUST_VERSION}
           rustup target add ${{ matrix.platform.target }}
+      - name: Install lld
+        run: |
+          brew install lld
       - name: Build
         run: |
           cargo build --release --locked --target ${{ matrix.platform.target }}

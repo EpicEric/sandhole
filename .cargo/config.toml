@@ -1,0 +1,5 @@
+[target.aarch64-apple-darwin]
+rustflags = ["-Clink-arg=-fuse-ld=lld"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-Clink-arg=-fuse-ld=lld"]

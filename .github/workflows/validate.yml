@@ -102,6 +102,10 @@ jobs:
         run: |
           rustup toolchain install nightly-${{ matrix.platform.target }}
           rustup override set nightly-${{ matrix.platform.target }}
+      - name: Install lld on macOS
+        if: matrix.platform.target == 'x86_64-apple-darwin' || matrix.platform.target == 'aarch64-apple-darwin'
+        run: |
+          brew install lld
       - name: Test
         env:
           RUSTFLAGS: -A dead_code -A unused_variables
