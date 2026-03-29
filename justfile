@@ -1,4 +1,4 @@
-default:
+list:
     just --list
 
 test $RUST_LOG="sandhole=debug":

@@ -21,7 +21,6 @@
 # Reference
 
 - [Frequently asked questions](./faq.md)
-- [Features](./features.md)
 - [CLI](./cli.md)
 - [NixOS module options](./nixos_options.md)
 - [Benchmarks](./benchmarks.md)

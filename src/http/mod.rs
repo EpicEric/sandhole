@@ -312,8 +312,13 @@ impl From<ServerError> for HttpError {
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> axum::response::Response {
-        #[cfg(not(coverage_nightly))]
-        tracing::debug!(error = %self, "HTTP proxy error.");
+        if matches!(self, HttpError::HyperError(_) | HttpError::InternalError(_)) {
+            #[cfg(not(coverage_nightly))]
+            tracing::error!(error = %self, "HTTP proxy error.");
+        } else {
+            #[cfg(not(coverage_nightly))]
+            tracing::debug!(error = %self, "HTTP proxy error.");
+        }
         match self {
             HttpError::HeaderToStrError(_)
             | HttpError::MissingUriHost

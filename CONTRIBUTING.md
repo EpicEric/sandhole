@@ -16,6 +16,6 @@ If you wish to contribute changes to Sandhole, please [fork the repository](http
 
 If possible, make sure that your changes pass all tests and linting/formatting checks before creating a pull request by running `just test` and `just clippy`, respectively. This should ensure that your PR will pass the CI pipeline.
 
-Please add a short description of any user-facing changes to the top of [CHANGELOG.md](./CHANGELOG.md), under the "Unreleased" section (or create one if it does not exist). The changelog should adhere to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and it must emphasize any breaking changes. Also, update the [features.md page](./book/src/features.md) of the book accordingly.
+Please add a short description of any user-facing changes to the top of [CHANGELOG.md](./CHANGELOG.md), under the "Unreleased" section (or create one if it does not exist). The changelog must adhere to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and it must emphasize any breaking changes.
 
-If you're adding or modifying a command line option, run `just cli`, manually format the contents output to `cli.html` (i.e. by wrapping long lines and removing trailing whitespace), and update the [cli.md page](./book/src/cli.md) of the book accordingly.
+If you're adding or modifying a command line option, run `just cli` to update the book. This requires you to have `nix` installed.

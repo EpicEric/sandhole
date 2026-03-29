@@ -33,13 +33,17 @@ in
       options = removeAttrs evalOptions.options [ "_module" ];
     }).optionsCommonMark;
 
-  _cli = pkgs.stdenv.mkDerivation {
-    name = "sandhole-cli.html";
-    nativeBuildInputs = [ pkgs.to-html ];
-    buildCommand = ''
-      to-html --no-prompt "${lib.getExe sandhole} --help" > $out
-    '';
-  };
+  _cli =
+    pkgs.runCommand "sandhole-cli.html"
+      {
+        nativeBuildInputs = [
+          pkgs.to-html
+          sandhole
+        ];
+      }
+      ''
+        to-html --no-prompt "sandhole --help" > $out
+      '';
 
   _book = pkgs.stdenv.mkDerivation {
     name = "sandhole-book";
