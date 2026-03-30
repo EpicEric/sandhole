@@ -57,10 +57,7 @@ use crate::{
     droppable_handle::DroppableHandle,
     error::ServerError,
     fingerprints::FingerprintsValidator,
-    http::{
-        DomainRedirect, Protocol, ProxyData, ProxyType, http2::https_2_handler,
-        http11::https_11_handler, proxy_handler,
-    },
+    http::{DomainRedirect, Protocol, ProxyData, ProxyType, proxy_handler},
     ip::{IpFilter, IpFilterConfig},
     quota::{DummyQuotaHandler, QuotaHandler, QuotaMap},
     reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
@@ -1040,13 +1037,7 @@ async fn handle_https_connection(
                     // Create a Hyper service and serve over the accepted TLS connection.
                     let io = TokioIo::new(stream);
                     let service = service_fn(move |req: Request<Incoming>| {
-                        https_2_handler(
-                            req,
-                            address,
-                            Arc::clone(&proxy_data),
-                            Arc::clone(&tunnel_handler),
-                            sni.clone(),
-                        )
+                        proxy_handler(req, address, None, Arc::clone(&proxy_data))
                     });
                     let server = auto::Builder::new(TokioExecutor::new());
                     let conn = server.serve_connection_with_upgrades(io, service);
@@ -1070,13 +1061,7 @@ async fn handle_https_connection(
                     // Create a Hyper service and serve over the accepted TLS connection.
                     let io = TokioIo::new(stream);
                     let service = service_fn(move |req: Request<Incoming>| {
-                        https_11_handler(
-                            req,
-                            address,
-                            Arc::clone(&proxy_data),
-                            Arc::clone(&tunnel_handler),
-                            sni.clone(),
-                        )
+                        proxy_handler(req, address, None, Arc::clone(&proxy_data))
                     });
                     let mut server = auto::Builder::new(TokioExecutor::new());
                     server.http1().pipeline_flush(true);
@@ -1097,7 +1082,7 @@ async fn handle_https_connection(
             };
         };
     } else {
-        match TlsAcceptor::from(http11_server_config).accept(stream).await {
+        match TlsAcceptor::from(http2_server_config).accept(stream).await {
             Ok(stream) => {
                 // Create a Hyper service and serve over the accepted TLS connection.
                 let io = TokioIo::new(stream);

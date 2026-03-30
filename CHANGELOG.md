@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Avoid using dropped handlers for HTTP proxies.
+
 ## 0.9.2 (2026-03-28)
 
 ### Added
