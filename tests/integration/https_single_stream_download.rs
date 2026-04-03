@@ -15,7 +15,8 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
-use rand::RngCore;
+
+use rand::Rng;
 use russh::{
     Channel, Preferred,
     client::{Msg, Session},

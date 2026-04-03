@@ -2,7 +2,8 @@ use std::time::Instant;
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
-use rand::RngCore;
+
+use rand::Rng;
 use russh::{
     Channel,
     client::{Msg, Session},

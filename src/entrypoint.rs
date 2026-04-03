@@ -12,7 +12,7 @@ use hyper_util::{
     server::conn::auto,
 };
 use metrics::{counter, gauge};
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::{
     keys::{
@@ -133,7 +133,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             #[cfg(not(coverage_nightly))]
             tracing::info!("Key file not found. Creating...");
             let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-                &ChaCha20Rng::from_os_rng().random(),
+                &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
             ));
             if !config.disable_directory_creation {
                 fs::create_dir_all(

@@ -167,7 +167,7 @@ impl QuotaHandler for Arc<QuotaMap> {
 mod quota_map_tests {
     use std::sync::Arc;
 
-    use rand::{Rng, SeedableRng};
+    use rand::{RngExt, SeedableRng};
     use rand_chacha::ChaCha20Rng;
     use russh::keys::{HashAlg, ssh_key::private::Ed25519Keypair};
 
@@ -195,7 +195,7 @@ mod quota_map_tests {
     #[test_log::test]
     fn returns_unlimited_tokens_for_admin_holder() {
         let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::from_os_rng().random(),
+            &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
         ));
         let map = Arc::new(QuotaMap::new(3.try_into().unwrap()));
         let mut tokens = Vec::with_capacity(5);
@@ -212,7 +212,7 @@ mod quota_map_tests {
     #[test_log::test]
     fn returns_tokens_for_different_holders() {
         let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::from_os_rng().random(),
+            &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
         ));
         let fingerprint = key.fingerprint(HashAlg::Sha256);
         let user_a = UserIdentification::Username("a".into());

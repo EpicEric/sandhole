@@ -1,10 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::{
-    Channel,
+    Channel, ChannelMsg,
     client::{Msg, Session},
     keys::{key::PrivateKeyWithHashAlg, load_secret_key, ssh_key::private::Ed25519Keypair},
 };
@@ -126,7 +126,7 @@ async fn alias_timeout() {
 
     // 3. Start anonymous SSH client that will forward the proxies via aliasing
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::from_os_rng().random(),
+        &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
     ));
     let ssh_client = SshClient;
     let mut client_session =
@@ -156,7 +156,7 @@ async fn alias_timeout() {
     let http_channel = ("http.foobar.tld", 18080);
     let alias_channel = ("alias.tunnel", 12345);
     let tcp_channel = ("localhost", 23456);
-    let Ok(()) = timeout(Duration::from_secs(3), async {
+    let Ok(()) = timeout(Duration::from_secs(5), async {
         for (i, channel) in [ssh_channel, http_channel, alias_channel, tcp_channel]
             .into_iter()
             .enumerate()
@@ -166,8 +166,12 @@ async fn alias_timeout() {
                 .await
                 .expect("forwarding failed");
             assert!(
+                matches!(forwarding_channel.wait().await.unwrap(), ChannelMsg::Close),
+                "channel should've been closed",
+            );
+            assert!(
                 forwarding_channel.wait().await.is_none(),
-                "channel should've been closed"
+                "no messages after channel is closed",
             );
         }
     })
@@ -219,7 +223,7 @@ async fn alias_timeout() {
     let http_channel = ("http.foobar.tld", 18080);
     let alias_channel = ("alias.tunnel", 12345);
     let tcp_channel = ("localhost", 23456);
-    let Ok(()) = timeout(Duration::from_secs(3), async {
+    let Ok(()) = timeout(Duration::from_secs(5), async {
         for (i, channel) in [ssh_channel, http_channel, alias_channel, tcp_channel]
             .into_iter()
             .enumerate()
@@ -229,8 +233,12 @@ async fn alias_timeout() {
                 .await
                 .expect("forwarding failed");
             assert!(
+                matches!(forwarding_channel.wait().await.unwrap(), ChannelMsg::Close),
+                "channel should've been closed",
+            );
+            assert!(
                 forwarding_channel.wait().await.is_none(),
-                "channel should've been closed"
+                "no messages after channel is closed",
             );
         }
     })

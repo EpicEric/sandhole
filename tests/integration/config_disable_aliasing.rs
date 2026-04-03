@@ -8,7 +8,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key, ssh_key::private::Ed25519Keypair};
 use russh::{
@@ -271,7 +271,7 @@ async fn config_disable_aliasing() {
 
     // 4. Reject anonymous users if aliasing is disabled
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::from_os_rng().random(),
+        &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
     ));
     let ssh_client = SshClientTwo;
     let mut session_three =

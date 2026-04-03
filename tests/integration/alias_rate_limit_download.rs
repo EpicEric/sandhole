@@ -2,7 +2,7 @@ use std::time::Instant;
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
-use rand::{Rng, RngCore, SeedableRng};
+use rand::{Rng, RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::ChannelMsg;
 use russh::keys::ssh_key::private::Ed25519Keypair;
@@ -118,7 +118,7 @@ async fn alias_rate_limit_download() {
 
     // 3. Establish a tunnel via aliasing
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::from_os_rng().random(),
+        &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
     ));
     let ssh_client = SshClient;
     let mut client_session =

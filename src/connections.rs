@@ -9,7 +9,7 @@ use std::{
 use ahash::RandomState;
 use bon::Builder;
 use dashmap::DashMap;
-use rand::{Rng, rng, seq::IndexedRandom};
+use rand::{RngExt, rng, seq::IndexedRandom};
 use rand_seeder::SipHasher;
 
 use crate::{

@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
@@ -105,7 +105,7 @@ async fn alias_ip_connections_limit() {
 
     // 3. Start long-running request that takes the spot for the IP
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::from_os_rng().random(),
+        &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
     ));
     let ssh_client = SshClient;
     let mut client_session =
@@ -147,7 +147,7 @@ async fn alias_ip_connections_limit() {
     // 4. Start request that gets rate-limited from IP connection exhaustion
     tokio::time::sleep(Duration::from_millis(500)).await;
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::from_os_rng().random(),
+        &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
     ));
     let ssh_client = SshClient;
     let mut client_session =
@@ -181,7 +181,7 @@ async fn alias_ip_connections_limit() {
 
     // 5. Start request from different IP that succeeds
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::from_os_rng().random(),
+        &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
     ));
     let ssh_client = SshClient;
     let mut client_session = russh::client::connect(Default::default(), "[::1]:18022", ssh_client)

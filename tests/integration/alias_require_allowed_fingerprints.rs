@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::keys::ssh_key::private::Ed25519Keypair;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
@@ -163,7 +163,7 @@ async fn alias_require_allowed_fingerprints() {
 
     // 3b. Try to local-forward with invalid key
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::from_os_rng().random(),
+        &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
     ));
     let ssh_client = SshClient;
     let mut session = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)

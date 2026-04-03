@@ -6,6 +6,10 @@
 
 - Avoid using dropped handlers for HTTP proxies.
 
+### Changed
+
+- Update dependencies.
+
 ## 0.9.2 (2026-03-28)
 
 ### Added

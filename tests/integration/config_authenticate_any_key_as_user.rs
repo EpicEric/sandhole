@@ -9,7 +9,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use regex::Regex;
 use russh::keys::{key::PrivateKeyWithHashAlg, ssh_key::private::Ed25519Keypair};
@@ -91,7 +91,7 @@ async fn config_authenticate_any_key_as_user() {
 
     // 2. Start SSH client that will be proxied via HTTPS with random key
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::from_os_rng().random(),
+        &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
     ));
     let ssh_client = SshClient;
     let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)

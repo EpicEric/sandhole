@@ -4,7 +4,7 @@ use std::{
 };
 
 use clap::Parser;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::{
     Channel,
@@ -127,7 +127,7 @@ async fn alias_pool_timeout() {
     let started = Instant::now();
     for _ in 0..2 {
         let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-            &ChaCha20Rng::from_os_rng().random(),
+            &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
         ));
         let ssh_client = SshAliasClient;
         let mut client_session =
@@ -171,7 +171,7 @@ async fn alias_pool_timeout() {
     // 4. Start request that gets rate-limited from pool exhaustion
     tokio::time::sleep(Duration::from_millis(500)).await;
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::from_os_rng().random(),
+        &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
     ));
     let ssh_client = SshAliasClient;
     let mut client_session =
@@ -206,7 +206,7 @@ async fn alias_pool_timeout() {
     // 5. Start request that gets queued and eventually completes
     tokio::time::sleep(Duration::from_millis(1000)).await;
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::from_os_rng().random(),
+        &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
     ));
     let ssh_client = SshAliasClient;
     let mut client_session =

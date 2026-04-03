@@ -6,7 +6,7 @@ use std::{
 };
 
 use clap::Parser;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::{
     Channel, MethodSet,
@@ -117,7 +117,7 @@ async fn ssh_proxy_jump() {
 
     // 3. Connect to the SSH port of our proxy with anonymous user
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::from_os_rng().random(),
+        &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
     ));
     let ssh_client = ProxyClient;
     let mut session_two = client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
@@ -276,12 +276,13 @@ impl client::Handler for SshClient {
                 .map(|addr| SocketAddr::new(addr, connected_port as u16)),
         );
         let stream = channel.into_stream();
+        let keys = vec![russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
+        ))];
         tokio::spawn(async move {
             let session = match server::run_stream(
                 Arc::new(server::Config {
-                    keys: vec![russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-                        &ChaCha20Rng::from_os_rng().random(),
-                    ))],
+                    keys,
                     ..Default::default()
                 }),
                 stream,

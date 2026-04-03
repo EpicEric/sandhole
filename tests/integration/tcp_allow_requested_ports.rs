@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::keys::ssh_key::private::Ed25519Keypair;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
@@ -118,7 +118,7 @@ async fn tcp_allow_requested_ports() {
 
     // 4. Local-forward the TCP port for random user
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::from_os_rng().random(),
+        &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
     ));
     let ssh_client = SshClient;
     let mut session_two = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)

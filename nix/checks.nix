@@ -99,4 +99,12 @@
         machine.wait_for_unit("sandhole-nextest.service")
       '';
     };
+
+  sandhole-module-test-blacklist = pkgs.testers.runNixOSTest (
+    import ./modules/tests/blacklist.nix { inherit pkgs sandhole; }
+  );
+
+  sandhole-module-test-with-container = pkgs.testers.runNixOSTest (
+    import ./modules/tests/with-container.nix { inherit pkgs sandhole; }
+  );
 }

@@ -5,7 +5,7 @@ use clap::Parser;
 use http::header::HOST;
 use hyper::{body::Incoming, server::conn::http1::Builder, service::service_fn};
 use hyper_util::rt::TokioIo;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::{
     Channel,
@@ -154,7 +154,7 @@ async fn sni_aliasing_timeout() {
     );
     let connector = TlsConnector::from(tls_config);
     let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
-        &ChaCha20Rng::from_os_rng().random(),
+        &ChaCha20Rng::from_rng(&mut rand::rng()).random(),
     ));
     let ssh_client = ProxyClient;
     let mut session_two = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
