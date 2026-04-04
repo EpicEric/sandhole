@@ -107,4 +107,8 @@
   sandhole-module-test-with-container = pkgs.testers.runNixOSTest (
     import ./modules/tests/with-container.nix { inherit pkgs sandhole; }
   );
+
+  sandhole-module-test-websites = pkgs.testers.runNixOSTest (
+    import ./modules/tests/websites.nix { inherit pkgs sandhole; }
+  );
 }

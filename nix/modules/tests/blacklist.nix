@@ -21,7 +21,6 @@ in
     # The reverse proxy running Sandhole.
     sandhole =
       { lib, ... }:
-      with lib;
       {
         imports = [ ../sandhole.nix ];
         virtualisation.vlans = [ 10 ];
@@ -36,7 +35,7 @@ in
                   prefixLength = 24;
                 }
               ];
-              routes = mkForce [
+              routes = lib.mkForce [
                 {
                   address = "0.0.0.0";
                   prefixLength = 0;
@@ -50,6 +49,7 @@ in
             "8.8.4.4"
           ];
         };
+
         services.sandhole = {
           enable = true;
           package = sandhole;
@@ -68,7 +68,6 @@ in
     # The server that will be proxied via SSH.
     server =
       { lib, ... }:
-      with lib;
       {
         virtualisation.vlans = [ 10 ];
         networking = {
@@ -82,7 +81,7 @@ in
                   prefixLength = 24;
                 }
               ];
-              routes = mkForce [
+              routes = lib.mkForce [
                 {
                   address = "0.0.0.0";
                   prefixLength = 0;
@@ -130,7 +129,6 @@ in
     # The client that will be blocked from accessing Sandhole.
     blocked =
       { lib, ... }:
-      with lib;
       {
         virtualisation.vlans = [ 10 ];
         networking = {
@@ -144,7 +142,7 @@ in
                   prefixLength = 24;
                 }
               ];
-              routes = mkForce [
+              routes = lib.mkForce [
                 {
                   address = "0.0.0.0";
                   prefixLength = 0;

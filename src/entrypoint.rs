@@ -90,6 +90,20 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         )
         .into());
     }
+    if config.force_https {
+        if config.disable_http {
+            return Err(ServerError::InvalidConfig(
+                "--force-https is incompatible with --disable-http".into(),
+            )
+            .into());
+        }
+        if config.disable_https {
+            return Err(ServerError::InvalidConfig(
+                "--force-https is incompatible with --disable-https".into(),
+            )
+            .into());
+        }
+    }
     if config.domain.no_domain {
         if config.allow_requested_subdomains {
             #[cfg(not(coverage_nightly))]
