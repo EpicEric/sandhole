@@ -29,7 +29,8 @@ let
     nativeBuildInputs = [
       pkgs.cmake
       pkgs.perl
-    ];
+    ]
+    ++ lib.optionals (system == "x86_64-darwin" || system == "aarch64-darwin") [ pkgs.lld ];
   };
 
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
