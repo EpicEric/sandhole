@@ -29,7 +29,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding. A self-hosted ngrok / 
 To expose a local HTTP service running on port 4321:
 
 ```sh
-ssh -i path/to/key -R 80:localhost:4321 demo.sandhole.com.br
+ssh -R 80:localhost:4321 demo.sandhole.com.br
 ```
 
 ## Status
