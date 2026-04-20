@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Update dependencies.
+
 ## 0.9.3 (2026-04-04)
 
 ### Fixed
