@@ -1,10 +1,23 @@
 {
   description = "Expose HTTP/SSH/TCP services through SSH port forwarding";
 
-  inputs = { };
+  inputs = {
+    crane = {
+      url = "path:./nix/dummy.nix";
+      flake = false;
+    };
+    nixpkgs = {
+      url = "path:./nix/dummy.nix";
+      flake = false;
+    };
+    rust-overlay = {
+      url = "path:./nix/dummy.nix";
+      flake = false;
+    };
+  };
 
   outputs =
-    { self, ... }:
+    { self, ... }@inputs:
     let
       systems = [
         "x86_64-linux"
@@ -55,12 +68,31 @@
     // eachSystem (
       system:
       let
-        inherit (import ./nix { inherit system; })
-          pkgs
+        sources = import ./npins;
+        importInput =
+          attr:
+          if import inputs.${attr} ? __isDummyInput then import sources.${attr} else import inputs.${attr};
+        pkgs = importInput "nixpkgs" {
+          inherit system;
+          overlays = [ (importInput "rust-overlay") ];
+        };
+        craneLib = (importInput "crane" { inherit pkgs; }).overrideToolchain (
+          p: p.rust-bin.stable.latest.default
+        );
+
+        inherit
+          (import ./nix {
+            inherit
+              system
+              pkgs
+              craneLib
+              ;
+          })
           packages
           checks
           shell
           ;
+
         inherit (pkgs) lib;
       in
       {

@@ -45,7 +45,7 @@ let
   );
 in
 {
-  inherit pkgs sandhole;
+  inherit sandhole;
 
   packages = import ./packages.nix {
     inherit
