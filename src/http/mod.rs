@@ -148,7 +148,7 @@ fn http_log(
         TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME,
         "method" => method.clone(),
         "host" => host.clone(),
-        "uri" => uri.clone(),
+        "status_code" => status.to_string(),
     )
     .record(elapsed_time.as_secs_f64());
     let status_style = match status {

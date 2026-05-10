@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Replace `uri` in `sandhole_http_elapsed_time` for `status_code`.
 - Update dependencies.
 
 ## 0.9.3 (2026-04-04)
