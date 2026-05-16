@@ -2,7 +2,10 @@ use std::{fmt::Display, hash::Hash, net::SocketAddr, sync::Mutex};
 
 use block_id::{Alphabet, BlockId};
 use bon::Builder;
-use hickory_resolver::{TokioResolver, proto::rr::RecordType};
+use hickory_resolver::{
+    TokioResolver,
+    proto::rr::{RData, RecordType},
+};
 use itertools::Itertools;
 use rand::{self, RngExt, SeedableRng, seq::IndexedRandom};
 use rand_chacha::ChaCha20Rng;
@@ -33,12 +36,12 @@ pub(crate) trait Resolver {
 }
 
 impl DnsResolver {
-    pub(crate) fn new() -> Self {
-        DnsResolver(
+    pub(crate) fn new() -> color_eyre::Result<Self> {
+        Ok(DnsResolver(
             TokioResolver::builder_tokio()
                 .expect("failed to create DNS resolver")
-                .build(),
-        )
+                .build()?,
+        ))
     }
 }
 
@@ -58,14 +61,13 @@ impl Resolver for DnsResolver {
         {
             Ok(lookup) => {
                 // Iterate over the TXT records
-                lookup.iter().any(|txt| {
-                    txt.iter().any(|data| {
-                        // See if the parsed record matches the given fingerprint
-                        String::from_utf8_lossy(data)
-                            .parse::<Fingerprint>()
-                            .as_ref()
-                            == Ok(fingerprint)
-                    })
+                lookup.answers().iter().any(|record| {
+                    // See if the parsed record matches the given fingerprint
+                    if let RData::TXT(txt) = &record.data {
+                        txt.to_string().parse::<Fingerprint>().as_ref() == Ok(fingerprint)
+                    } else {
+                        false
+                    }
                 })
             }
             _ => false,
@@ -82,10 +84,8 @@ impl Resolver for DnsResolver {
         {
             Ok(lookup) => {
                 // Iterate over the CNAME records
-                lookup
-                    .iter()
-                    .filter_map(|rdata| rdata.clone().into_cname().ok())
-                    .any(|cname| {
+                lookup.answers().iter().any(|record| {
+                    if let RData::CNAME(cname) = &record.data {
                         // Retrieve the domain name from the pieces
                         let cname = cname
                             .iter()
@@ -95,7 +95,10 @@ impl Resolver for DnsResolver {
                         tracing::debug!(%cname, "Checking CNAME.");
                         // Check if the domain name matches
                         cname == domain
-                    })
+                    } else {
+                        false
+                    }
+                })
             }
             _ => false,
         }

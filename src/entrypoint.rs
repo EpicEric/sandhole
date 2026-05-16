@@ -331,7 +331,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     // Add addressing service with optional profanity filtering
     let addressing = Arc::new({
         let builder = AddressDelegator::builder()
-            .resolver(DnsResolver::new())
+            .resolver(DnsResolver::new()?)
             .txt_record_prefix(config.txt_record_prefix)
             .maybe_root_domain(config.domain.domain.clone())
             .bind_hostnames(config.bind_hostnames)
