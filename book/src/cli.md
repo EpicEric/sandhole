@@ -324,6 +324,30 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           By default, connections are immediately timed out when the pool is
           exhausted.
 
+      <b>--http-pool-size</b> &lt;SIZE&gt;
+          Maximum size for each HTTP connection pool (per unique client).
+
+          Controls how many keep-alive HTTP connections are cached per unique
+          client. Lower values reduce memory usage, higher values improve
+          performance.
+
+          [default: 16]
+
+      <b>--http-pool-max-idle-time</b> &lt;DURATION&gt;
+          Maximum idle time for HTTP pooled connections.
+
+          Connections idle longer than this will be evicted from the pool.
+
+          [default: 60s]
+
+      <b>--http-pool-max-reuse</b> &lt;COUNT&gt;
+          Maximum number of times an HTTP connection can be reused.
+
+          Prevents connections with accumulated state from persisting
+          indefinitely.
+
+          [default: 1000]
+
       <b>--max-simultaneous-connections-per-ip</b> &lt;SIZE&gt;
           Maximum number of simultaneous connections per IP to a proxied
           service. The maximum is 65535.

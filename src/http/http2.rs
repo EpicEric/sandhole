@@ -4,8 +4,8 @@ use crate::{
     connection_handler::ConnectionHandler,
     connections::ConnectionGetByHttpHost,
     http::{
-        ArcProxyData, HttpError, HttpLog, ProxyData, ProxyResponse, ProxyType, TimedResponse,
-        http_log,
+        ArcProxyData, HttpError, HttpLog, PooledConnection, ProxyData, ProxyResponse, ProxyType,
+        TimedResponse, http_log,
     },
     keepalive::KeepaliveAlias,
 };
@@ -66,9 +66,13 @@ where
                 tokio::select! {
                     result = recv => {
                         match result {
-                            // Return pool item
-                            Ok(tuple) if tuple.0.is_ready() => break (tuple.0, tuple.1, guard),
-                            // Connection is closed; discard pool item
+                            // Return pool item if connection is ready and not expired
+                            Ok(mut pooled) if pooled.connection.is_ready()
+                                && !pooled.is_expired(guard.max_idle_time, guard.max_reuse) => {
+                                pooled.touch();
+                                break (pooled.connection, pooled.log_sender, guard)
+                            },
+                            // Connection is closed or expired; discard pool item
                             Ok(_) => {
                                 recv = guard.pool.recv();
                                 continue;
@@ -97,9 +101,12 @@ where
             'sender: loop {
                 match proxy_data.get_http2_pool_guard(key.clone()) {
                     Some(guard) => {
-                        while let Ok(sender) = guard.pool.try_recv() {
-                            if sender.0.is_ready() {
-                                break 'sender (sender.0, sender.1, guard);
+                        while let Ok(mut pooled) = guard.pool.try_recv() {
+                            if pooled.connection.is_ready()
+                                && !pooled.is_expired(guard.max_idle_time, guard.max_reuse)
+                            {
+                                pooled.touch();
+                                break 'sender (pooled.connection, pooled.log_sender, guard);
                             }
                         }
                     }
@@ -140,11 +147,12 @@ where
 
         // Create entry for pool
         let key_clone = key.clone();
+        let pool_size = proxy_data.http_pool_size;
         let pool = {
             let pool_ref = proxy_data
                 .keepalive_http2_pool_map
                 .entry(key_clone)
-                .or_insert_with(|| Arc::new(async_channel::unbounded()))
+                .or_insert_with(|| Arc::new(async_channel::bounded(pool_size)))
                 .downgrade();
             pool_ref.0.clone()
         };
@@ -222,7 +230,8 @@ where
                 );
                 // Send sender to pool
                 tokio::spawn(async move {
-                    let _ = pool.send((sender, tx)).await;
+                    let pooled = PooledConnection::new(sender, tx);
+                    let _ = pool.send(pooled).await;
                     drop(_guard);
                 });
             })),

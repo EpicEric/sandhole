@@ -339,9 +339,37 @@ impl IntoResponse for HttpError {
     }
 }
 
+// Wrapper for pooled connections with metadata
+pub(crate) struct PooledConnection<T> {
+    connection: T,
+    log_sender: ServerHandlerSender,
+    last_used: Instant,
+    reuse_count: usize,
+}
+
+impl<T> PooledConnection<T> {
+    fn new(connection: T, log_sender: ServerHandlerSender) -> Self {
+        Self {
+            connection,
+            log_sender,
+            last_used: Instant::now(),
+            reuse_count: 0,
+        }
+    }
+
+    fn touch(&mut self) {
+        self.last_used = Instant::now();
+        self.reuse_count += 1;
+    }
+
+    fn is_expired(&self, max_idle: Duration, max_reuse: usize) -> bool {
+        self.last_used.elapsed() > max_idle || self.reuse_count >= max_reuse
+    }
+}
+
 type KeepalivePool<P> = Arc<(Sender<P>, Receiver<P>)>;
-type Http11KeepalivePool<B> = KeepalivePool<(Http11SendRequest<B>, ServerHandlerSender)>;
-type Http2KeepalivePool<B> = KeepalivePool<(Http2SendRequest<B>, ServerHandlerSender)>;
+type Http11KeepalivePool<B> = KeepalivePool<PooledConnection<Http11SendRequest<B>>>;
+type Http2KeepalivePool<B> = KeepalivePool<PooledConnection<Http2SendRequest<B>>>;
 
 // Data commonly reused between HTTP proxy requests.
 #[derive(Builder)]
@@ -362,6 +390,12 @@ where
     keepalive_http2_pool_map: Arc<DashMap<KeepaliveAlias, Http2KeepalivePool<B>, RandomState>>,
     // Whether the server supports a queue pool for handlers.
     has_pool_queue: bool,
+    // Maximum size for each connection pool.
+    http_pool_size: usize,
+    // Maximum idle time for pooled connections.
+    http_pool_max_idle_time: Duration,
+    // Maximum number of times a connection can be reused.
+    http_pool_max_reuse: usize,
     // Connection manager to get handlers from.
     conn_manager: M,
     // Tuple containing where to redirect requests from the main domain to.
@@ -399,9 +433,11 @@ where
 }
 
 pub(crate) struct Http11PoolGuard<B> {
-    pool: Receiver<(Http11SendRequest<B>, ServerHandlerSender)>,
+    pool: Receiver<PooledConnection<Http11SendRequest<B>>>,
     key: KeepaliveAlias,
     map: Arc<DashMap<KeepaliveAlias, Http11KeepalivePool<B>, RandomState>>,
+    max_idle_time: Duration,
+    max_reuse: usize,
 }
 
 impl<B> Drop for Http11PoolGuard<B> {
@@ -413,9 +449,11 @@ impl<B> Drop for Http11PoolGuard<B> {
 }
 
 pub(crate) struct Http2PoolGuard<B> {
-    pool: Receiver<(Http2SendRequest<B>, ServerHandlerSender)>,
+    pool: Receiver<PooledConnection<Http2SendRequest<B>>>,
     key: KeepaliveAlias,
     map: Arc<DashMap<KeepaliveAlias, Http2KeepalivePool<B>, RandomState>>,
+    max_idle_time: Duration,
+    max_reuse: usize,
 }
 
 pub(crate) trait ArcProxyData<B> {
@@ -443,11 +481,12 @@ where
     <B as Body>::Error: Error + Send + Sync + 'static,
 {
     fn create_http11_pool_guard(&self, key: KeepaliveAlias) -> Http11PoolGuard<B> {
+        let pool_size = self.http_pool_size;
         let pool = {
             let map_ref = self
                 .keepalive_http11_pool_map
                 .entry(key.clone())
-                .or_insert_with(|| Arc::new(async_channel::unbounded()))
+                .or_insert_with(|| Arc::new(async_channel::bounded(pool_size)))
                 .downgrade();
             map_ref.1.clone()
         };
@@ -455,6 +494,8 @@ where
             pool,
             key,
             map: Arc::clone(&self.keepalive_http11_pool_map),
+            max_idle_time: self.http_pool_max_idle_time,
+            max_reuse: self.http_pool_max_reuse,
         }
     }
 
@@ -467,15 +508,18 @@ where
             pool,
             key,
             map: Arc::clone(&self.keepalive_http11_pool_map),
+            max_idle_time: self.http_pool_max_idle_time,
+            max_reuse: self.http_pool_max_reuse,
         })
     }
 
     fn create_http2_pool_guard(&self, key: KeepaliveAlias) -> Http2PoolGuard<B> {
+        let pool_size = self.http_pool_size;
         let pool = {
             let map_ref = self
                 .keepalive_http2_pool_map
                 .entry(key.clone())
-                .or_insert_with(|| Arc::new(async_channel::unbounded()))
+                .or_insert_with(|| Arc::new(async_channel::bounded(pool_size)))
                 .downgrade();
             map_ref.1.clone()
         };
@@ -483,6 +527,8 @@ where
             pool,
             key,
             map: Arc::clone(&self.keepalive_http2_pool_map),
+            max_idle_time: self.http_pool_max_idle_time,
+            max_reuse: self.http_pool_max_reuse,
         }
     }
 
@@ -495,6 +541,8 @@ where
             pool,
             key,
             map: Arc::clone(&self.keepalive_http2_pool_map),
+            max_idle_time: self.http_pool_max_idle_time,
+            max_reuse: self.http_pool_max_reuse,
         })
     }
 }
@@ -761,6 +809,9 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -807,6 +858,9 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -853,6 +907,9 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -919,6 +976,9 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -988,6 +1048,9 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -1058,6 +1121,9 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -1127,6 +1193,9 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -1223,6 +1292,9 @@ mod proxy_handler_tests {
                     .http_request_timeout(Duration::from_millis(500))
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -1314,6 +1386,9 @@ mod proxy_handler_tests {
                         .http_request_timeout(Duration::from_millis(500))
                         .disable_http_logs(false)
                         .log_format(LogFormat::Default)
+                        .http_pool_size(16)
+                        .http_pool_max_idle_time(Duration::from_secs(60))
+                        .http_pool_max_reuse(1_000)
                         .build(),
                 ),
             )
@@ -1427,6 +1502,9 @@ mod proxy_handler_tests {
                     .http_request_timeout(Duration::from_millis(500))
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -1527,6 +1605,9 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -1629,6 +1710,9 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -1730,6 +1814,9 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -1830,6 +1917,9 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -1931,6 +2021,9 @@ mod proxy_handler_tests {
                     .buffer_size(8_000)
                     .disable_http_logs(false)
                     .log_format(LogFormat::Default)
+                    .http_pool_size(16)
+                    .http_pool_max_idle_time(Duration::from_secs(60))
+                    .http_pool_max_reuse(1_000)
                     .build(),
             ),
         )
@@ -2027,6 +2120,9 @@ mod proxy_handler_tests {
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .log_format(LogFormat::Default)
+                        .http_pool_size(16)
+                        .http_pool_max_idle_time(Duration::from_secs(60))
+                        .http_pool_max_reuse(1_000)
                         .build(),
                 ),
             )
@@ -2146,6 +2242,9 @@ mod proxy_handler_tests {
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .log_format(LogFormat::Default)
+                        .http_pool_size(16)
+                        .http_pool_max_idle_time(Duration::from_secs(60))
+                        .http_pool_max_reuse(1_000)
                         .build(),
                 ),
             )
@@ -2256,6 +2355,9 @@ mod proxy_handler_tests {
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .log_format(LogFormat::Default)
+                        .http_pool_size(16)
+                        .http_pool_max_idle_time(Duration::from_secs(60))
+                        .http_pool_max_reuse(1_000)
                         .build(),
                 ),
             )
@@ -2383,6 +2485,9 @@ mod proxy_handler_tests {
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .log_format(LogFormat::Default)
+                        .http_pool_size(16)
+                        .http_pool_max_idle_time(Duration::from_secs(60))
+                        .http_pool_max_reuse(1_000)
                         .build(),
                 ),
             )
@@ -2460,6 +2565,9 @@ mod proxy_handler_tests {
                         .buffer_size(8_000)
                         .disable_http_logs(false)
                         .log_format(LogFormat::Default)
+                        .http_pool_size(16)
+                        .http_pool_max_idle_time(Duration::from_secs(60))
+                        .http_pool_max_reuse(1_000)
                         .build(),
                 ),
             )

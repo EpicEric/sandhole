@@ -668,6 +668,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             // Always use aliasing channels instead of tunneling channels.
             .proxy_type(ProxyType::Aliasing)
             .has_pool_queue(config.pool_timeout.is_some())
+            .http_pool_size(config.http_pool_size)
+            .http_pool_max_idle_time(config.http_pool_max_idle_time)
+            .http_pool_max_reuse(config.http_pool_max_reuse)
             .buffer_size(buffer_size)
             .maybe_http_request_timeout(http_request_timeout)
             .maybe_websocket_timeout(tcp_connection_timeout)
@@ -774,6 +777,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 // Always use tunneling channels.
                 .proxy_type(ProxyType::Tunneling)
                 .has_pool_queue(config.pool_timeout.is_some())
+                .http_pool_size(config.http_pool_size)
+                .http_pool_max_idle_time(config.http_pool_max_idle_time)
+                .http_pool_max_reuse(config.http_pool_max_reuse)
                 .buffer_size(buffer_size)
                 .maybe_http_request_timeout(http_request_timeout)
                 .maybe_websocket_timeout(tcp_connection_timeout)
@@ -854,6 +860,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 // Always use tunneling channels.
                 .proxy_type(ProxyType::Tunneling)
                 .has_pool_queue(config.pool_timeout.is_some())
+                .http_pool_size(config.http_pool_size)
+                .http_pool_max_idle_time(config.http_pool_max_idle_time)
+                .http_pool_max_reuse(config.http_pool_max_reuse)
                 .buffer_size(buffer_size)
                 .maybe_http_request_timeout(http_request_timeout)
                 .maybe_websocket_timeout(tcp_connection_timeout)

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Add `--http-pool-size`, `--http-pool-max-idle-time`, and `--http-pool-max-reuse` CLI flags.
+
 ### Changed
 
 - Replace `uri` in `sandhole_http_elapsed_time` for `status_code`.

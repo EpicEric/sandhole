@@ -429,6 +429,28 @@ pub struct ApplicationConfig {
     #[arg(long, value_parser = validate_duration, value_name = "DURATION")]
     pub pool_timeout: Option<Duration>,
 
+    /// Maximum size for each HTTP connection pool (per unique client).
+    ///
+    /// Controls how many keep-alive HTTP connections are cached
+    /// per unique client. Lower values reduce memory usage,
+    /// higher values improve performance.
+    #[arg(long, default_value_t = 16, value_name = "SIZE")]
+    pub http_pool_size: usize,
+
+    /// Maximum idle time for HTTP pooled connections.
+    ///
+    /// Connections idle longer than this will be evicted
+    /// from the pool.
+    #[arg(long, default_value = "60s", value_parser = validate_duration, value_name = "DURATION")]
+    pub http_pool_max_idle_time: Duration,
+
+    /// Maximum number of times an HTTP connection can be reused.
+    ///
+    /// Prevents connections with accumulated state from
+    /// persisting indefinitely.
+    #[arg(long, default_value_t = 1_000, value_name = "COUNT")]
+    pub http_pool_max_reuse: usize,
+
     /// Maximum number of simultaneous connections per IP to a proxied service.
     /// The maximum is 65535.
     ///
@@ -607,6 +629,9 @@ mod application_config_tests {
                 buffer_size: 32_768,
                 pool_size: 65_536,
                 pool_timeout: None,
+                http_pool_size: 16,
+                http_pool_max_idle_time: Duration::from_secs(60),
+                http_pool_max_reuse: 1_000,
                 max_simultaneous_connections_per_ip: 64,
                 ssh_keepalive_interval: Duration::from_secs(15),
                 ssh_keepalive_max: 3,
@@ -671,6 +696,9 @@ mod application_config_tests {
             "--buffer-size=4KB",
             "--pool-size=2048",
             "--pool-timeout=9s",
+            "--http-pool-size=32",
+            "--http-pool-max-idle-time=120s",
+            "--http-pool-max-reuse=500",
             "--max-simultaneous-connections-per-ip=32",
             "--ssh-keepalive-interval=10s",
             "--ssh-keepalive-max=2",
@@ -737,6 +765,9 @@ mod application_config_tests {
                 buffer_size: 4_000,
                 pool_size: 2_048,
                 pool_timeout: Some(Duration::from_secs(9)),
+                http_pool_size: 32,
+                http_pool_max_idle_time: Duration::from_secs(120),
+                http_pool_max_reuse: 500,
                 max_simultaneous_connections_per_ip: 32,
                 ssh_keepalive_interval: Duration::from_secs(10),
                 ssh_keepalive_max: 2,

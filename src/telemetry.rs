@@ -63,23 +63,17 @@ impl SlidingWindowCounter {
 
     fn clean(&self) {
         let mut history = self.history.lock().expect("not poisoned");
-        loop {
-            let Some(element) = history.front() else {
+        while let Some(element) = history.front()
+            && element.0.elapsed() >= self.window
+        {
+            // Don't remove the first element if it is the last one.
+            // Instead, update its instant.
+            // This ensures that the first call to add is counted.
+            if history.len() == 1 {
+                history.front_mut().expect("length check").0 = Instant::now();
                 break;
-            };
-            // Remove elements at the front if they are too old.
-            if element.0.elapsed() >= self.window {
-                // Don't remove the first element if it is the last one.
-                // Instead, update its instant.
-                // This ensures that the first call to add is counted.
-                if history.len() == 1 {
-                    history.front_mut().expect("length check").0 = Instant::now();
-                    break;
-                } else {
-                    history.pop_front();
-                }
             } else {
-                break;
+                history.pop_front();
             }
         }
     }
