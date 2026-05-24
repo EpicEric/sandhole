@@ -389,8 +389,8 @@ where
     #[builder(default = Arc::default())]
     pub(crate) keepalive_http2_pool_map:
         Arc<DashMap<KeepaliveAlias, Http2KeepalivePool<B>, RandomState>>,
-    // Whether the server supports a queue pool for handlers.
-    has_pool_queue: bool,
+    // Timeout when the server has a queue pool for handlers.
+    pool_queue_timeout: Option<Duration>,
     // Maximum size for each connection pool.
     http_pool_size: usize,
     // Maximum idle time for pooled connections.
@@ -435,39 +435,19 @@ where
 
 pub(crate) struct Http11PoolGuard<B> {
     pool: deadpool::unmanaged::Pool<PooledConnection<Http11SendRequest<B>>>,
-    key: KeepaliveAlias,
-    map: Arc<DashMap<KeepaliveAlias, Http11KeepalivePool<B>, RandomState>>,
     max_idle_time: Duration,
     max_reuse: usize,
 }
 
-impl<B> Drop for Http11PoolGuard<B> {
-    fn drop(&mut self) {
-        self.map
-            .remove_if(&self.key, |_, value| value.status().available == 0);
-    }
-}
-
 pub(crate) struct Http2PoolGuard<B> {
     pool: deadpool::unmanaged::Pool<PooledConnection<Http2SendRequest<B>>>,
-    key: KeepaliveAlias,
-    map: Arc<DashMap<KeepaliveAlias, Http2KeepalivePool<B>, RandomState>>,
     max_idle_time: Duration,
     max_reuse: usize,
 }
 
 pub(crate) trait ArcProxyData<B> {
-    fn create_http11_pool_guard(&self, key: KeepaliveAlias) -> Http11PoolGuard<B>;
-    fn get_http11_pool_guard(&self, key: KeepaliveAlias) -> Option<Http11PoolGuard<B>>;
-    fn create_http2_pool_guard(&self, key: KeepaliveAlias) -> Http2PoolGuard<B>;
-    fn get_http2_pool_guard(&self, key: KeepaliveAlias) -> Option<Http2PoolGuard<B>>;
-}
-
-impl<B> Drop for Http2PoolGuard<B> {
-    fn drop(&mut self) {
-        self.map
-            .remove_if(&self.key, |_, value| value.status().available == 0);
-    }
+    fn get_http11_pool_guard(&self, key: KeepaliveAlias) -> Http11PoolGuard<B>;
+    fn get_http2_pool_guard(&self, key: KeepaliveAlias) -> Http2PoolGuard<B>;
 }
 
 impl<B, M, H, T> ArcProxyData<B> for Arc<ProxyData<B, M, H, T>>
@@ -479,7 +459,7 @@ where
     <B as Body>::Data: Send + Sync + 'static,
     <B as Body>::Error: Error + Send + Sync + 'static,
 {
-    fn create_http11_pool_guard(&self, key: KeepaliveAlias) -> Http11PoolGuard<B> {
+    fn get_http11_pool_guard(&self, key: KeepaliveAlias) -> Http11PoolGuard<B> {
         let pool_size = self.http_pool_size;
         let pool = {
             let map_ref = self
@@ -491,28 +471,12 @@ where
         };
         Http11PoolGuard {
             pool,
-            key,
-            map: Arc::clone(&self.keepalive_http11_pool_map),
             max_idle_time: self.http_pool_max_idle_time,
             max_reuse: self.http_pool_max_reuse,
         }
     }
 
-    fn get_http11_pool_guard(&self, key: KeepaliveAlias) -> Option<Http11PoolGuard<B>> {
-        let pool = {
-            let map_ref = self.keepalive_http11_pool_map.get(&key)?;
-            map_ref.clone()
-        };
-        Some(Http11PoolGuard {
-            pool,
-            key,
-            map: Arc::clone(&self.keepalive_http11_pool_map),
-            max_idle_time: self.http_pool_max_idle_time,
-            max_reuse: self.http_pool_max_reuse,
-        })
-    }
-
-    fn create_http2_pool_guard(&self, key: KeepaliveAlias) -> Http2PoolGuard<B> {
+    fn get_http2_pool_guard(&self, key: KeepaliveAlias) -> Http2PoolGuard<B> {
         let pool_size = self.http_pool_size;
         let pool = {
             let map_ref = self
@@ -524,25 +488,9 @@ where
         };
         Http2PoolGuard {
             pool,
-            key,
-            map: Arc::clone(&self.keepalive_http2_pool_map),
             max_idle_time: self.http_pool_max_idle_time,
             max_reuse: self.http_pool_max_reuse,
         }
-    }
-
-    fn get_http2_pool_guard(&self, key: KeepaliveAlias) -> Option<Http2PoolGuard<B>> {
-        let pool = {
-            let map_ref = self.keepalive_http2_pool_map.get(&key)?;
-            map_ref.clone()
-        };
-        Some(Http2PoolGuard {
-            pool,
-            key,
-            map: Arc::clone(&self.keepalive_http2_pool_map),
-            max_idle_time: self.http_pool_max_idle_time,
-            max_reuse: self.http_pool_max_reuse,
-        })
     }
 }
 
@@ -797,7 +745,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -846,7 +793,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -895,7 +841,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -964,7 +909,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1036,7 +980,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1109,7 +1052,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1181,7 +1123,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1279,7 +1220,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1373,7 +1313,6 @@ mod proxy_handler_tests {
                 None,
                 Arc::new(
                     ProxyData::builder()
-                        .has_pool_queue(false)
                         .conn_manager(Arc::clone(&conn_manager))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),
@@ -1489,7 +1428,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1593,7 +1531,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1698,7 +1635,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1802,7 +1738,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -1905,7 +1840,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "main.domain".into(),
@@ -2009,7 +1943,6 @@ mod proxy_handler_tests {
             None,
             Arc::new(
                 ProxyData::builder()
-                    .has_pool_queue(false)
                     .conn_manager(Arc::clone(&conn_manager))
                     .domain_redirect(Arc::new(DomainRedirect {
                         from: "root.domain".into(),
@@ -2108,7 +2041,6 @@ mod proxy_handler_tests {
                 None,
                 Arc::new(
                     ProxyData::builder()
-                        .has_pool_queue(false)
                         .conn_manager(Arc::clone(&conn_manager))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),
@@ -2230,7 +2162,6 @@ mod proxy_handler_tests {
                 None,
                 Arc::new(
                     ProxyData::builder()
-                        .has_pool_queue(false)
                         .conn_manager(Arc::clone(&conn_manager))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),
@@ -2343,7 +2274,6 @@ mod proxy_handler_tests {
                 None,
                 Arc::new(
                     ProxyData::builder()
-                        .has_pool_queue(false)
                         .conn_manager(Arc::clone(&conn_manager))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),
@@ -2473,7 +2403,6 @@ mod proxy_handler_tests {
                 None,
                 Arc::new(
                     ProxyData::builder()
-                        .has_pool_queue(false)
                         .conn_manager(Arc::clone(&conn_manager))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),
@@ -2553,7 +2482,6 @@ mod proxy_handler_tests {
                 None,
                 Arc::new(
                     ProxyData::builder()
-                        .has_pool_queue(false)
                         .conn_manager(Arc::clone(&conn_manager))
                         .domain_redirect(Arc::new(DomainRedirect {
                             from: "main.domain".into(),

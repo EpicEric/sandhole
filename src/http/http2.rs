@@ -43,9 +43,8 @@ where
 
     loop {
         // Get HTTP/2 sender and remote log channel
-        let (mut sender, tx, _guard) = if proxy_data.has_pool_queue
-            && let Some(guard) = proxy_data.get_http2_pool_guard(key.clone())
-        {
+        let (mut sender, tx, _guard) = if proxy_data.pool_queue_timeout.is_some() {
+            let guard = proxy_data.get_http2_pool_guard(key.clone());
             // Race between new channel and HTTP pool
             let mut recv = guard.pool.get();
             let mut channel_future = pin!(async {
@@ -67,7 +66,7 @@ where
                     result = recv => {
                         match result {
                             // Return pool item if connection is ready and not expired
-                            Ok( pooled) if pooled.connection.is_ready()
+                            Ok(pooled) if pooled.connection.is_ready()
                                 && !pooled.is_expired(guard.max_idle_time, guard.max_reuse) => {
                                     let mut pooled = deadpool::unmanaged::Object::take(pooled);
                                 pooled.touch();
@@ -78,6 +77,7 @@ where
                                 recv = guard.pool.get();
                                 continue;
                             },
+                            Err(deadpool::unmanaged::PoolError::Timeout) => return Err(HttpError::NoHandlerAvailable),
                             Err(_) => return Err(HttpError::PoolClosed),
                         }
                     }
@@ -100,19 +100,18 @@ where
         } else {
             // No pool timeout - get recycled sender or create new one
             'sender: loop {
-                match proxy_data.get_http2_pool_guard(key.clone()) {
-                    Some(guard) => {
-                        while let Ok(pooled) = guard.pool.try_get() {
-                            if pooled.connection.is_ready()
-                                && !pooled.is_expired(guard.max_idle_time, guard.max_reuse)
-                            {
-                                let mut pooled = deadpool::unmanaged::Object::take(pooled);
-                                pooled.touch();
-                                break 'sender (pooled.connection, pooled.log_sender, guard);
-                            }
+                let guard = proxy_data.get_http2_pool_guard(key.clone());
+                match guard.pool.try_get() {
+                    Ok(pooled) => {
+                        if pooled.connection.is_ready()
+                            && !pooled.is_expired(guard.max_idle_time, guard.max_reuse)
+                        {
+                            let mut pooled = deadpool::unmanaged::Object::take(pooled);
+                            pooled.touch();
+                            break 'sender (pooled.connection, pooled.log_sender, guard);
                         }
                     }
-                    None => {
+                    Err(_) => {
                         let io = match proxy_data.proxy_type {
                             ProxyType::Tunneling => {
                                 handler
@@ -140,7 +139,7 @@ where
                                 tracing::warn!(%error, "HTTP/2 connection failed.");
                             }
                         }));
-                        let guard = proxy_data.create_http2_pool_guard(key.clone());
+                        let guard = proxy_data.get_http2_pool_guard(key.clone());
                         break (sender, handler.log_channel(), guard);
                     }
                 }
@@ -224,12 +223,17 @@ where
                 );
                 // Send sender to pool
                 let pooled = PooledConnection::new(sender, tx);
-                let pool_ref = proxy_data
-                    .keepalive_http2_pool_map
-                    .entry(key_clone)
-                    .or_insert_with(|| deadpool::unmanaged::Pool::new(pool_size))
-                    .downgrade();
-                let _ = pool_ref.try_add(pooled);
+                {
+                    let pool_ref = proxy_data
+                        .keepalive_http2_pool_map
+                        .entry(key_clone)
+                        .or_insert_with(|| deadpool::unmanaged::Pool::new(pool_size))
+                        .downgrade();
+                    if let Err(error) = pool_ref.try_add(pooled) {
+                        #[cfg(not(coverage_nightly))]
+                        tracing::warn!(error = %error.1, "Failed to add HTTP/2 connection back to pool.");
+                    }
+                }
                 drop(_guard);
             })),
         }));
