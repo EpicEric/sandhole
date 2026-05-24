@@ -383,10 +383,12 @@ where
 {
     // Keep-alive pool for opened HTTP/1.1 connections.
     #[builder(default = Arc::default())]
-    keepalive_http11_pool_map: Arc<DashMap<KeepaliveAlias, Http11KeepalivePool<B>, RandomState>>,
+    pub(crate) keepalive_http11_pool_map:
+        Arc<DashMap<KeepaliveAlias, Http11KeepalivePool<B>, RandomState>>,
     // Keep-alive pool for opened HTTP/2 connections.
     #[builder(default = Arc::default())]
-    keepalive_http2_pool_map: Arc<DashMap<KeepaliveAlias, Http2KeepalivePool<B>, RandomState>>,
+    pub(crate) keepalive_http2_pool_map:
+        Arc<DashMap<KeepaliveAlias, Http2KeepalivePool<B>, RandomState>>,
     // Whether the server supports a queue pool for handlers.
     has_pool_queue: bool,
     // Maximum size for each connection pool.

@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Change pooling mechanism.
+- Change pooling mechanism and add garbage collection of empty pools.
 - Update dependencies.
 
 ## 0.9.4 (2026-05-17)

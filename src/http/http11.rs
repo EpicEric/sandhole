@@ -306,14 +306,6 @@ where
             // Create entry for pool
             let key_clone = key.clone();
             let pool_size = proxy_data.http_pool_size;
-            let pool = {
-                let pool_ref = proxy_data
-                    .keepalive_http11_pool_map
-                    .entry(key_clone)
-                    .or_insert_with(|| deadpool::unmanaged::Pool::new(pool_size))
-                    .downgrade();
-                pool_ref.clone()
-            };
 
             let response = match proxy_data.http_request_timeout {
                 // Await for a response under the given duration.
@@ -374,11 +366,14 @@ where
                         proxy_data.log_format,
                     );
                     // Return sender to pool
-                    tokio::spawn(async move {
-                        let pooled = PooledConnection::new(sender, tx);
-                        let _ = pool.add(pooled).await;
-                        drop(_guard);
-                    });
+                    let pooled = PooledConnection::new(sender, tx);
+                    let pool_ref = proxy_data
+                        .keepalive_http11_pool_map
+                        .entry(key_clone)
+                        .or_insert_with(|| deadpool::unmanaged::Pool::new(pool_size))
+                        .downgrade();
+                    let _ = pool_ref.try_add(pooled);
+                    drop(_guard);
                 })),
             }));
         }

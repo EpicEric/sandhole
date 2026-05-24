@@ -678,6 +678,17 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .log_format(log_format)
             .build(),
     );
+    let proxy_data = Arc::clone(&aliasing_proxy_data);
+    tokio::spawn(async move {
+        let mut cleanup_interval = interval(Duration::from_secs(300));
+        cleanup_interval.tick().await;
+        loop {
+            cleanup_interval.tick().await;
+            proxy_data
+                .keepalive_http11_pool_map
+                .retain(|_, pool| pool.status().available == 0);
+        }
+    });
     let mut sandhole = Arc::new(SandholeServer {
         session_id: AtomicUsize::new(0),
         sessions_password: Mutex::default(),
@@ -787,6 +798,17 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 .log_format(log_format)
                 .build(),
         );
+        let proxy_data = Arc::clone(&http_proxy_data);
+        tokio::spawn(async move {
+            let mut cleanup_interval = interval(Duration::from_secs(300));
+            cleanup_interval.tick().await;
+            loop {
+                cleanup_interval.tick().await;
+                proxy_data
+                    .keepalive_http11_pool_map
+                    .retain(|_, pool| pool.status().available == 0);
+            }
+        });
         DroppableHandle(tokio::spawn(async move {
             loop {
                 let proxy_data = Arc::clone(&http_proxy_data);
@@ -870,6 +892,17 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 .log_format(log_format)
                 .build(),
         );
+        let proxy_data = Arc::clone(&https_proxy_data);
+        tokio::spawn(async move {
+            let mut cleanup_interval = interval(Duration::from_secs(300));
+            cleanup_interval.tick().await;
+            loop {
+                cleanup_interval.tick().await;
+                proxy_data
+                    .keepalive_http11_pool_map
+                    .retain(|_, pool| pool.status().available == 0);
+            }
+        });
         let sandhole_clone = Arc::clone(&sandhole);
         let ssh_config_clone = Arc::clone(&ssh_config);
         DroppableHandle(tokio::spawn(async move {
