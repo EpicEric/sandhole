@@ -203,7 +203,7 @@ where
                 && let Some(guard) = proxy_data.get_http11_pool_guard(key.clone())
             {
                 // Race between new channel and HTTP pool
-                let mut recv = guard.pool.recv();
+                let mut recv = guard.pool.get();
                 let mut channel_future = pin!(async {
                     match proxy_data.proxy_type {
                         ProxyType::Tunneling => {
@@ -227,14 +227,15 @@ where
                         result = recv => {
                             match result {
                                 // Return pool item if connection is ready and not expired
-                                Ok(mut pooled) if pooled.connection.is_ready()
+                                Ok(pooled) if pooled.connection.is_ready()
                                     && !pooled.is_expired(guard.max_idle_time, guard.max_reuse) => {
+                                        let mut pooled = deadpool::unmanaged::Object::take(pooled);
                                     pooled.touch();
                                     break (pooled.connection, pooled.log_sender, guard)
                                 },
                                 // Connection is closed or expired; discard pool item
                                 Ok(_) => {
-                                    recv = guard.pool.recv();
+                                    recv = guard.pool.get();
                                     continue;
                                 },
                                 Err(_) => return Err(HttpError::PoolClosed),
@@ -260,10 +261,11 @@ where
                 'sender: loop {
                     match proxy_data.get_http11_pool_guard(key.clone()) {
                         Some(guard) => {
-                            while let Ok(mut pooled) = guard.pool.try_recv() {
+                            while let Ok(pooled) = guard.pool.try_get() {
                                 if pooled.connection.is_ready()
                                     && !pooled.is_expired(guard.max_idle_time, guard.max_reuse)
                                 {
+                                    let mut pooled = deadpool::unmanaged::Object::take(pooled);
                                     pooled.touch();
                                     break 'sender (pooled.connection, pooled.log_sender, guard);
                                 }
@@ -308,9 +310,9 @@ where
                 let pool_ref = proxy_data
                     .keepalive_http11_pool_map
                     .entry(key_clone)
-                    .or_insert_with(|| Arc::new(async_channel::bounded(pool_size)))
+                    .or_insert_with(|| deadpool::unmanaged::Pool::new(pool_size))
                     .downgrade();
-                pool_ref.0.clone()
+                pool_ref.clone()
             };
 
             let response = match proxy_data.http_request_timeout {
@@ -374,7 +376,7 @@ where
                     // Return sender to pool
                     tokio::spawn(async move {
                         let pooled = PooledConnection::new(sender, tx);
-                        let _ = pool.send(pooled).await;
+                        let _ = pool.add(pooled).await;
                         drop(_guard);
                     });
                 })),

@@ -29,7 +29,6 @@ use crate::{
 };
 
 use ahash::RandomState;
-use async_channel::{Receiver, Sender};
 use axum::{
     body::Body as AxumBody,
     response::{IntoResponse, Redirect},
@@ -367,7 +366,7 @@ impl<T> PooledConnection<T> {
     }
 }
 
-type KeepalivePool<P> = Arc<(Sender<P>, Receiver<P>)>;
+type KeepalivePool<P> = deadpool::unmanaged::Pool<P>;
 type Http11KeepalivePool<B> = KeepalivePool<PooledConnection<Http11SendRequest<B>>>;
 type Http2KeepalivePool<B> = KeepalivePool<PooledConnection<Http2SendRequest<B>>>;
 
@@ -433,7 +432,7 @@ where
 }
 
 pub(crate) struct Http11PoolGuard<B> {
-    pool: Receiver<PooledConnection<Http11SendRequest<B>>>,
+    pool: deadpool::unmanaged::Pool<PooledConnection<Http11SendRequest<B>>>,
     key: KeepaliveAlias,
     map: Arc<DashMap<KeepaliveAlias, Http11KeepalivePool<B>, RandomState>>,
     max_idle_time: Duration,
@@ -442,14 +441,13 @@ pub(crate) struct Http11PoolGuard<B> {
 
 impl<B> Drop for Http11PoolGuard<B> {
     fn drop(&mut self) {
-        self.map.remove_if(&self.key, |_, value| {
-            Arc::strong_count(value) == 1 && value.1.is_empty()
-        });
+        self.map
+            .remove_if(&self.key, |_, value| value.status().available == 0);
     }
 }
 
 pub(crate) struct Http2PoolGuard<B> {
-    pool: Receiver<PooledConnection<Http2SendRequest<B>>>,
+    pool: deadpool::unmanaged::Pool<PooledConnection<Http2SendRequest<B>>>,
     key: KeepaliveAlias,
     map: Arc<DashMap<KeepaliveAlias, Http2KeepalivePool<B>, RandomState>>,
     max_idle_time: Duration,
@@ -465,9 +463,8 @@ pub(crate) trait ArcProxyData<B> {
 
 impl<B> Drop for Http2PoolGuard<B> {
     fn drop(&mut self) {
-        self.map.remove_if(&self.key, |_, value| {
-            Arc::strong_count(value) == 1 && value.1.is_empty()
-        });
+        self.map
+            .remove_if(&self.key, |_, value| value.status().available == 0);
     }
 }
 
@@ -486,9 +483,9 @@ where
             let map_ref = self
                 .keepalive_http11_pool_map
                 .entry(key.clone())
-                .or_insert_with(|| Arc::new(async_channel::bounded(pool_size)))
+                .or_insert_with(|| deadpool::unmanaged::Pool::new(pool_size))
                 .downgrade();
-            map_ref.1.clone()
+            map_ref.clone()
         };
         Http11PoolGuard {
             pool,
@@ -502,7 +499,7 @@ where
     fn get_http11_pool_guard(&self, key: KeepaliveAlias) -> Option<Http11PoolGuard<B>> {
         let pool = {
             let map_ref = self.keepalive_http11_pool_map.get(&key)?;
-            map_ref.1.clone()
+            map_ref.clone()
         };
         Some(Http11PoolGuard {
             pool,
@@ -519,9 +516,9 @@ where
             let map_ref = self
                 .keepalive_http2_pool_map
                 .entry(key.clone())
-                .or_insert_with(|| Arc::new(async_channel::bounded(pool_size)))
+                .or_insert_with(|| deadpool::unmanaged::Pool::new(pool_size))
                 .downgrade();
-            map_ref.1.clone()
+            map_ref.clone()
         };
         Http2PoolGuard {
             pool,
@@ -535,7 +532,7 @@ where
     fn get_http2_pool_guard(&self, key: KeepaliveAlias) -> Option<Http2PoolGuard<B>> {
         let pool = {
             let map_ref = self.keepalive_http2_pool_map.get(&key)?;
-            map_ref.1.clone()
+            map_ref.clone()
         };
         Some(Http2PoolGuard {
             pool,

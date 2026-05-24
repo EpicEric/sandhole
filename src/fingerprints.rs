@@ -94,7 +94,11 @@ async fn load_fingerprints_data(
                                         key.fingerprint(HashAlg::Sha256),
                                         KeyData {
                                             file: entry.path(),
-                                            comment: key.comment().into(),
+                                            comment: key
+                                                .comment()
+                                                .as_str()
+                                                .unwrap_or("-- not valid UTF-8 --")
+                                                .to_string(),
                                             algorithm: key.algorithm(),
                                             auth,
                                         },

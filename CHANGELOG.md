@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Change pooling mechanism.
+- Update dependencies.
+
 ## 0.9.4 (2026-05-17)
 
 ### Added
