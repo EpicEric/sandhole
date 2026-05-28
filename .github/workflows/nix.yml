@@ -1,12 +1,12 @@
 on:
-  check_suite:
-    types: ["completed"]
+  push:
+    branches: ["main"]
 
 permissions:
   contents: read
 
 concurrency:
-  group: "cachix"
+  group: "nix"
   cancel-in-progress: false
 
 jobs:
@@ -40,6 +40,9 @@ jobs:
           CACHIX_NAME: ${{ vars.CACHIX_NAME }}
         run: |
           cachix use ${CACHIX_NAME}
+      - name: Run checks
+        run: |
+          nix flake check
       - name: Build and push to Cachix
         env:
           CACHIX_NAME: ${{ vars.CACHIX_NAME }}
