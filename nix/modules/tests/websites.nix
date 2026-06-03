@@ -110,12 +110,14 @@ in
             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDpmDGLbC68yM87r+fD/aoEimDdnzZtmnZXCnxkIGHMq admin"
           ];
           domains = [ "example.sandhole.nix" ];
+          enableHttp2 = true;
           hostAddress6 = "fc00::2:1";
           localAddress6 = "fc00::2:2";
           autosshExtraArguments = "-o ServerAliveInterval=30 -c aes256-gcm@openssh.com";
           sandholeHost = "192.168.10.10";
           sandholePort = 2222;
           sandholeKeyPath = "/etc/ssh_key";
+          sandholeExecArguments = "http2";
         };
       };
   };

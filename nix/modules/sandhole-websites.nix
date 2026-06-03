@@ -88,6 +88,8 @@ in
                 example = "-o ServerAliveInterval=30 -c aes256-gcm@openssh.com";
               };
 
+              enableHttp2 = lib.mkEnableOption "HTTP/2 support";
+
               nginxExtraConfig = lib.mkOption {
                 type = types.str;
                 default = "";
@@ -95,7 +97,7 @@ in
                   These lines go to the end of the NGINX vhost verbatim.
                 '';
                 example = ''
-                  http2 on;
+                  error_page 404 /index.html;
                   rewrite ^/github https://github.com/EpicEric permanent;
                 '';
               };
@@ -132,7 +134,7 @@ in
                 description = ''
                   These lines go to the end of the Autossh arguments verbatim, for use with Sandhole.
                 '';
-                example = "http2";
+                example = "ip-allowlist=10.0.0.0/8,20ff::/16";
               };
             };
           }
@@ -175,7 +177,15 @@ in
                   index = "index.html index.htm";
                   root = "/static";
                 };
-                extraConfig = value.nginxExtraConfig;
+                extraConfig = ''
+                  ${
+                    if value.enableHttp2 && !(lib.hasInfix "http2 on;" value.sandholeExecArguments) then
+                      "http2 on;"
+                    else
+                      ""
+                  }
+                  ${value.nginxExtraConfig}
+                '';
               };
             };
             networking = {
@@ -200,7 +210,14 @@ in
           )
         } \
         -p ${toString value.sandholePort} \
-        ${value.autosshExtraArguments} ${value.sandholeHost} ${value.sandholeExecArguments}
+        ${value.autosshExtraArguments} ${value.sandholeHost} ${
+          if value.enableHttp2 && !(lib.hasInfix "http2" value.sandholeExecArguments) then "http2" else ""
+        } ${
+          if value.enableHttp2 && !(lib.hasInfix "force-https" value.sandholeExecArguments) then
+            "force-https"
+          else
+            ""
+        } ${value.sandholeExecArguments}
       '';
     }) cfg;
   };
