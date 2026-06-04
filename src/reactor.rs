@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use crate::{
     certificates::CertificateResolver,
-    tcp::{PortHandler, TcpHandler},
-    tcp_alias::TcpAlias,
+    sock_addr_alias::SockAddrAlias,
+    tcp::{TcpHandler, TcpPortHandler},
     telemetry::Telemetry,
+    udp::{UdpHandler, UdpPortHandler},
 };
 
 #[cfg_attr(test, mockall::automock)]
@@ -62,10 +63,22 @@ impl ConnectionMapReactor<u16> for TcpReactor {
     }
 }
 
+pub(crate) struct UdpReactor {
+    pub(crate) handler: Arc<UdpHandler>,
+    pub(crate) telemetry: Arc<Telemetry>,
+}
+
+impl ConnectionMapReactor<u16> for UdpReactor {
+    fn call(&self, identifiers: Vec<u16>) {
+        self.handler.update_ports(identifiers.clone());
+        self.telemetry.udp_reactor(identifiers);
+    }
+}
+
 pub(crate) struct AliasReactor(pub(crate) Arc<Telemetry>);
 
-impl ConnectionMapReactor<TcpAlias> for AliasReactor {
-    fn call(&self, identifiers: Vec<TcpAlias>) {
+impl ConnectionMapReactor<SockAddrAlias> for AliasReactor {
+    fn call(&self, identifiers: Vec<SockAddrAlias>) {
         self.0.alias_reactor(identifiers);
     }
 }

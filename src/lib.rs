@@ -25,10 +25,11 @@ use crate::{
     fingerprints::FingerprintsValidator,
     http::ProxyData,
     quota::TokenHolderUser,
-    reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
+    reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor, UdpReactor},
+    sock_addr_alias::SockAddrAlias,
     ssh::connection_handler::{SshChannel, SshTunnelHandler},
     tcp::TcpHandler,
-    tcp_alias::TcpAlias,
+    udp::UdpHandler,
 };
 
 #[doc(hidden)]
@@ -60,12 +61,14 @@ mod keepalive;
 mod login;
 mod quota;
 mod reactor;
+mod sock_addr_alias;
 mod ssh;
 mod tcp;
-mod tcp_alias;
 mod tcp_listener;
 mod telemetry;
 mod tls;
+mod udp;
+mod udp_listener;
 
 // Data collected from the system and displayed on the admin interface.
 #[derive(Default, Clone)]
@@ -112,10 +115,12 @@ pub(crate) struct SandholeServer {
     pub(crate) sni: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, SniReactor>>,
     // The map for forwarded TCP connections.
     pub(crate) tcp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, TcpReactor>>,
+    // The map for forwarded UDP connections.
+    pub(crate) udp: Arc<ConnectionMap<u16, Arc<SshTunnelHandler>, UdpReactor>>,
     // The map for admin aliased connections.
-    pub(crate) admin_alias: Arc<ConnectionMap<TcpAlias, Arc<AdminAliasHandler>, AliasReactor>>,
+    pub(crate) admin_alias: Arc<ConnectionMap<SockAddrAlias, Arc<AdminAliasHandler>, AliasReactor>>,
     // The map for forwarded aliased connections.
-    pub(crate) alias: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, AliasReactor>>,
+    pub(crate) alias: Arc<ConnectionMap<SockAddrAlias, Arc<SshTunnelHandler>, AliasReactor>>,
     // Data related to the SSH forwardings for the admin interface.
     pub(crate) ssh_data: DataTable<String, (BTreeMap<SocketAddr, TokenHolderUser>, u64, f64)>,
     // Data related to the HTTP forwardings for the admin interface.
@@ -124,8 +129,11 @@ pub(crate) struct SandholeServer {
     pub(crate) sni_data: DataTable<String, (BTreeMap<SocketAddr, TokenHolderUser>, u64, f64)>,
     // Data related to the TCP forwardings for the admin interface.
     pub(crate) tcp_data: DataTable<u16, (BTreeMap<SocketAddr, TokenHolderUser>, u64, f64)>,
+    // Data related to the UDP forwardings for the admin interface.
+    pub(crate) udp_data: DataTable<u16, (BTreeMap<SocketAddr, TokenHolderUser>, u64, f64)>,
     // Data related to the alias forwardings for the admin interface.
-    pub(crate) alias_data: DataTable<TcpAlias, (BTreeMap<SocketAddr, TokenHolderUser>, u64, f64)>,
+    pub(crate) alias_data:
+        DataTable<SockAddrAlias, (BTreeMap<SocketAddr, TokenHolderUser>, u64, f64)>,
     // System data for the admin interface.
     pub(crate) system_data: Arc<Mutex<SystemData>>,
     // Warnings for the admin interface.
@@ -141,6 +149,8 @@ pub(crate) struct SandholeServer {
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
     // Service for handling opening and closing TCP sockets for non-aliased services.
     pub(crate) tcp_handler: Arc<TcpHandler>,
+    // Service for handling opening and closing UDP sockets.
+    pub(crate) udp_handler: Arc<UdpHandler>,
     // The base domain of Sandhole.
     pub(crate) domain: Option<String>,
     // Which port Sandhole listens to for HTTP connections.
@@ -161,6 +171,8 @@ pub(crate) struct SandholeServer {
     pub(crate) disable_sni: bool,
     // If true, TCP is disabled for all ports except for HTTP.
     pub(crate) disable_tcp: bool,
+    // If true, UDP is disabled for all ports.
+    pub(crate) disable_udp: bool,
     // If true, aliasing is disabled, including SSH and all local forwarding connections.
     pub(crate) disable_aliasing: bool,
     // Buffer size for bidirectional copying.

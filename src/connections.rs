@@ -18,8 +18,8 @@ use crate::{
     error::ServerError,
     quota::{QuotaHandler, QuotaToken, TokenHolder, TokenHolderUser},
     reactor::{AliasReactor, ConnectionMapReactor, DummyConnectionMapReactor, HttpReactor},
+    sock_addr_alias::{BorrowedSockAddrAlias, SockAddrAlias, SockAddrAliasKey},
     ssh::connection_handler::SshTunnelHandler,
-    tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
 };
 
 // Data stored for a connection map entry.
@@ -274,14 +274,16 @@ where
 #[derive(Builder)]
 pub(crate) struct HttpAliasingConnection {
     http: Arc<ConnectionMap<String, Arc<SshTunnelHandler>, HttpReactor>>,
-    alias: Arc<ConnectionMap<TcpAlias, Arc<SshTunnelHandler>, AliasReactor>>,
+    alias: Arc<ConnectionMap<SockAddrAlias, Arc<SshTunnelHandler>, AliasReactor>>,
 }
 
 impl ConnectionGetByHttpHost<Arc<SshTunnelHandler>> for Arc<HttpAliasingConnection> {
     fn get_by_http_host(&self, host: &str, ip: IpAddr) -> Option<Arc<SshTunnelHandler>> {
         self.http.get(host, ip).or_else(|| {
-            self.alias
-                .get(&BorrowedTcpAlias(host, &80) as &dyn TcpAliasKey, ip)
+            self.alias.get(
+                &BorrowedSockAddrAlias(host, &80) as &dyn SockAddrAliasKey,
+                ip,
+            )
         })
     }
 }

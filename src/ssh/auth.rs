@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     admin::interface::AdminInterface, connection_handler::ConnectionHttpData,
     droppable_handle::DroppableHandle, ip::IpFilter, quota::TokenHolder, ssh::FingerprintFn,
-    tcp_alias::TcpAlias,
+    sock_addr_alias::SockAddrAlias,
 };
 
 pub(crate) struct ProxyAutoCancellation {
@@ -88,11 +88,12 @@ pub(crate) struct UserData {
     // Identifier for the user, used for creating quota tokens.
     pub(crate) quota_key: TokenHolder,
     // Map to keep track of opened host-based connections (HTTP and SSH), to clean up when the forwarding is canceled.
-    pub(crate) host_addressing: HashMap<TcpAlias, (String, Arc<Semaphore>), RandomState>,
+    pub(crate) host_addressing: HashMap<SockAddrAlias, (String, Arc<Semaphore>), RandomState>,
     // Map to keep track of opened port-based connections (TCP), to clean up when the forwarding is canceled.
-    pub(crate) port_addressing: HashMap<TcpAlias, (u16, Arc<Semaphore>), RandomState>,
+    pub(crate) port_addressing: HashMap<SockAddrAlias, (u16, Arc<Semaphore>), RandomState>,
     // Map to keep track of opened alias-based connections (aliases), to clean up when the forwarding is canceled.
-    pub(crate) alias_addressing: HashMap<TcpAlias, (TcpAlias, Arc<Semaphore>), RandomState>,
+    pub(crate) alias_addressing:
+        HashMap<SockAddrAlias, (SockAddrAlias, Arc<Semaphore>), RandomState>,
     // IPs allowed to connect to this user's services.
     pub(crate) allowlist: Option<Vec<IpNet>>,
     // IPs disallowed from connecting to this user's services.

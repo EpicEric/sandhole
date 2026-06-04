@@ -20,8 +20,8 @@ use crate::{
     error::ServerError,
     http::{http2::handle_http2_request, http11::handle_http11_request},
     keepalive::KeepaliveAlias,
+    sock_addr_alias::BorrowedSockAddrAlias,
     ssh::ServerHandlerSender,
-    tcp_alias::BorrowedTcpAlias,
     telemetry::{
         TELEMETRY_COUNTER_ALIAS_CONNECTIONS, TELEMETRY_COUNTER_HTTP_REQUESTS,
         TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME, TELEMETRY_KEY_ALIAS, TELEMETRY_KEY_HOSTNAME,
@@ -641,7 +641,7 @@ where
     append_to_header(headers, &X_FORWARDED_PORT, port.to_string().as_bytes());
     // Add this request to the telemetry for the host
     if http_data.as_ref().is_some_and(|data| data.is_aliasing) {
-        counter!(TELEMETRY_COUNTER_ALIAS_CONNECTIONS, TELEMETRY_KEY_ALIAS => BorrowedTcpAlias(&host, &port).to_string())
+        counter!(TELEMETRY_COUNTER_ALIAS_CONNECTIONS, TELEMETRY_KEY_ALIAS => BorrowedSockAddrAlias(&host, &port).to_string())
             .increment(1);
     } else {
         counter!(TELEMETRY_COUNTER_HTTP_REQUESTS, TELEMETRY_KEY_HOSTNAME => host.clone())

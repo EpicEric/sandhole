@@ -9,7 +9,7 @@ use crate::{
     SandholeServer,
     admin::interface::AdminInterface,
     ssh::{AuthenticatedData, ServerHandlerSender, auth::UserSessionRestriction},
-    tcp_alias::TcpAlias,
+    sock_addr_alias::SockAddrAlias,
 };
 
 #[bitflags]
@@ -133,7 +133,7 @@ impl SshCommand for AllowedFingerprintsCommand {
                     }
                     // Insert our handler into the TCP alias connections map.
                     context.server.alias.insert(
-                        TcpAlias(address.clone(), 80),
+                        SockAddrAlias(address.clone(), 80),
                         *context.peer,
                         user_data.quota_key.clone(),
                         handler,
@@ -198,7 +198,7 @@ impl SshCommand for TcpAliasCommand {
                     }
                     // Insert our handler into the TCP alias connections map.
                     context.server.alias.insert(
-                        TcpAlias(address.clone(), 80),
+                        SockAddrAlias(address.clone(), 80),
                         *context.peer,
                         user_data.quota_key.clone(),
                         handler,

@@ -37,13 +37,13 @@ pub(crate) struct TcpHandler {
     disable_tcp_logs: bool,
 }
 
-pub(crate) trait PortHandler {
+pub(crate) trait TcpPortHandler {
     async fn create_port_listener(&self, port: u16) -> color_eyre::Result<u16>;
     async fn get_free_port(&self) -> color_eyre::Result<u16>;
     fn update_ports(&self, ports: Vec<u16>);
 }
 
-impl PortHandler for Arc<TcpHandler> {
+impl TcpPortHandler for Arc<TcpHandler> {
     // Create a TCP listener on the given port.
     async fn create_port_listener(&self, port: u16) -> color_eyre::Result<u16> {
         if self.sockets.contains_key(&port) {
@@ -61,14 +61,13 @@ impl PortHandler for Arc<TcpHandler> {
             loop {
                 match listener.accept().await {
                     Ok((mut stream, address)) => {
-                        let ip = address.ip();
+                        let ip = address.ip().to_canonical();
                         if !clone.ip_filter.is_allowed(ip) {
                             #[cfg(not(coverage_nightly))]
                             tracing::info!(%address, "Rejecting TCP connection: IP not allowed.");
                             continue;
                         }
                         // Get the handler for this port
-                        let ip = address.ip().to_canonical();
                         if let Some(handler) = clone.conn_manager.get(&port, ip)
                             && let Ok(mut channel) =
                                 handler.tunneling_channel(ip, address.port()).await
@@ -80,7 +79,7 @@ impl PortHandler for Arc<TcpHandler> {
                                 let _ = handler.log_channel().send(
                                     format!(
                                         "New connection from {}:{} to TCP port {}\r\n",
-                                        address.ip().to_canonical(),
+                                        ip,
                                         address.port(),
                                         port
                                     )

@@ -60,7 +60,7 @@ use crate::{
     http::{DomainRedirect, Protocol, ProxyData, ProxyType, proxy_handler},
     ip::{IpFilter, IpFilterConfig},
     quota::{DummyQuotaHandler, QuotaHandler, QuotaMap},
-    reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor},
+    reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor, UdpReactor},
     ssh::Server,
     tcp::TcpHandler,
     tcp_listener::get_tcp_listener,
@@ -70,11 +70,12 @@ use crate::{
         TELEMETRY_GAUGE_USED_MEMORY, TELEMETRY_KEY_HOSTNAME, Telemetry,
     },
     tls::{TlsPeekData, peek_sni_and_alpn},
+    udp::UdpHandler,
 };
 #[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use crate::{
     admin::{ADMIN_ALIAS_PORT, connection_handler::AdminAliasHandler},
-    tcp_alias::TcpAlias,
+    sock_addr_alias::SockAddrAlias,
 };
 
 #[doc(hidden)]
@@ -297,6 +298,13 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .quota_handler(Arc::clone(&quota_handler))
             .build(),
     );
+    let udp_connections = Arc::new(
+        ConnectionMap::builder()
+            .strategy(config.load_balancing)
+            .algorithm(config.load_balancing_algorithm)
+            .quota_handler(Arc::clone(&quota_handler))
+            .build(),
+    );
     let admin_alias_connections = Arc::new(
         ConnectionMap::builder()
             .strategy(crate::LoadBalancingStrategy::Deny)
@@ -325,6 +333,19 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     // Add TCP handler service as a listener for TCP port updates.
     tcp_connections.update_reactor(Some(TcpReactor {
         handler: Arc::clone(&tcp_handler),
+        telemetry: Arc::clone(&telemetry),
+    }));
+    let udp_handler: Arc<UdpHandler> = Arc::new(
+        UdpHandler::builder()
+            .listen_address(config.listen_address)
+            .conn_manager(Arc::clone(&udp_connections))
+            .ip_filter(Arc::clone(&ip_filter))
+            .disable_udp_logs(config.disable_udp_logs)
+            .build(),
+    );
+    // Add udp handler service as a listener for udp port updates.
+    udp_connections.update_reactor(Some(UdpReactor {
+        handler: Arc::clone(&udp_handler),
         telemetry: Arc::clone(&telemetry),
     }));
     // Add addressing service with optional profanity filtering
@@ -484,6 +505,37 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 let data = connections_clone.data();
                 let telemetry_per_minute = telemetry_clone.get_tcp_connections_per_minute();
                 let telemetry_current = telemetry_clone.get_current_tcp_connections();
+                let data = data
+                    .into_iter()
+                    .map(|(port, addresses)| {
+                        let connections_per_minute =
+                            telemetry_per_minute.get(&port).copied().unwrap_or_default();
+                        let current_connections =
+                            telemetry_current.get(&port).copied().unwrap_or_default();
+                        (
+                            port,
+                            (addresses, connections_per_minute, current_connections),
+                        )
+                    })
+                    .collect();
+                *data_clone.lock().expect("not poisoned") = data;
+            }
+        });
+    }
+    let udp_data = Arc::new(Mutex::default());
+    if !config.disable_udp {
+        let data_clone = Arc::clone(&udp_data);
+        let connections_clone = Arc::clone(&udp_connections);
+        let telemetry_clone = Arc::clone(&telemetry);
+        // Periodically update UDP data, based on the connection map.
+        tokio::spawn(async move {
+            let mut refresh_interval = interval(Duration::from_millis(3_000));
+            refresh_interval.tick().await;
+            loop {
+                refresh_interval.tick().await;
+                let data = connections_clone.data();
+                let telemetry_per_minute = telemetry_clone.get_udp_connections_per_minute();
+                let telemetry_current = telemetry_clone.get_current_udp_connections();
                 let data = data
                     .into_iter()
                     .map(|(port, addresses)| {
@@ -696,12 +748,14 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         sni: sni_connections,
         ssh: ssh_connections,
         tcp: tcp_connections,
+        udp: udp_connections,
         admin_alias: admin_alias_connections,
         alias: alias_connections,
         http_data,
         sni_data,
         ssh_data,
         tcp_data,
+        udp_data,
         alias_data,
         system_data,
         admin_notifications,
@@ -711,6 +765,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         api_login,
         address_delegator: addressing,
         tcp_handler,
+        udp_handler,
         domain: config.mode.domain,
         http_port: config.http_port.into(),
         https_port: config.https_port.into(),
@@ -721,6 +776,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         disable_https: config.disable_http || config.disable_https,
         disable_sni: config.disable_http || config.disable_https || config.disable_sni,
         disable_tcp: config.disable_tcp,
+        disable_udp: config.disable_udp,
         disable_aliasing: config.disable_aliasing,
         buffer_size,
         pool_size: config.pool_size,
@@ -745,7 +801,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         sandhole
             .admin_alias
             .insert(
-                TcpAlias("prometheus.sandhole".into(), ADMIN_ALIAS_PORT),
+                SockAddrAlias("prometheus.sandhole".into(), ADMIN_ALIAS_PORT),
                 SocketAddr::from(([0, 0, 0, 0], 0)),
                 TokenHolder::System,
                 Arc::new(AdminAliasHandler {

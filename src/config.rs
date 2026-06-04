@@ -205,6 +205,10 @@ pub struct ApplicationConfig {
     #[arg(long, default_value_t = false)]
     pub disable_tcp_logs: bool,
 
+    /// Disable sending UDP logs to clients.
+    #[arg(long, default_value_t = false)]
+    pub disable_udp_logs: bool,
+
     /// Contact e-mail to use with Let's Encrypt. If set, enables ACME for HTTPS certificates.
     ///
     /// By providing your e-mail, you agree to the Let's Encrypt Subscriber Agreement.
@@ -305,6 +309,10 @@ pub struct ApplicationConfig {
     /// Disable all TCP port tunneling except HTTP. By default, this is enabled globally.
     #[arg(long, default_value_t = false)]
     pub disable_tcp: bool,
+
+    /// Disable all UDP port tunneling. By default, this is enabled globally.
+    #[arg(long, default_value_t = false)]
+    pub disable_udp: bool,
 
     /// Disable all aliasing (i.e. local forwarding). By default, this is enabled globally.
     #[arg(long, default_value_t = false)]
@@ -603,6 +611,7 @@ mod application_config_tests {
                 force_https: false,
                 disable_http_logs: false,
                 disable_tcp_logs: false,
+                disable_udp_logs: false,
                 acme_contact_email: None,
                 acme_use_staging: false,
                 password_authentication_url: None,
@@ -617,6 +626,7 @@ mod application_config_tests {
                 disable_https: false,
                 disable_sni: false,
                 disable_tcp: false,
+                disable_udp: false,
                 disable_aliasing: false,
                 disable_prometheus: false,
                 quota_per_user: None,
@@ -670,6 +680,7 @@ mod application_config_tests {
             "--force-https",
             "--disable-http-logs",
             "--disable-tcp-logs",
+            "--disable-udp-logs",
             "--acme-contact-email=admin@server.com",
             "--acme-use-staging",
             "--password-authentication-url=https://auth.server.com/validate",
@@ -684,6 +695,7 @@ mod application_config_tests {
             "--disable-https",
             "--disable-sni",
             "--disable-tcp",
+            "--disable-udp",
             "--disable-aliasing",
             "--disable-prometheus",
             "--quota-per-user=10",
@@ -737,6 +749,7 @@ mod application_config_tests {
                 force_https: true,
                 disable_http_logs: true,
                 disable_tcp_logs: true,
+                disable_udp_logs: true,
                 acme_contact_email: Some("admin@server.com".into()),
                 acme_use_staging: true,
                 password_authentication_url: Some("https://auth.server.com/validate".into()),
@@ -751,6 +764,7 @@ mod application_config_tests {
                 disable_https: true,
                 disable_sni: true,
                 disable_tcp: true,
+                disable_udp: true,
                 disable_aliasing: true,
                 disable_prometheus: true,
                 quota_per_user: Some(10.try_into().unwrap()),

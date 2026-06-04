@@ -27,20 +27,22 @@ use crate::{
     connection_handler::ConnectionHandler,
     connections::ConnectionGetByHttpHost,
     http::proxy_handler,
+    sock_addr_alias::{BorrowedSockAddrAlias, SockAddrAlias, SockAddrAliasKey},
     ssh::{
         AuthenticatedData, ServerHandlerSender, UserData, auth::UserSessionRestriction,
         connection_handler::SshTunnelHandler,
     },
-    tcp::PortHandler,
-    tcp_alias::{BorrowedTcpAlias, TcpAlias, TcpAliasKey},
+    tcp::TcpPortHandler,
     telemetry::{
         TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS, TELEMETRY_COUNTER_ALIAS_CONNECTIONS,
         TELEMETRY_COUNTER_SNI_CONNECTIONS, TELEMETRY_COUNTER_SSH_CONNECTIONS,
-        TELEMETRY_COUNTER_TCP_CONNECTIONS, TELEMETRY_GAUGE_ADMIN_ALIAS_CONNECTIONS_CURRENT,
-        TELEMETRY_GAUGE_ALIAS_CONNECTIONS_CURRENT, TELEMETRY_GAUGE_SNI_CONNECTIONS_CURRENT,
-        TELEMETRY_GAUGE_SSH_CONNECTIONS_CURRENT, TELEMETRY_GAUGE_TCP_CONNECTIONS_CURRENT,
+        TELEMETRY_COUNTER_TCP_CONNECTIONS, TELEMETRY_COUNTER_UDP_CONNECTIONS,
+        TELEMETRY_GAUGE_ADMIN_ALIAS_CONNECTIONS_CURRENT, TELEMETRY_GAUGE_ALIAS_CONNECTIONS_CURRENT,
+        TELEMETRY_GAUGE_SNI_CONNECTIONS_CURRENT, TELEMETRY_GAUGE_SSH_CONNECTIONS_CURRENT,
+        TELEMETRY_GAUGE_TCP_CONNECTIONS_CURRENT, TELEMETRY_GAUGE_UDP_CONNECTIONS_CURRENT,
         TELEMETRY_KEY_ALIAS, TELEMETRY_KEY_HOSTNAME, TELEMETRY_KEY_PORT,
     },
+    udp::UdpPortHandler,
 };
 
 pub(crate) struct RemoteForwardingContext<'a> {
@@ -89,6 +91,8 @@ pub(crate) trait ForwardingHandlerStrategy {
 
 pub(crate) struct Forwarder;
 
+pub(crate) const UDP_ADDRESS: &str = "udp.sandhole";
+
 impl Forwarder {
     pub(crate) async fn remote_forwarding(
         context: &mut RemoteForwardingContext<'_>,
@@ -109,6 +113,10 @@ impl Forwarder {
             || https_port.is_some_and(|https_port| *port == u32::from(https_port))
         {
             HttpForwardingHandler
+                .remote_forwarding(context, address, port, handle)
+                .await
+        } else if address == UDP_ADDRESS {
+            UdpForwardingHandler
                 .remote_forwarding(context, address, port, handle)
                 .await
         } else if context.server.is_alias(address) {
@@ -142,6 +150,11 @@ impl Forwarder {
                 || https_port.is_some_and(|https_port| port == https_port) =>
             {
                 HttpForwardingHandler
+                    .cancel_remote_forwarding(context, address, port)
+                    .await
+            }
+            _ if address == UDP_ADDRESS => {
+                UdpForwardingHandler
                     .cancel_remote_forwarding(context, address, port)
                     .await
             }
@@ -192,6 +205,17 @@ impl Forwarder {
                     channel,
                 )
                 .await
+        } else if address == UDP_ADDRESS {
+            UdpForwardingHandler
+                .local_forwarding(
+                    context,
+                    address,
+                    port,
+                    originator_address,
+                    originator_port,
+                    channel,
+                )
+                .await
         } else if context.server.is_alias(address) {
             AliasForwardingHandler
                 .local_forwarding(
@@ -222,6 +246,7 @@ pub(crate) struct SshForwardingHandler;
 pub(crate) struct HttpForwardingHandler;
 pub(crate) struct AliasForwardingHandler;
 pub(crate) struct TcpForwardingHandler;
+pub(crate) struct UdpForwardingHandler;
 
 impl ForwardingHandlerStrategy for SshForwardingHandler {
     async fn remote_forwarding(
@@ -343,7 +368,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                     .into_bytes(),
                 );
                 context.user_data.host_addressing.insert(
-                    TcpAlias(address.to_string(), *port as u16),
+                    SockAddrAlias(address.to_string(), *port as u16),
                     (address.to_string(), semaphore),
                 );
                 Ok(true)
@@ -360,7 +385,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
         if let Some(assigned_host) = context
             .user_data
             .host_addressing
-            .remove(&BorrowedTcpAlias(address, &port) as &dyn TcpAliasKey)
+            .remove(&BorrowedSockAddrAlias(address, &port) as &dyn SockAddrAliasKey)
         {
             context.server.ssh.remove(&assigned_host.0, context.peer);
             #[cfg(not(coverage_nightly))]
@@ -545,7 +570,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 context.user_data.max_pool_size.load(Ordering::Acquire),
             ));
             match context.server.alias.insert(
-                TcpAlias(address.into(), 80),
+                SockAddrAlias(address.into(), 80),
                 *context.peer,
                 context.user_data.quota_key.clone(),
                 Arc::new(SshTunnelHandler {
@@ -598,8 +623,8 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                         .into_bytes(),
                     );
                     context.user_data.alias_addressing.insert(
-                        TcpAlias(address.into(), 80),
-                        (TcpAlias(address.into(), 80), semaphore),
+                        SockAddrAlias(address.into(), 80),
+                        (SockAddrAlias(address.into(), 80), semaphore),
                     );
                     Ok(true)
                 }
@@ -678,7 +703,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                                 .into_bytes(),
                             );
                             context.user_data.host_addressing.insert(
-                                TcpAlias(address.into(), *port as u16),
+                                SockAddrAlias(address.into(), *port as u16),
                                 (assigned_host, semaphore),
                             );
                             Ok(true)
@@ -823,7 +848,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                                 );
                             }
                             context.user_data.host_addressing.insert(
-                                TcpAlias(address.to_string(), *port as u16),
+                                SockAddrAlias(address.to_string(), *port as u16),
                                 (assigned_host, semaphore),
                             );
                             Ok(true)
@@ -867,9 +892,9 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
             if let Some(assigned_alias) = context
                 .user_data
                 .alias_addressing
-                .remove(&BorrowedTcpAlias(address, &80) as &dyn TcpAliasKey)
+                .remove(&BorrowedSockAddrAlias(address, &80) as &dyn SockAddrAliasKey)
             {
-                let key: &dyn TcpAliasKey = assigned_alias.0.borrow();
+                let key: &dyn SockAddrAliasKey = assigned_alias.0.borrow();
                 context.server.alias.remove(key, context.peer);
                 #[cfg(not(coverage_nightly))]
                 tracing::info!(
@@ -897,7 +922,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
             if let Some(assigned_alias) = context
                 .user_data
                 .host_addressing
-                .remove(&BorrowedTcpAlias(address, &{ port }) as &dyn TcpAliasKey)
+                .remove(&BorrowedSockAddrAlias(address, &{ port }) as &dyn SockAddrAliasKey)
             {
                 context.server.sni.remove(&assigned_alias.0, context.peer);
                 #[cfg(not(coverage_nightly))]
@@ -923,7 +948,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
             if let Some(assigned_host) = context
                 .user_data
                 .host_addressing
-                .remove(&BorrowedTcpAlias(address, &{ port }) as &dyn TcpAliasKey)
+                .remove(&BorrowedSockAddrAlias(address, &{ port }) as &dyn SockAddrAliasKey)
             {
                 context.server.http.remove(&assigned_host.0, context.peer);
                 #[cfg(not(coverage_nightly))]
@@ -1146,7 +1171,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             context.user_data.max_pool_size.load(Ordering::Acquire),
         ));
         match context.server.alias.insert(
-            TcpAlias(address.to_string(), assigned_port),
+            SockAddrAlias(address.to_string(), assigned_port),
             *context.peer,
             context.user_data.quota_key.clone(),
             Arc::new(SshTunnelHandler {
@@ -1188,8 +1213,8 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             _ => {
                 // Adding to connection map succeeded.
                 context.user_data.alias_addressing.insert(
-                    TcpAlias(address.to_string(), *port as u16),
-                    (TcpAlias(address.to_string(), assigned_port), semaphore),
+                    SockAddrAlias(address.to_string(), *port as u16),
+                    (SockAddrAlias(address.to_string(), assigned_port), semaphore),
                 );
                 #[cfg(not(coverage_nightly))]
                 tracing::info!(
@@ -1217,13 +1242,12 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
         address: &str,
         port: u16,
     ) -> Result<bool, russh::Error> {
-        if let Some(assigned_alias) =
-            context
-                .user_data
-                .alias_addressing
-                .remove(&BorrowedTcpAlias(address, &{ port }) as &dyn TcpAliasKey)
+        if let Some(assigned_alias) = context
+            .user_data
+            .alias_addressing
+            .remove(&BorrowedSockAddrAlias(address, &{ port }) as &dyn SockAddrAliasKey)
         {
-            let key: &dyn TcpAliasKey = assigned_alias.0.borrow();
+            let key: &dyn SockAddrAliasKey = assigned_alias.0.borrow();
             context.server.alias.remove(key, context.peer);
             #[cfg(not(coverage_nightly))]
             tracing::info!(
@@ -1256,17 +1280,16 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
         channel: Channel<Msg>,
     ) -> Result<bool, russh::Error> {
         let ip = context.peer.ip().to_canonical();
-        if let Some(handler) = context
-            .server
-            .admin_alias
-            .get(&BorrowedTcpAlias(address, &port) as &dyn TcpAliasKey, ip)
-        {
+        if let Some(handler) = context.server.admin_alias.get(
+            &BorrowedSockAddrAlias(address, &port) as &dyn SockAddrAliasKey,
+            ip,
+        ) {
             if let AuthenticatedData::Admin { .. } = context.auth_data {
                 if let Ok(mut io) = handler
                     .aliasing_channel(ip, context.peer.port(), context.key_fingerprint.as_ref())
                     .await
                 {
-                    let alias = TcpAlias(address.into(), port);
+                    let alias = SockAddrAlias(address.into(), port);
                     let gauge = gauge!(TELEMETRY_GAUGE_ADMIN_ALIAS_CONNECTIONS_CURRENT, TELEMETRY_KEY_ALIAS => alias.to_string());
                     gauge.increment(1);
                     counter!(TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS, TELEMETRY_KEY_ALIAS => alias.to_string())
@@ -1314,15 +1337,14 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                     "Non-admin user attempt to local forward admin alias",
                 )
             }
-        } else if let Some(handler) = context
-            .server
-            .alias
-            .get(&BorrowedTcpAlias(address, &port) as &dyn TcpAliasKey, ip)
-            && let Ok(mut io) = handler
-                .aliasing_channel(ip, context.peer.port(), context.key_fingerprint.as_ref())
-                .await
+        } else if let Some(handler) = context.server.alias.get(
+            &BorrowedSockAddrAlias(address, &port) as &dyn SockAddrAliasKey,
+            ip,
+        ) && let Ok(mut io) = handler
+            .aliasing_channel(ip, context.peer.port(), context.key_fingerprint.as_ref())
+            .await
         {
-            let alias = TcpAlias(address.into(), port);
+            let alias = SockAddrAlias(address.into(), port);
             let gauge = gauge!(TELEMETRY_GAUGE_ALIAS_CONNECTIONS_CURRENT, TELEMETRY_KEY_ALIAS => alias.to_string());
             gauge.increment(1);
             counter!(TELEMETRY_COUNTER_ALIAS_CONNECTIONS, TELEMETRY_KEY_ALIAS => alias.to_string())
@@ -1648,7 +1670,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                 _ => {
                     // Adding to connection map succeeded.
                     context.user_data.port_addressing.insert(
-                        TcpAlias(address.to_string(), *port as u16),
+                        SockAddrAlias(address.to_string(), *port as u16),
                         (assigned_port, semaphore),
                     );
                     #[cfg(not(coverage_nightly))]
@@ -1682,11 +1704,10 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
         address: &str,
         port: u16,
     ) -> Result<bool, russh::Error> {
-        if let Some(assigned_port) =
-            context
-                .user_data
-                .port_addressing
-                .remove(&BorrowedTcpAlias(address, &{ port }) as &dyn TcpAliasKey)
+        if let Some(assigned_port) = context
+            .user_data
+            .port_addressing
+            .remove(&BorrowedSockAddrAlias(address, &{ port }) as &dyn SockAddrAliasKey)
         {
             context.server.tcp.remove(&assigned_port.0, context.peer);
             #[cfg(not(coverage_nightly))]
@@ -1823,6 +1844,349 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
         let _ = context.tx.send(
             format!(
                 "{} {} Unknown TCP port '{}'\r\n",
+                Utc::now().to_rfc3339().dimmed(),
+                " Error ".black().on_red().bold(),
+                port
+            )
+            .into_bytes(),
+        );
+        Ok(false)
+    }
+}
+
+impl ForwardingHandlerStrategy for UdpForwardingHandler {
+    async fn remote_forwarding(
+        &mut self,
+        context: &mut RemoteForwardingContext<'_>,
+        address: &str,
+        port: &mut u32,
+        handle: Handle,
+    ) -> Result<bool, russh::Error> {
+        // Forbid binding UDP if disabled
+        if context.server.disable_udp {
+            let error = eyre!("UDP is disabled");
+            #[cfg(not(coverage_nightly))]
+            tracing::info!(
+                peer = %context.peer, %port, %error,
+                "Failed to bind UDP port.",
+            );
+            let _ = context.tx.send(
+                format!(
+                    "{} {} Cannot listen to UDP on port {}:{} ({})\r\n",
+                    Utc::now().to_rfc3339().dimmed(),
+                    " Error ".black().on_red().bold(),
+                    context
+                        .server
+                        .domain
+                        .as_deref()
+                        .unwrap_or("<Sandhole's IP>"),
+                    port,
+                    error,
+                )
+                .into_bytes(),
+            );
+            Ok(false)
+        // Forbid binding low UDP ports
+        } else if (1..1024).contains(port) {
+            let error = eyre!("port too low");
+            #[cfg(not(coverage_nightly))]
+            tracing::info!(
+                peer = %context.peer, %port, %error,
+                "Failed to bind UDP port.",
+            );
+            let _ = context.tx.send(
+                format!(
+                    "{} {} Cannot listen to UDP on port {}:{} ({})\r\n",
+                    Utc::now().to_rfc3339().dimmed(),
+                    " Error ".black().on_red().bold(),
+                    context
+                        .server
+                        .domain
+                        .as_deref()
+                        .unwrap_or("<Sandhole's IP>"),
+                    port,
+                    error,
+                )
+                .into_bytes(),
+            );
+            Ok(false)
+        } else {
+            // When port is 0, assign a random one
+            let assigned_port = if *port == 0 {
+                let assigned_port = match context.server.udp_handler.get_free_port().await {
+                    Ok(port) => port,
+                    Err(error) => {
+                        #[cfg(not(coverage_nightly))]
+                        tracing::info!(
+                            peer = %context.peer, alias = %address, %error,
+                            "Failed to bind random UDP port for alias.",
+                        );
+                        let _ = context.tx.send(
+                            format!(
+                                "{} {} Cannot listen to UDP on random port of {} ({})\r\n",
+                                Utc::now().to_rfc3339().dimmed(),
+                                " Error ".black().on_red().bold(),
+                                address,
+                                error,
+                            )
+                            .into_bytes(),
+                        );
+                        return Ok(false);
+                    }
+                };
+                // Set port to communicate it back to the client
+                *port = assigned_port.into();
+                assigned_port
+            // Ignore user-requested port, assign any free one
+            } else if context.server.force_random_ports {
+                match context.server.udp_handler.get_free_port().await {
+                    Ok(port) => port,
+                    Err(error) => {
+                        #[cfg(not(coverage_nightly))]
+                        tracing::info!(
+                            peer = %context.peer, alias = %address, %error,
+                            "Failed to bind random UDP port for alias.",
+                        );
+                        let _ = context.tx.send(
+                            format!(
+                                "{} {} Cannot listen to UDP on random port of {} ({})\r\n",
+                                Utc::now().to_rfc3339().dimmed(),
+                                " Error ".black().on_red().bold(),
+                                port,
+                                error,
+                            )
+                            .into_bytes(),
+                        );
+                        return Ok(false);
+                    }
+                }
+            // Allow user-requested port when server allows binding on any port
+            } else {
+                match context
+                    .server
+                    .udp_handler
+                    .create_port_socket(*port as u16)
+                    .await
+                {
+                    Ok(_) => (),
+                    Err(error) => {
+                        // Creating port listener failed.
+                        #[cfg(not(coverage_nightly))]
+                        tracing::info!(
+                            peer = %context.peer, %port, %error,
+                            "Rejecting UDP.",
+                        );
+                        let _ = context.tx.send(
+                            format!(
+                                "{} {} Cannot listen to UDP on {}:{} ({})\r\n",
+                                Utc::now().to_rfc3339().dimmed(),
+                                " Error ".black().on_red().bold(),
+                                context
+                                    .server
+                                    .domain
+                                    .as_deref()
+                                    .unwrap_or("<Sandhole's IP>"),
+                                &port,
+                                error,
+                            )
+                            .into_bytes(),
+                        );
+                        return Ok(false);
+                    }
+                }
+                *port as u16
+            };
+            // Add handler to UDP connection map
+            let semaphore = Arc::new(Semaphore::new(
+                context.user_data.max_pool_size.load(Ordering::Acquire),
+            ));
+            match context.server.udp.insert(
+                assigned_port,
+                *context.peer,
+                context.user_data.quota_key.clone(),
+                Arc::new(SshTunnelHandler {
+                    allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
+                    http_data: None,
+                    pool: Arc::clone(&semaphore),
+                    pool_timeout: context.server.pool_timeout,
+                    ip_connections: Arc::default(),
+                    max_connections_per_ip: context.server.max_connections_per_ip,
+                    ip_filter: Arc::clone(&context.user_data.ip_filter),
+                    handle,
+                    tx: context.tx.clone(),
+                    peer: *context.peer,
+                    address: address.to_string(),
+                    port: *port,
+                    limiter: context.user_data.limiter.clone(),
+                }),
+            ) {
+                Err(error) => {
+                    // Adding to connection map failed.
+                    #[cfg(not(coverage_nightly))]
+                    tracing::info!(
+                        peer = %context.peer, port = %assigned_port, %error,
+                        "Rejecting UDP.",
+                    );
+                    let _ = context.tx.send(
+                        format!(
+                            "{} {} Cannot listen to UDP on {}:{} ({})\r\n",
+                            Utc::now().to_rfc3339().dimmed(),
+                            " Error ".black().on_red().bold(),
+                            context
+                                .server
+                                .domain
+                                .as_deref()
+                                .unwrap_or("<Sandhole's IP>"),
+                            &assigned_port,
+                            error,
+                        )
+                        .into_bytes(),
+                    );
+                    Ok(false)
+                }
+                _ => {
+                    // Adding to connection map succeeded.
+                    context.user_data.port_addressing.insert(
+                        SockAddrAlias(address.to_string(), *port as u16),
+                        (assigned_port, semaphore),
+                    );
+                    #[cfg(not(coverage_nightly))]
+                    tracing::info!(
+                        peer = %context.peer, port = %assigned_port,
+                        "Serving UDP...",
+                    );
+                    let _ = context.tx.send(
+                        format!(
+                            "{} {:>14} port on {}:{}\r\n",
+                            Utc::now().to_rfc3339().dimmed(),
+                            "Starting UDP".green().bold(),
+                            context
+                                .server
+                                .domain
+                                .as_deref()
+                                .unwrap_or("<Sandhole's IP>"),
+                            &assigned_port,
+                        )
+                        .into_bytes(),
+                    );
+                    Ok(true)
+                }
+            }
+        }
+    }
+
+    async fn cancel_remote_forwarding(
+        &mut self,
+        context: &mut RemoteForwardingContext<'_>,
+        address: &str,
+        port: u16,
+    ) -> Result<bool, russh::Error> {
+        if let Some(assigned_port) = context
+            .user_data
+            .port_addressing
+            .remove(&BorrowedSockAddrAlias(address, &{ port }) as &dyn SockAddrAliasKey)
+        {
+            context.server.udp.remove(&assigned_port.0, context.peer);
+            #[cfg(not(coverage_nightly))]
+            tracing::info!(
+                peer = %context.peer, port = %port,
+                "Stopped UDP forwarding.",
+            );
+            let _ = context.tx.send(
+                format!(
+                    "{} {:>14} port on {}:{}\r\n",
+                    Utc::now().to_rfc3339().dimmed(),
+                    "Stopping UDP".yellow().bold(),
+                    context
+                        .server
+                        .domain
+                        .as_deref()
+                        .unwrap_or("<Sandhole's IP>"),
+                    &assigned_port.0,
+                )
+                .into_bytes(),
+            );
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    async fn local_forwarding(
+        &mut self,
+        context: &mut LocalForwardingContext<'_>,
+        address: &str,
+        port: u16,
+        originator_address: &str,
+        originator_port: u16,
+        channel: Channel<Msg>,
+    ) -> Result<bool, russh::Error> {
+        let ip = context.peer.ip().to_canonical();
+        if let Some(handler) = context.server.udp.get(&port, ip)
+            && let Ok(mut io) = handler
+                .aliasing_channel(ip, context.peer.port(), context.key_fingerprint.as_ref())
+                .await
+        {
+            let gauge = gauge!(TELEMETRY_GAUGE_UDP_CONNECTIONS_CURRENT, TELEMETRY_KEY_PORT => port.to_string());
+            gauge.increment(1);
+            counter!(TELEMETRY_COUNTER_UDP_CONNECTIONS, TELEMETRY_KEY_PORT => port.to_string())
+                .increment(1);
+            let _ = handler.log_channel().send(
+                format!(
+                    "{} {:>14} - {}:{} => {}:{}\r\n",
+                    Utc::now().to_rfc3339().dimmed(),
+                    "Proxying UDP".blue().bold(),
+                    originator_address,
+                    originator_port,
+                    address,
+                    port,
+                )
+                .into_bytes(),
+            );
+            match context.auth_data {
+                // Serve UDP for unauthed user, then add disconnection timeout if this is the last proxy connection
+                AuthenticatedData::None { proxy_data } => {
+                    let guard = proxy_data.clone();
+                    let buffer_size = context.server.buffer_size;
+                    tokio::spawn(async move {
+                        let mut stream = channel.into_stream();
+                        let _ = copy_bidirectional_with_sizes(
+                            &mut stream,
+                            &mut io,
+                            buffer_size,
+                            buffer_size,
+                        )
+                        .await;
+                        drop(guard);
+                        gauge.decrement(1);
+                    });
+                }
+                // Serve UDP normally for authed user
+                _ => {
+                    let buffer_size = context.server.buffer_size;
+                    tokio::spawn(async move {
+                        let mut stream = channel.into_stream();
+                        let _ = copy_bidirectional_with_sizes(
+                            &mut stream,
+                            &mut io,
+                            buffer_size,
+                            buffer_size,
+                        )
+                        .await;
+                        gauge.decrement(1);
+                    });
+                }
+            }
+            #[cfg(not(coverage_nightly))]
+            tracing::debug!(
+                peer = %context.peer, remote = %handler.peer, port = %port,
+                "Accepted UDP connection.",
+            );
+            return Ok(true);
+        }
+        let _ = context.tx.send(
+            format!(
+                "{} {} Unknown UDP port '{}'\r\n",
                 Utc::now().to_rfc3339().dimmed(),
                 " Error ".black().on_red().bold(),
                 port

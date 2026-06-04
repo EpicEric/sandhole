@@ -99,5 +99,7 @@ mod tcp_rate_limit_upload;
 mod tcp_reject_low_ports;
 mod tcp_reject_port_above_max;
 mod tcp_timeout;
+mod udp_allow_requested_ports;
+mod udp_bind_random_ports;
 mod websocket_connection;
 mod websocket_timeout;

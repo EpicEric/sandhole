@@ -30,8 +30,8 @@ use crate::{
     droppable_handle::DroppableHandle,
     fingerprints::{AuthenticationType, KeyData},
     quota::TokenHolderUser,
+    sock_addr_alias::SockAddrAlias,
     ssh::ServerHandlerSender,
-    tcp_alias::TcpAlias,
 };
 
 struct BufferedSender {
@@ -57,6 +57,7 @@ enum Tab {
     Sni,
     Ssh,
     Tcp,
+    Udp,
     Alias,
 }
 
@@ -68,6 +69,7 @@ impl Tab {
             Tab::Sni => Color::Cyan,
             Tab::Ssh => Color::Yellow,
             Tab::Tcp => Color::Green,
+            Tab::Udp => Color::Magenta,
             Tab::Alias => Color::Red,
         }
     }
@@ -100,6 +102,7 @@ impl TabData {
                     Tab::Sni => Line::from("  SNI  ".black().bg(tab.color())),
                     Tab::Ssh => Line::from("  SSH  ".black().bg(tab.color())),
                     Tab::Tcp => Line::from("  TCP  ".black().bg(tab.color())),
+                    Tab::Udp => Line::from("  UDP  ".black().bg(tab.color())),
                     Tab::Alias => Line::from("  Alias  ".black().bg(tab.color())),
                 })
                 .collect::<Vec<_>>(),
@@ -613,6 +616,50 @@ impl AdminState {
                     &mut self.vertical_scroll,
                 );
             }
+            Tab::Udp => {
+                // Get data for UDP
+                let data = self.server.udp_data.lock().expect("not poisoned").clone();
+                self.vertical_scroll = self.vertical_scroll.content_length(data.len());
+                // Create rows for each socket or alias
+                let rows: Vec<Row<'_>> = data
+                    .iter()
+                    .map(|(port, (connections, conns_per_min, current_conns))| {
+                        let len = connections.len() as u16;
+                        let (peers, users): (Vec<_>, Vec<_>) = connections.iter().unzip();
+                        Row::new(vec![
+                            port.to_string(),
+                            conns_per_min.to_string(),
+                            current_conns.to_string(),
+                            users.iter().join("\n"),
+                            peers.iter().map(to_socket_addr_string).join("\n"),
+                        ])
+                        .height(len)
+                    })
+                    .collect();
+                let constraints = [
+                    Constraint::Length(5),
+                    Constraint::Length(7),
+                    Constraint::Length(6),
+                    Constraint::Min(7),
+                    Constraint::Length(47),
+                ];
+                let header = Row::new(["Port", "Con/min", "#Conns", "User(s)", "Peer(s)"])
+                    .add_modifier(Modifier::UNDERLINED);
+                let title =
+                    Block::new().title(Line::from("UDP services".fg(color).bold()).centered());
+                let table = Table::new(rows, constraints)
+                    .header(header)
+                    .column_spacing(1)
+                    .block(title)
+                    .row_highlight_style(Style::new().fg(color).reversed());
+                StatefulWidget::render(table, area, buf, &mut self.table_state);
+                StatefulWidget::render(
+                    Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+                    area.inner(Margin::new(0, 2)),
+                    buf,
+                    &mut self.vertical_scroll,
+                );
+            }
             Tab::Alias => {
                 // Get data for aliases
                 let data = self.server.alias_data.lock().expect("not poisoned").clone();
@@ -621,7 +668,10 @@ impl AdminState {
                 let rows: Vec<Row<'_>> = data
                     .iter()
                     .map(
-                        |(TcpAlias(alias, port), (connections, conns_per_min, current_conns))| {
+                        |(
+                            SockAddrAlias(alias, port),
+                            (connections, conns_per_min, current_conns),
+                        )| {
                             let len = connections.len() as u16;
                             let (peers, users): (Vec<_>, Vec<_>) = connections.iter().unzip();
                             Row::new(vec![
@@ -773,6 +823,9 @@ impl AdminInterface {
         }
         if !server.disable_tcp {
             tabs.push(Tab::Tcp);
+        }
+        if !server.disable_udp {
+            tabs.push(Tab::Udp);
         }
         if !server.disable_aliasing {
             tabs.push(Tab::Alias);
@@ -1060,6 +1113,15 @@ impl AdminInterface {
                                     .state
                                     .server
                                     .tcp_data
+                                    .lock()
+                                    .expect("not poisoned")
+                                    .values()
+                                    .nth(row)
+                                    .map(|value| value.0.values().cloned().collect()),
+                                Tab::Udp => interface
+                                    .state
+                                    .server
+                                    .udp_data
                                     .lock()
                                     .expect("not poisoned")
                                     .values()
