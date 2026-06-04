@@ -76,11 +76,11 @@ jobs:
         run: |
           cargo build --locked --no-default-features
   tests-nightly:
-    name: Run tests on nightly (${{ matrix.platform.runner }})
+    name: Run tests on nightly (${{ matrix.runner }})
     strategy:
       fail-fast: false
       matrix:
-        platform:
+        include:
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
           - runner: macos-15-intel
@@ -89,7 +89,7 @@ jobs:
             target: aarch64-apple-darwin
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
-    runs-on: ${{ matrix.platform.runner }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
@@ -100,10 +100,10 @@ jobs:
           tool: cargo-nextest@${{ env.CARGO_NEXTEST_VERSION }}
       - name: Fetch nightly Rust
         run: |
-          rustup toolchain install nightly-${{ matrix.platform.target }}
-          rustup override set nightly-${{ matrix.platform.target }}
+          rustup toolchain install nightly-${{ matrix.target }}
+          rustup override set nightly-${{ matrix.target }}
       - name: Install lld on macOS
-        if: matrix.platform.target == 'x86_64-apple-darwin' || matrix.platform.target == 'aarch64-apple-darwin'
+        if: matrix.target == 'x86_64-apple-darwin' || matrix.target == 'aarch64-apple-darwin'
         run: |
           brew install lld
       - name: Test

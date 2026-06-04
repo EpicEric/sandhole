@@ -43,15 +43,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform:
+        include:
           - runner: macos-15-intel
             target: x86_64-apple-darwin
             key: macos-amd64
           - runner: macos-15
             target: aarch64-apple-darwin
             key: macos-arm64
-    name: Build for ${{ matrix.platform.key }}
-    runs-on: ${{ matrix.platform.runner }}
+    name: Build for ${{ matrix.key }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -61,31 +61,31 @@ jobs:
         run: |
           rustup toolchain install ${RUST_VERSION}
           rustup override set ${RUST_VERSION}
-          rustup target add ${{ matrix.platform.target }}
+          rustup target add ${{ matrix.target }}
       - name: Install lld
         run: |
           brew install lld
       - name: Build
         run: |
-          cargo build --release --locked --target ${{ matrix.platform.target }}
+          cargo build --release --locked --target ${{ matrix.target }}
           mkdir dist
-          cp target/${{ matrix.platform.target }}/release/sandhole dist/sandhole-${{ matrix.platform.key }}
+          cp target/${{ matrix.target }}/release/sandhole dist/sandhole-${{ matrix.key }}
       - name: Upload artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: sandhole-${{ matrix.platform.key }}
+          name: sandhole-${{ matrix.key }}
           path: dist
 
   build-windows:
     strategy:
       fail-fast: false
       matrix:
-        platform:
+        include:
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             key: windows-amd64
-    name: Build for ${{ matrix.platform.key }}
-    runs-on: ${{ matrix.platform.runner }}
+    name: Build for ${{ matrix.key }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -95,17 +95,17 @@ jobs:
         run: |
           rustup toolchain install ${RUST_VERSION}
           rustup override set ${RUST_VERSION}
-          rustup target add ${{ matrix.platform.target }}
+          rustup target add ${{ matrix.target }}
       - name: Build
         shell: bash
         run: |
-          cargo build --release --locked --target ${{ matrix.platform.target }}
+          cargo build --release --locked --target ${{ matrix.target }}
           mkdir dist
-          cp target/${{ matrix.platform.target }}/release/sandhole.exe dist/sandhole-${{ matrix.platform.key }}.exe
+          cp target/${{ matrix.target }}/release/sandhole.exe dist/sandhole-${{ matrix.key }}.exe
       - name: Upload artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: sandhole-${{ matrix.platform.key }}
+          name: sandhole-${{ matrix.key }}
           path: dist
 
   create-release-draft:

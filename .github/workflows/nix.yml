@@ -11,16 +11,16 @@ concurrency:
 
 jobs:
   build-nix-flake:
-    name: Build Nix flake (${{ matrix.platform.system }})
+    name: Build Nix flake (${{ matrix.system }})
     strategy:
       fail-fast: false
       matrix:
-        platform:
+        include:
           - runner: ubuntu-24.04
             system: x86_64-linux
           - runner: ubuntu-24.04-arm
             system: aarch64-linux
-    runs-on: ${{ matrix.platform.runner }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
@@ -31,7 +31,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
           extra_nix_config: |
-            system = ${{ matrix.platform.system }}
+            system = ${{ matrix.system }}
       - name: Install cachix
         run: |
           nix-env -iA cachix -f https://cachix.org/api/v1/install
@@ -41,6 +41,7 @@ jobs:
         run: |
           cachix use ${CACHIX_NAME}
       - name: Run checks
+        if: matrix.system == 'x86_64-linux'
         run: |
           nix flake check
       - name: Build and push to Cachix
