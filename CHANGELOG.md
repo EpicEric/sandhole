@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **BREAKING**: Use gauges for `system_used_memory` and `system_total_memory`.
+
 ## 0.9.5 (2026-05-25)
 
 ### Changed

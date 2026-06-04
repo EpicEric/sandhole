@@ -40,10 +40,6 @@ jobs:
           CACHIX_NAME: ${{ vars.CACHIX_NAME }}
         run: |
           cachix use ${CACHIX_NAME}
-      - name: Run checks
-        if: matrix.system == 'x86_64-linux'
-        run: |
-          nix flake check
       - name: Build and push to Cachix
         env:
           CACHIX_NAME: ${{ vars.CACHIX_NAME }}

@@ -162,8 +162,8 @@ pub(crate) const TELEMETRY_COUNTER_ALIAS_CONNECTIONS: &str = "sandhole_alias_con
 pub(crate) const TELEMETRY_COUNTER_ADMIN_ALIAS_CONNECTIONS: &str =
     "sandhole_admin_alias_connections";
 pub(crate) const TELEMETRY_COUNTER_TCP_CONNECTIONS: &str = "sandhole_tcp_connections";
-pub(crate) const TELEMETRY_COUNTER_USED_MEMORY: &str = "system_used_memory";
-pub(crate) const TELEMETRY_COUNTER_TOTAL_MEMORY: &str = "system_total_memory";
+pub(crate) const TELEMETRY_GAUGE_USED_MEMORY: &str = "system_used_memory";
+pub(crate) const TELEMETRY_GAUGE_TOTAL_MEMORY: &str = "system_total_memory";
 pub(crate) const TELEMETRY_COUNTER_NETWORK_TX: &str = "system_network_tx";
 pub(crate) const TELEMETRY_COUNTER_NETWORK_RX: &str = "system_network_rx";
 
@@ -283,8 +283,6 @@ impl Telemetry {
             TELEMETRY_COUNTER_TCP_CONNECTIONS,
             "Total connections for TCP ports"
         );
-        describe_counter!(TELEMETRY_COUNTER_USED_MEMORY, Unit::Bytes, "Used memory");
-        describe_counter!(TELEMETRY_COUNTER_TOTAL_MEMORY, Unit::Bytes, "Total memory");
         describe_counter!(
             TELEMETRY_COUNTER_NETWORK_TX,
             Unit::Bytes,
@@ -313,6 +311,8 @@ impl Telemetry {
             "Current requests for TCP ports"
         );
         describe_gauge!(TELEMETRY_GAUGE_CPU_USAGE, Unit::Percent, "Total CPU usage");
+        describe_gauge!(TELEMETRY_GAUGE_USED_MEMORY, Unit::Bytes, "Used memory");
+        describe_gauge!(TELEMETRY_GAUGE_TOTAL_MEMORY, Unit::Bytes, "Total memory");
 
         describe_histogram!(
             TELEMETRY_HISTOGRAM_HTTP_ELAPSED_TIME,

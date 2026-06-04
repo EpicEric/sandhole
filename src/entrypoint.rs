@@ -66,9 +66,8 @@ use crate::{
     tcp_listener::get_tcp_listener,
     telemetry::{
         TELEMETRY_COUNTER_NETWORK_RX, TELEMETRY_COUNTER_NETWORK_TX,
-        TELEMETRY_COUNTER_SNI_CONNECTIONS, TELEMETRY_COUNTER_TOTAL_MEMORY,
-        TELEMETRY_COUNTER_USED_MEMORY, TELEMETRY_GAUGE_CPU_USAGE, TELEMETRY_KEY_HOSTNAME,
-        Telemetry,
+        TELEMETRY_COUNTER_SNI_CONNECTIONS, TELEMETRY_GAUGE_CPU_USAGE, TELEMETRY_GAUGE_TOTAL_MEMORY,
+        TELEMETRY_GAUGE_USED_MEMORY, TELEMETRY_KEY_HOSTNAME, Telemetry,
     },
     tls::{TlsPeekData, peek_sni_and_alpn},
 };
@@ -584,9 +583,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             let cpu_usage = system.global_cpu_usage() / system.cpus().len() as f32;
             gauge!(TELEMETRY_GAUGE_CPU_USAGE).set(cpu_usage / 100.0);
             let used_memory = system.used_memory();
-            counter!(TELEMETRY_COUNTER_USED_MEMORY).absolute(used_memory);
+            gauge!(TELEMETRY_GAUGE_USED_MEMORY).set(used_memory as f64);
             let total_memory = system.total_memory();
-            counter!(TELEMETRY_COUNTER_TOTAL_MEMORY).absolute(total_memory);
+            gauge!(TELEMETRY_GAUGE_TOTAL_MEMORY).set(total_memory as f64);
             counter!(TELEMETRY_COUNTER_NETWORK_TX).increment(network_tx);
             counter!(TELEMETRY_COUNTER_NETWORK_RX).increment(network_rx);
             let data = SystemData {
