@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use sandhole::{ApplicationConfig, LogFormat, entrypoint};
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -7,6 +7,16 @@ async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
     let config = ApplicationConfig::parse();
+
+    if let Some(shell) = config.mode.completions {
+        clap_complete::generate(
+            shell,
+            &mut ApplicationConfig::command(),
+            env!("CARGO_BIN_NAME"),
+            &mut std::io::stdout(),
+        );
+        return Ok(());
+    }
 
     let env_filter = tracing_subscriber::EnvFilter::builder()
         .with_default_directive(tracing::level_filters::LevelFilter::INFO.into())

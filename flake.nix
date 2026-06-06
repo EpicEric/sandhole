@@ -98,18 +98,15 @@
       {
         packages.${system} = packages;
 
-        apps.${system}.default = {
-          type = "app";
-          program = lib.getExe self.packages.${system}.default;
-          meta = {
-            name = "sandhole";
-            description = "Expose HTTP/SSH/TCP services through SSH port forwarding";
-            homepage = "https://sandhole.com.br";
-            license = lib.licenses.mit;
-            mainProgram = "sandhole";
-            platforms = lib.platforms.linux ++ lib.platforms.darwin;
+        apps.${system}.default =
+          let
+            sandhole = self.packages.${system}.default;
+          in
+          {
+            type = "app";
+            program = lib.getExe sandhole;
+            inherit (sandhole) meta;
           };
-        };
 
         checks.${system} = checks;
 

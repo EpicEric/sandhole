@@ -103,7 +103,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .into());
         }
     }
-    if config.domain.no_domain {
+    if config.mode.no_domain {
         if config.allow_requested_subdomains {
             #[cfg(not(coverage_nightly))]
             tracing::warn!("--allow-requested-subdomains has no effect with --no-domain");
@@ -332,7 +332,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let builder = AddressDelegator::builder()
             .resolver(DnsResolver::new()?)
             .txt_record_prefix(config.txt_record_prefix)
-            .maybe_root_domain(config.domain.domain.clone())
+            .maybe_root_domain(config.mode.domain.clone())
             .bind_hostnames(config.bind_hostnames)
             .force_random_subdomains(!config.allow_requested_subdomains)
             .maybe_random_subdomain_seed(config.random_subdomain_seed)
@@ -369,7 +369,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         }
     });
     // Configure the default domain redirect for Sandhole.
-    let domain_redirect = config.domain.domain.clone().map(|from| {
+    let domain_redirect = config.mode.domain.clone().map(|from| {
         Arc::new(DomainRedirect {
             from,
             to: config.domain_redirect,
@@ -601,7 +601,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     });
     let admin_notifications = Arc::new(Mutex::default());
     let notifications_clone = Arc::clone(&admin_notifications);
-    let domain_clone = config.domain.domain.clone();
+    let domain_clone = config.mode.domain.clone();
     let certificates_clone = Arc::clone(&certificates);
     // Periodically check for problems (every 10 seconds) and update notifications.
     tokio::spawn(async move {
@@ -711,7 +711,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         api_login,
         address_delegator: addressing,
         tcp_handler,
-        domain: config.domain.domain,
+        domain: config.mode.domain,
         http_port: config.http_port.into(),
         https_port: config.https_port.into(),
         ssh_port: config.ssh_port.into(),

@@ -28,6 +28,7 @@ let
 
     nativeBuildInputs = [
       pkgs.cmake
+      pkgs.installShellFiles
       pkgs.perl
     ]
     ++ lib.optionals (system == "x86_64-darwin" || system == "aarch64-darwin") [ pkgs.lld ];
@@ -40,17 +41,36 @@ let
     // {
       inherit cargoArtifacts;
       doCheck = false;
-      meta.mainProgram = "sandhole";
+      postInstall = lib.optionalString (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) ''
+        $out/bin/sandhole --completions bash
+        installShellCompletion --cmd sandhole \
+          --bash <($out/bin/sandhole --completions bash) \
+          --fish <($out/bin/sandhole --completions fish) \
+          --zsh <($out/bin/sandhole --completions zsh)
+      '';
+      meta = {
+        name = "sandhole";
+        description = "Expose HTTP/SSH/TCP services through SSH port forwarding";
+        homepage = "https://sandhole.com.br";
+        license = lib.licenses.mit;
+        mainProgram = "sandhole";
+        platforms = lib.platforms.linux ++ lib.platforms.darwin;
+      };
     }
   );
+
+  sandhole-no-default-features = sandhole.overrideAttrs {
+    cargoExtraArgs = "--locked --no-default-features";
+  };
 in
 {
-  inherit sandhole;
+  inherit sandhole sandhole-no-default-features;
 
   packages = import ./packages.nix {
     inherit
       pkgs
       sandhole
+      sandhole-no-default-features
       ;
   };
 
@@ -61,6 +81,7 @@ in
       craneLib
       pkgs
       sandhole
+      sandhole-no-default-features
       src
       ;
   };

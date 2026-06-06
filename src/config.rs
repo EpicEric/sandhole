@@ -79,20 +79,24 @@ pub enum LogFormat {
 
 #[derive(Debug, Args, PartialEq)]
 #[group(required = true, multiple = false)]
-pub struct Domain {
+pub struct Mode {
     /// The root domain of the application.
     #[arg(
         long,
         value_parser = validate_domain,
-        group = "sandhole_domain"
+        group = "sandhole_mode"
     )]
     pub domain: Option<String>,
 
     /// Whether to run Sandhole without a root domain.
     ///
     /// This option disables subdomains.
-    #[arg(long, default_value_t = false, group = "sandhole_domain")]
+    #[arg(long, default_value_t = false, group = "sandhole_mode")]
     pub no_domain: bool,
+
+    /// Generate shell completions for Sandhole.
+    #[arg(long, group = "sandhole_mode")]
+    pub completions: Option<clap_complete::Shell>,
 }
 
 // CLI configuration for Sandhole.
@@ -101,7 +105,7 @@ pub struct Domain {
 #[command(version, about, long_about = None)]
 pub struct ApplicationConfig {
     #[command(flatten)]
-    pub domain: Domain,
+    pub mode: Mode,
 
     /// Where to redirect requests to the root domain.
     #[arg(
@@ -569,7 +573,7 @@ mod application_config_tests {
     use clap::Parser;
     use ipnet::IpNet;
 
-    use crate::config::{Domain, LoadBalancingAlgorithm, LogFormat};
+    use crate::config::{LoadBalancingAlgorithm, LogFormat, Mode};
 
     use super::{ApplicationConfig, BindHostnames, LoadBalancingStrategy, RandomSubdomainSeed};
 
@@ -579,9 +583,10 @@ mod application_config_tests {
         assert_eq!(
             config,
             ApplicationConfig {
-                domain: Domain {
+                mode: Mode {
                     domain: Some("foobar.tld".into()),
                     no_domain: false,
+                    completions: None,
                 },
                 domain_redirect: "https://github.com/EpicEric/sandhole".into(),
                 user_keys_directory: "./deploy/user_keys/".into(),
@@ -712,9 +717,10 @@ mod application_config_tests {
         assert_eq!(
             config,
             ApplicationConfig {
-                domain: Domain {
+                mode: Mode {
                     domain: None,
                     no_domain: true,
+                    completions: None,
                 },
                 domain_redirect: "https://sandhole.eric.dev.br".into(),
                 user_keys_directory: "/etc/user_keys/".into(),
@@ -777,6 +783,19 @@ mod application_config_tests {
                 authentication_request_timeout: Duration::from_secs(6),
                 http_request_timeout: Some(Duration::from_secs(15)),
                 tcp_connection_timeout: Some(Duration::from_secs(30))
+            }
+        )
+    }
+
+    #[test_log::test]
+    fn parses_completions() {
+        let config = ApplicationConfig::parse_from(["sandhole", "--completions", "fish"]);
+        assert_eq!(
+            config.mode,
+            Mode {
+                domain: None,
+                no_domain: false,
+                completions: Some(clap_complete::Shell::Fish),
             }
         )
     }

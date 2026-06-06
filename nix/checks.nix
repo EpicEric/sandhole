@@ -4,21 +4,12 @@
   craneLib,
   pkgs,
   sandhole,
+  sandhole-no-default-features,
   src,
   ...
 }:
 {
-  inherit sandhole;
-
-  sandhole-no-default-features = craneLib.buildPackage (
-    commonArgs
-    // {
-      inherit cargoArtifacts;
-      pname = "sandhole-no-default-features";
-      cargoExtraArgs = "--locked --no-default-features";
-      doCheck = false;
-    }
-  );
+  inherit sandhole sandhole-no-default-features;
 
   sandhole-clippy = craneLib.cargoClippy (
     commonArgs

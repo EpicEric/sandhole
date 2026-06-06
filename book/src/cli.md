@@ -18,6 +18,11 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           This option disables subdomains.
 
+      <b>--completions</b> &lt;COMPLETIONS&gt;
+          Generate shell completions for Sandhole
+
+          [possible values: bash, elvish, fish, powershell, zsh]
+
       <b>--domain-redirect</b> &lt;URL&gt;
           Where to redirect requests to the root domain
 

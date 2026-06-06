@@ -2,9 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Add `--completions` CLI flag.
+
 ### Changed
 
 - **BREAKING**: Use gauges for `system_used_memory` and `system_total_memory`.
+- Update dependencies.
 
 ## 0.9.5 (2026-05-25)
 

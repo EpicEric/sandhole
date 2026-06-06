@@ -1,6 +1,7 @@
 {
   pkgs,
   sandhole,
+  sandhole-no-default-features,
   ...
 }:
 let
@@ -25,7 +26,7 @@ let
   };
 in
 {
-  inherit sandhole;
+  inherit sandhole sandhole-no-default-features;
   default = sandhole;
 
   _docs =
@@ -42,7 +43,8 @@ in
         ];
       }
       ''
-        to-html --no-prompt "sandhole --help" > $out
+        mkdir $out
+        to-html --no-prompt "sandhole --help" > $out/cli.html
       '';
 
   _book = pkgs.stdenv.mkDerivation {

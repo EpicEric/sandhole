@@ -31,6 +31,7 @@ bytes = "1.11.1"
 bytesize = "2.3.1"
 chrono = "0.4.44"
 clap = { version = "4.6.1", features = ["derive", "string"] }
+clap_complete = "4.6.5"
 color-eyre = "0.6.5"
 crossterm = { version = "0.29.0", default-features = false }
 dashmap = "6.1.0"
@@ -71,7 +72,7 @@ reqwest = { version = "0.13.3", optional = true, default-features = false, featu
   "json",
   "rustls",
 ] }
-russh = "0.61.1"
+russh = "0.61.2"
 rustls = "0.23.40"
 rustls-acme = { version = "0.15.2", optional = true, default-features = false, features = [
   "tokio",
