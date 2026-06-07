@@ -32,7 +32,7 @@ ssh -i /your/private/key -p 2222 -R test:80:localhost:3000 sandhole.com.br
 ssh -i /your/private/key -p 2222 -R test.sandhole.com.br:80:localhost:3000 sandhole.com.br
 ```
 
-And if we'd like to bind to a specific port, say 4321:
+And if we'd like to bind to a specific TCP port, say 4321:
 
 ```bash
 ssh -i /your/private/key -p 2222 -R 4321:localhost:3000 sandhole.com.br

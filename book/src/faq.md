@@ -10,7 +10,7 @@ ssh -p 2222 -R example.com:80:localhost:3000 -R www.example.com:80:localhost:300
 
 Use `ssh -p 2222 -J sandhole.com.br:2222 mysshserver.com` (replace the ports with Sandhole's SSH port if not using the default `2222`).
 
-If you'd like to avoid typing out the proxy jump command every time, make sure to edit your SSH config file (usually `~/.ssh/config`) and add the following entry (changing the port where appropriate):
+If you'd like to avoid typing out the proxy jump command every time, edit your SSH config file (usually `~/.ssh/config`) and add the following entry (changing the port where appropriate):
 
 ```ssh-config
 Host mysshserver.com
@@ -24,7 +24,7 @@ Websockets are always enabled for HTTP services.
 
 ## Can I expose UDP services (like HTTP/3)?
 
-No. SSH remote forwarding only supports TCP.
+See [UDP-over-TCP](./udp_over_tcp.md).
 
 ## How do I retrieve proxy information for my HTTP service?
 
