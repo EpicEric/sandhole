@@ -150,6 +150,20 @@ in
                 :::
               '';
             };
+
+            disable-udp = lib.mkOption {
+              type = types.bool;
+              default = false;
+              example = true;
+              description = ''
+                Disable all UDP port tunneling. By default, this is enabled globally.
+
+                ::: {.warning}
+                If this option is false or unset and `services.sandhole.openFirewall` is true,
+                all unprivileged UDP ports (i.e. >= 1024) will be opened.
+                :::
+              '';
+            };
           };
         };
         default = { };
@@ -260,6 +274,10 @@ in
         httpsPort
       ];
       allowedTCPPortRanges = lib.optional (!(cfg.settings.disable-tcp or false)) {
+        from = 1024;
+        to = 65535;
+      };
+      allowedUDPPortRanges = lib.optional (!(cfg.settings.disable-udp or false)) {
         from = 1024;
         to = 65535;
       };
