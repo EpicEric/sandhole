@@ -1,30 +1,28 @@
+use std::time::Instant;
 use std::{sync::Arc, time::Duration};
 
-use bytes::BytesMut;
 use clap::Parser;
 
 use rand::Rng;
+use russh::ChannelMsg;
 use russh::{
-    Channel, Preferred,
+    Channel,
     client::{Msg, Session},
-};
-use russh::{
-    client::Config,
     keys::{key::PrivateKeyWithHashAlg, load_secret_key},
 };
 use sandhole::{ApplicationConfig, entrypoint};
+use tokio::net::UdpSocket;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     time::{sleep, timeout},
 };
 
 use crate::common::SandholeHandle;
 
-/// This test ensures that a TCP service can handle multiple big uploads at the
-/// same time (mostly for profiling purposes).
+/// This test ensures that rate limiting works as expected for UDP
+/// services.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn tcp_multi_stream_download() {
+async fn udp_rate_limit() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -64,7 +62,9 @@ async fn tcp_multi_stream_download() {
         "--allow-requested-ports",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
-        "--http-request-timeout=60s",
+        "--http-request-timeout=5s",
+        "--buffer-size=20KB",
+        "--rate-limit-per-user=20KB",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -86,29 +86,20 @@ async fn tcp_multi_stream_download() {
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session = russh::client::connect(
-        Arc::new(Config {
-            preferred: Preferred {
-                cipher: std::borrow::Cow::Borrowed(&[
-                    russh::cipher::CHACHA20_POLY1305,
-                    // russh::cipher::AES_256_GCM,
-                ]),
-                ..Default::default()
-            },
-            ..Default::default()
-        }),
-        "127.0.0.1:18022",
-        ssh_client,
-    )
-    .await
-    .expect("Failed to connect to SSH server");
+    let mut session_one = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
     assert!(
-        session
+        session_one
             .authenticate_publickey(
                 "user",
                 PrivateKeyWithHashAlg::new(
                     Arc::new(key),
-                    session.best_supported_rsa_hash().await.unwrap().flatten()
+                    session_one
+                        .best_supported_rsa_hash()
+                        .await
+                        .unwrap()
+                        .flatten()
                 )
             )
             .await
@@ -116,48 +107,35 @@ async fn tcp_multi_stream_download() {
             .success(),
         "authentication didn't succeed"
     );
-    session
-        .tcpip_forward("tcp.sandhole", 12345)
+    session_one
+        .tcpip_forward("udp.sandhole", 12345)
         .await
         .expect("tcpip_forward failed");
 
-    // 3. Connect to the TCP port of our proxy with out multiple streams
-    let mut data = vec![0u8; 20_000_000];
+    // 3. Connect to the UDP port of our proxy
+    let mut data = vec![0u8; 55_000];
     rand::rng().fill_bytes(&mut data);
-    let data: &'static [u8] = data.leak();
-    timeout(Duration::from_secs(30), async move {
-        let mut jh_vec = vec![];
-        for file_size in [7_500_000usize, 10_000_000, 15_000_000, 20_000_000] {
-            let tcp_stream = TcpStream::connect("127.0.0.1:12345")
-                .await
-                .expect("TCP connection failed");
-            tcp_stream.set_nodelay(true).unwrap();
-            let (mut read_half, mut write_half) = tcp_stream.into_split();
-            let jh = tokio::spawn(async move {
-                let jh = tokio::spawn(async move {
-                    write_half
-                        .write_all(&file_size.to_le_bytes())
-                        .await
-                        .unwrap();
-                    write_half.write_all(&data[..file_size]).await.unwrap();
-                    write_half.flush().await.unwrap();
-                });
-                let mut buf = [0u8; size_of::<usize>()];
-                read_half
-                    .read_exact(&mut buf)
-                    .await
-                    .expect("socket closed unexpectedly");
-                assert_eq!(usize::from_le_bytes(buf), file_size);
-                jh.abort();
-            });
-            jh_vec.push(jh);
-        }
-        for jh in jh_vec.into_iter() {
-            jh.await.expect("Join handle panicked");
-        }
-    })
-    .await
-    .expect("Timeout waiting for test to finish.");
+    let udp_socket = UdpSocket::bind("127.0.0.1:0")
+        .await
+        .expect("UDP connection failed");
+    udp_socket
+        .connect(format!("127.0.0.1:12345"))
+        .await
+        .unwrap();
+    let start = Instant::now();
+    udp_socket.send(&data[..]).await.unwrap();
+    let mut buf = [0u8; 32];
+    assert_eq!(udp_socket.recv(&mut buf).await.unwrap(), 2);
+    let elapsed = start.elapsed();
+    assert_eq!(&buf[..2], b"OK");
+    assert!(
+        elapsed > Duration::from_millis(2_000),
+        "must've taken more than 2 seconds, but was {elapsed:?}"
+    );
+    assert!(
+        elapsed < Duration::from_millis(3_500),
+        "must've taken less than 3.5 seconds, but was {elapsed:?}"
+    );
 }
 
 struct SshClient;
@@ -174,7 +152,7 @@ impl russh::client::Handler for SshClient {
 
     async fn server_channel_open_forwarded_tcpip(
         &mut self,
-        channel: Channel<Msg>,
+        mut channel: Channel<Msg>,
         _connected_address: &str,
         _connected_port: u32,
         _originator_address: &str,
@@ -182,24 +160,16 @@ impl russh::client::Handler for SshClient {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
-            let mut len_buf = [0u8; size_of::<usize>()];
-            let mut stream = channel.into_stream();
-            stream.read_exact(&mut len_buf).await.unwrap();
-            let total_size = usize::from_le_bytes(len_buf);
-            let mut size = total_size;
-            let mut buf = BytesMut::new();
-            while let Ok(n) = stream.read_buf(&mut buf).await {
-                if n == 0 {
-                    return;
-                }
-                buf.truncate(0);
-                size = size.saturating_sub(n);
-                if size == 0 {
-                    break;
+            let mut expected_len = 55_000 + std::mem::size_of::<u16>();
+            while let Some(msg) = channel.wait().await {
+                if let ChannelMsg::Data { data } = msg {
+                    expected_len -= data.len();
+                    if expected_len == 0 {
+                        channel.data(&b"\x00\x02OK"[..]).await.unwrap();
+                        return;
+                    }
                 }
             }
-            stream.write_all(&len_buf[..]).await.unwrap();
-            stream.flush().await.unwrap();
         });
         Ok(())
     }

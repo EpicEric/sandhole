@@ -1,30 +1,27 @@
-use std::{sync::Arc, time::Duration};
-
-use bytes::BytesMut;
-use clap::Parser;
-
-use rand::Rng;
-use russh::{
-    Channel, Preferred,
-    client::{Msg, Session},
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
 };
+
+use clap::Parser;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
-    client::Config,
-    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
+    Channel,
+    client::{Msg, Session},
 };
 use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
+    net::{TcpStream, UdpSocket},
     time::{sleep, timeout},
 };
 
 use crate::common::SandholeHandle;
 
-/// This test ensures that a TCP service can handle multiple big uploads at the
-/// same time (mostly for profiling purposes).
+/// This test ensures that no more UDP connections from the same IP
+/// than the specified limit are able to connect at the same time.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn tcp_multi_stream_download() {
+async fn udp_ip_connections_limit() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -55,16 +52,15 @@ async fn tcp_multi_stream_download() {
             std::env::var("CARGO_MANIFEST_DIR").unwrap()
         )),
         "--disable-directory-creation",
-        "--listen-address=127.0.0.1",
+        "--listen-address=::",
         "--ssh-port=18022",
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
-        "--bind-hostnames=none",
         "--allow-requested-ports",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
-        "--http-request-timeout=60s",
+        "--max-simultaneous-connections-per-ip=1",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -86,22 +82,9 @@ async fn tcp_multi_stream_download() {
     )
     .expect("Missing file key1");
     let ssh_client = SshClient;
-    let mut session = russh::client::connect(
-        Arc::new(Config {
-            preferred: Preferred {
-                cipher: std::borrow::Cow::Borrowed(&[
-                    russh::cipher::CHACHA20_POLY1305,
-                    // russh::cipher::AES_256_GCM,
-                ]),
-                ..Default::default()
-            },
-            ..Default::default()
-        }),
-        "127.0.0.1:18022",
-        ssh_client,
-    )
-    .await
-    .expect("Failed to connect to SSH server");
+    let mut session = russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client)
+        .await
+        .expect("Failed to connect to SSH server");
     assert!(
         session
             .authenticate_publickey(
@@ -117,47 +100,80 @@ async fn tcp_multi_stream_download() {
         "authentication didn't succeed"
     );
     session
-        .tcpip_forward("tcp.sandhole", 12345)
+        .tcpip_forward("udp.sandhole", 12345)
         .await
         .expect("tcpip_forward failed");
 
-    // 3. Connect to the TCP port of our proxy with out multiple streams
-    let mut data = vec![0u8; 20_000_000];
-    rand::rng().fill_bytes(&mut data);
-    let data: &'static [u8] = data.leak();
-    timeout(Duration::from_secs(30), async move {
-        let mut jh_vec = vec![];
-        for file_size in [7_500_000usize, 10_000_000, 15_000_000, 20_000_000] {
-            let tcp_stream = TcpStream::connect("127.0.0.1:12345")
-                .await
-                .expect("TCP connection failed");
-            tcp_stream.set_nodelay(true).unwrap();
-            let (mut read_half, mut write_half) = tcp_stream.into_split();
-            let jh = tokio::spawn(async move {
-                let jh = tokio::spawn(async move {
-                    write_half
-                        .write_all(&file_size.to_le_bytes())
-                        .await
-                        .unwrap();
-                    write_half.write_all(&data[..file_size]).await.unwrap();
-                    write_half.flush().await.unwrap();
-                });
-                let mut buf = [0u8; size_of::<usize>()];
-                read_half
-                    .read_exact(&mut buf)
-                    .await
-                    .expect("socket closed unexpectedly");
-                assert_eq!(usize::from_le_bytes(buf), file_size);
-                jh.abort();
-            });
-            jh_vec.push(jh);
-        }
-        for jh in jh_vec.into_iter() {
-            jh.await.expect("Join handle panicked");
-        }
+    // 3. Start long-running request that takes the spot for the IP
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let started = Instant::now();
+    let udp_socket = UdpSocket::bind("127.0.0.1:0")
+        .await
+        .expect("UDP connection failed");
+    udp_socket
+        .connect(format!("127.0.0.1:12345"))
+        .await
+        .unwrap();
+    udp_socket.send(b"0123456789").await.unwrap();
+    let jh = tokio::spawn(async move {
+        let mut data = [0u8; 16];
+        assert_eq!(
+            timeout(Duration::from_secs(6), async {
+                udp_socket.recv(&mut data).await.unwrap()
+            })
+            .await
+            .unwrap(),
+            2
+        );
+        assert_eq!(&data[..2], b"OK");
+    });
+
+    // 4. Start request that gets rate-limited from IP connection exhaustion
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let udp_socket = UdpSocket::bind("127.0.0.1:0")
+        .await
+        .expect("UDP connection failed");
+    udp_socket
+        .connect(format!("127.0.0.1:12345"))
+        .await
+        .unwrap();
+    udp_socket.send(b"0123456789").await.unwrap();
+    let jh2 = tokio::spawn(async move {
+        let mut data = [0u8; 16];
+        assert!(
+            timeout(Duration::from_secs(6), async {
+                udp_socket.recv(&mut data).await.unwrap()
+            })
+            .await
+            .is_err()
+        );
+    });
+
+    // 5. Start request from different IP that succeeds
+    let udp_socket = UdpSocket::bind("[::1]:0")
+        .await
+        .expect("UDP connection failed");
+    udp_socket.connect(format!("[::1]:12345")).await.unwrap();
+    udp_socket.send(b"0123456789").await.unwrap();
+    assert!(started.elapsed() < Duration::from_secs(5));
+    let mut data = [0u8; 16];
+    assert_eq!(
+        timeout(Duration::from_secs(6), async {
+            udp_socket.recv(&mut data).await.unwrap()
+        })
+        .await
+        .unwrap(),
+        2
+    );
+    assert!(started.elapsed() > Duration::from_secs(5));
+    assert_eq!(&data[..2], b"OK");
+
+    timeout(Duration::from_secs(10), async move {
+        jh.await.unwrap();
+        jh2.await.unwrap();
     })
     .await
-    .expect("Timeout waiting for test to finish.");
+    .expect("timeout waiting for join handle to finish");
 }
 
 struct SshClient;
@@ -182,23 +198,13 @@ impl russh::client::Handler for SshClient {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
-            let mut len_buf = [0u8; size_of::<usize>()];
             let mut stream = channel.into_stream();
-            stream.read_exact(&mut len_buf).await.unwrap();
-            let total_size = usize::from_le_bytes(len_buf);
-            let mut size = total_size;
-            let mut buf = BytesMut::new();
-            while let Ok(n) = stream.read_buf(&mut buf).await {
-                if n == 0 {
-                    return;
-                }
-                buf.truncate(0);
-                size = size.saturating_sub(n);
-                if size == 0 {
-                    break;
-                }
-            }
-            stream.write_all(&len_buf[..]).await.unwrap();
+            let len = stream.read_u16().await.unwrap();
+            let mut buf = [0; 32];
+            stream.read_exact(&mut buf[..len as usize]).await.unwrap();
+            assert_eq!(&buf[..len as usize], b"0123456789");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            stream.write_all(&b"\x00\x02OK"[..]).await.unwrap();
             stream.flush().await.unwrap();
         });
         Ok(())

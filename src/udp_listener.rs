@@ -24,15 +24,9 @@ pub(crate) fn get_udp_socket<A: ToSocketAddrs>(addr: A) -> io::Result<UdpSocket>
         socket.set_only_v6(false)?;
     }
 
-    // On platforms with Berkeley-derived sockets, this allows to quickly
-    // rebind a socket, without needing to wait for the OS to clean up the
-    // previous one.
-    //
-    // On Windows, this allows rebinding sockets which are actively in use,
-    // which allows “socket hijacking”, so we explicitly don't set it here.
-    // https://docs.microsoft.com/en-us/windows/win32/winsock/using-so-reuseaddr-and-so-exclusiveaddruse
-    #[cfg(not(windows))]
     socket.set_reuse_address(true)?;
+    #[cfg(not(windows))]
+    socket.set_reuse_port(true)?;
 
     socket.bind(&addr.into())?;
 

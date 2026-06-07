@@ -119,7 +119,7 @@ async fn tcp_multi_stream_upload() {
         "authentication didn't succeed"
     );
     session
-        .tcpip_forward("localhost", 12345)
+        .tcpip_forward("tcp.sandhole", 12345)
         .await
         .expect("tcpip_forward failed");
 

@@ -127,6 +127,10 @@ async fn admin_interface() {
         .tcpip_forward("", 23456)
         .await
         .expect("tcpip_forward failed");
+    session_one
+        .tcpip_forward("udp.sandhole", 34567)
+        .await
+        .expect("tcpip_forward failed");
     let ssh_client_two = SshClient;
     let mut session_two =
         russh::client::connect(Default::default(), "127.0.0.1:18022", ssh_client_two)
@@ -226,7 +230,7 @@ async fn admin_interface() {
         }
         let _ = hide_cursor_tx.send(parser.screen().hide_cursor());
     });
-    if timeout(Duration::from_secs(5), async move {
+    if timeout(Duration::from_secs(6), async move {
         // 4a. Validate header, system information, and HTTP tab data
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",
@@ -421,7 +425,66 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4h. Close user details, switch tabs, and validate alias tab data
+        // 4h. Close user details, switch tabs, and validate UDP tab data
+        writer
+            .write_all(CMD_ESC)
+            .await
+            .expect("channel write failed");
+        sleep(Duration::from_millis(200)).await;
+        writer
+            .write_all(CMD_TAB)
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"System information",
+            r"  CPU%  ",
+            r" Memory ",
+            r"   TX   ",
+            r"   RX   ",
+            r"UDP services",
+            r"34567",
+            r"SHA256:GehKyA\S*",
+            r"127\.0\.0\.1:\d{4,5}",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 4i. View UDP user details
+        writer
+            .write_all(CMD_UP)
+            .await
+            .expect("channel write failed");
+        sleep(Duration::from_millis(200)).await;
+        writer
+            .write_all(CMD_ENTER)
+            .await
+            .expect("channel write failed");
+        let search_strings: Vec<Regex> = [
+            r"Sandhole admin v\d+\.\d+\.\d+",
+            r"User details",
+            r"SHA256:GehKyA\S*",
+            r"Type: User",
+            r"Key comment: key1",
+            r"Algorithm: ssh-ed25519",
+            r" <Esc> Close  <Delete> Remove ",
+        ]
+        .into_iter()
+        .map(|re| Regex::new(re).expect("Invalid regex"))
+        .collect();
+        loop {
+            let screen = rx.recv().await.unwrap();
+            if search_strings.iter().all(|re| re.is_match(&screen)) {
+                break;
+            }
+        }
+        // 4j. Close user details, switch tabs, and validate alias tab data
         writer
             .write_all(CMD_ESC)
             .await
@@ -452,7 +515,7 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4i. View TCP user details
+        // 4k. View alias user details
         writer
             .write_all(CMD_UP)
             .await
@@ -479,7 +542,7 @@ async fn admin_interface() {
                 break;
             }
         }
-        // 4j. Close user details and go back one tab
+        // 4l. Close user details and go back one tab
         writer
             .write_all(CMD_ESC)
             .await
@@ -496,8 +559,8 @@ async fn admin_interface() {
             r" Memory ",
             r"   TX   ",
             r"   RX   ",
-            r"TCP services",
-            r"23456",
+            r"UDP services",
+            r"34567",
             r"SHA256:GehKyA\S*",
             r"127\.0\.0\.1:\d{4,5}",
         ]

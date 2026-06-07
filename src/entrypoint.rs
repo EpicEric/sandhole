@@ -84,9 +84,9 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     #[cfg(not(coverage_nightly))]
     tracing::info!("Starting Sandhole...");
     // Check configuration flags for issues or other operations
-    if config.disable_http && config.disable_tcp && config.disable_aliasing {
+    if config.disable_http && config.disable_tcp && config.disable_udp && config.disable_aliasing {
         return Err(ServerError::InvalidConfig(
-            "One of HTTP, TCP, or aliasing must be enabled".into(),
+            "One of HTTP, TCP, UDP, or aliasing must be enabled".into(),
         )
         .into());
     }

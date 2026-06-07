@@ -188,15 +188,11 @@ impl russh::client::Handler for SshClient {
         tokio::spawn(async move {
             match &mut channel.wait().await.unwrap() {
                 russh::ChannelMsg::Data { data } => {
-                    assert_eq!(data.to_vec(), [0x00, 0x04, b'P', b'i', b'n', b'g']);
+                    assert_eq!(data.to_vec(), b"\x00\x04Ping");
                 }
                 msg => panic!("Unexpected message {msg:?}"),
             }
-            channel
-                .data(&[0x00, 0x04, b'P', b'o', b'n', b'g'][..])
-                .await
-                .unwrap();
-            channel.eof().await.unwrap();
+            channel.data(&b"\x00\x04Pong"[..]).await.unwrap();
         });
         Ok(())
     }

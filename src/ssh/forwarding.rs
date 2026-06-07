@@ -91,6 +91,7 @@ pub(crate) trait ForwardingHandlerStrategy {
 
 pub(crate) struct Forwarder;
 
+pub(crate) const TCP_ADDRESS: &str = "tcp.sandhole";
 pub(crate) const UDP_ADDRESS: &str = "udp.sandhole";
 
 impl Forwarder {
@@ -119,12 +120,12 @@ impl Forwarder {
             UdpForwardingHandler
                 .remote_forwarding(context, address, port, handle)
                 .await
-        } else if context.server.is_alias(address) {
-            AliasForwardingHandler
+        } else if address == TCP_ADDRESS || !context.server.is_alias(address) {
+            TcpForwardingHandler
                 .remote_forwarding(context, address, port, handle)
                 .await
         } else {
-            TcpForwardingHandler
+            AliasForwardingHandler
                 .remote_forwarding(context, address, port, handle)
                 .await
         }
@@ -158,13 +159,13 @@ impl Forwarder {
                     .cancel_remote_forwarding(context, address, port)
                     .await
             }
-            _ if context.server.is_alias(address) => {
-                AliasForwardingHandler
+            _ if address == TCP_ADDRESS || !context.server.is_alias(address) => {
+                TcpForwardingHandler
                     .cancel_remote_forwarding(context, address, port)
                     .await
             }
             _ => {
-                TcpForwardingHandler
+                AliasForwardingHandler
                     .cancel_remote_forwarding(context, address, port)
                     .await
             }
@@ -216,8 +217,8 @@ impl Forwarder {
                     channel,
                 )
                 .await
-        } else if context.server.is_alias(address) {
-            AliasForwardingHandler
+        } else if address == TCP_ADDRESS || !context.server.is_alias(address) {
+            TcpForwardingHandler
                 .local_forwarding(
                     context,
                     address,
@@ -228,7 +229,7 @@ impl Forwarder {
                 )
                 .await
         } else {
-            TcpForwardingHandler
+            AliasForwardingHandler
                 .local_forwarding(
                     context,
                     address,
@@ -1158,6 +1159,27 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                     address,
                     error,
                     "  = hint: specify a different port".dimmed(),
+                )
+                .into_bytes(),
+            );
+            return Ok(false);
+        } else if address.ends_with(".sandhole") {
+            // Port 10 is reserved for admin aliases
+            let error = eyre!("TLD .sandhole is reserved by Sandhole");
+            #[cfg(not(coverage_nightly))]
+            tracing::debug!(
+                peer = %context.peer, alias = %address, %error,
+                "Failed to bind address for alias.",
+            );
+            let _ = context.tx.send(
+                format!(
+                    "{} {} Cannot listen on address {}:{} ({})\r\n{}\r\n",
+                    Utc::now().to_rfc3339().dimmed(),
+                    " Error ".black().on_red().bold(),
+                    address,
+                    port,
+                    error,
+                    "  = hint: specify a different address".dimmed(),
                 )
                 .into_bytes(),
             );

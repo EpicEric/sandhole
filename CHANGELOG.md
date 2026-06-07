@@ -4,11 +4,14 @@
 
 ### Added
 
+- Add experimental UDP support via `udp.sandhole` alias.
+- Add `tcp.sandhole` alias for TCP proxying.
 - Add `--completions` CLI flag.
 
 ### Changed
 
 - **BREAKING**: Use gauges for `system_used_memory` and `system_total_memory`.
+- **BREAKING**: Reserve `.sandhole` aliases for Sandhole.
 - Update dependencies.
 
 ## 0.9.5 (2026-05-25)

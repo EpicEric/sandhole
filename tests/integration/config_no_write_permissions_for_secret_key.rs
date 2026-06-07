@@ -6,7 +6,7 @@ use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{fs, time::timeout};
 
 /// This test ensures that setting a read-only directory for the secret key
-/// results in an error when launching Sandhole.
+/// results in an error when launching Sandhole without a key.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn config_no_write_permissions_for_secret_key() {
     // 1. Create random temporary directory and fail to initialize Sandhole
@@ -58,10 +58,6 @@ async fn config_no_write_permissions_for_secret_key() {
         )),
         "--listen-address=127.0.0.1",
         "--ssh-port=18022",
-        "--disable-http",
-        "--disable-tcp",
-        "--disable-aliasing",
-        "--acme-use-staging",
     ]);
     if timeout(Duration::from_secs(5), async {
         assert!(entrypoint(config).await.is_err());

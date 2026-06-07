@@ -348,6 +348,10 @@ async fn admin_remove_user() {
             .write_all(CMD_SHIFT_TAB)
             .await
             .expect("channel write failed");
+        writer
+            .write_all(CMD_SHIFT_TAB)
+            .await
+            .expect("channel write failed");
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",
             r"TCP services",

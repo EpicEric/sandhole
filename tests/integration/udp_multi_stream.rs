@@ -1,6 +1,5 @@
 use std::{sync::Arc, time::Duration};
 
-use bytes::BytesMut;
 use clap::Parser;
 
 use rand::Rng;
@@ -15,16 +14,16 @@ use russh::{
 use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
+    net::{TcpStream, UdpSocket},
     time::{sleep, timeout},
 };
 
 use crate::common::SandholeHandle;
 
-/// This test ensures that a TCP service can handle multiple big uploads at the
+/// This test ensures that an UDP service can handle multiple big requests at the
 /// same time (mostly for profiling purposes).
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn tcp_multi_stream_download() {
+async fn udp_multi_stream() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -117,37 +116,47 @@ async fn tcp_multi_stream_download() {
         "authentication didn't succeed"
     );
     session
-        .tcpip_forward("tcp.sandhole", 12345)
+        .tcpip_forward("udp.sandhole", 12345)
         .await
         .expect("tcpip_forward failed");
 
-    // 3. Connect to the TCP port of our proxy with out multiple streams
+    // 3. Connect to the UDP port of our proxy with out multiple streams
     let mut data = vec![0u8; 20_000_000];
     rand::rng().fill_bytes(&mut data);
     let data: &'static [u8] = data.leak();
     timeout(Duration::from_secs(30), async move {
         let mut jh_vec = vec![];
         for file_size in [7_500_000usize, 10_000_000, 15_000_000, 20_000_000] {
-            let tcp_stream = TcpStream::connect("127.0.0.1:12345")
+            let udp_socket_read = Arc::new(
+                UdpSocket::bind("127.0.0.1:0")
+                    .await
+                    .expect("UDP connection failed"),
+            );
+            udp_socket_read
+                .connect(format!("127.0.0.1:12345"))
                 .await
-                .expect("TCP connection failed");
-            tcp_stream.set_nodelay(true).unwrap();
-            let (mut read_half, mut write_half) = tcp_stream.into_split();
+                .unwrap();
+            let udp_socket_write = Arc::clone(&udp_socket_read);
             let jh = tokio::spawn(async move {
                 let jh = tokio::spawn(async move {
-                    write_half
-                        .write_all(&file_size.to_le_bytes())
-                        .await
-                        .unwrap();
-                    write_half.write_all(&data[..file_size]).await.unwrap();
-                    write_half.flush().await.unwrap();
+                    let mut buf = [0u8; 32];
+                    for chunk in data[..file_size].chunks(548) {
+                        udp_socket_write.send(chunk).await.unwrap();
+                        assert_eq!(
+                            udp_socket_read
+                                .recv(&mut buf)
+                                .await
+                                .expect("socket closed unexpectedly"),
+                            size_of::<usize>()
+                        );
+                        assert_eq!(
+                            u16::from_be_bytes(
+                                *buf[..size_of::<u16>()].as_array().expect("size checked")
+                            ) as usize,
+                            chunk.len()
+                        );
+                    }
                 });
-                let mut buf = [0u8; size_of::<usize>()];
-                read_half
-                    .read_exact(&mut buf)
-                    .await
-                    .expect("socket closed unexpectedly");
-                assert_eq!(usize::from_le_bytes(buf), file_size);
                 jh.abort();
             });
             jh_vec.push(jh);
@@ -182,23 +191,15 @@ impl russh::client::Handler for SshClient {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
-            let mut len_buf = [0u8; size_of::<usize>()];
+            let mut buf = [0u8; u16::MAX as usize];
             let mut stream = channel.into_stream();
-            stream.read_exact(&mut len_buf).await.unwrap();
-            let total_size = usize::from_le_bytes(len_buf);
-            let mut size = total_size;
-            let mut buf = BytesMut::new();
-            while let Ok(n) = stream.read_buf(&mut buf).await {
-                if n == 0 {
-                    return;
-                }
-                buf.truncate(0);
-                size = size.saturating_sub(n);
-                if size == 0 {
-                    break;
-                }
-            }
-            stream.write_all(&len_buf[..]).await.unwrap();
+            let n = stream.read_u16().await.unwrap();
+            stream.read_exact(&mut buf[..n as usize]).await.unwrap();
+            stream
+                .write_all(&size_of::<u16>().to_be_bytes()[..])
+                .await
+                .unwrap();
+            stream.write_all(&n.to_be_bytes()[..]).await.unwrap();
             stream.flush().await.unwrap();
         });
         Ok(())

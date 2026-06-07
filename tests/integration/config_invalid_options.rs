@@ -16,7 +16,7 @@ use crate::common::SandholeHandle;
 /// Sandhole.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn config_invalid_options() {
-    // 1. Fail to initialize Sandhole if HTTP, TCP, and aliasing are all disabled
+    // 1. Fail to initialize Sandhole if HTTP, TCP, UDP, and aliasing are all disabled
     let config = ApplicationConfig::parse_from([
         "sandhole",
         "--domain=foobar.tld",
@@ -49,6 +49,7 @@ async fn config_invalid_options() {
         "--ssh-port=18022",
         "--disable-http",
         "--disable-tcp",
+        "--disable-udp",
         "--disable-aliasing",
         "--acme-use-staging",
     ]);

@@ -1,7 +1,4 @@
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
@@ -11,17 +8,15 @@ use russh::{
 };
 use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
-    io::AsyncReadExt,
     net::TcpStream,
     time::{sleep, timeout},
 };
 
 use crate::common::SandholeHandle;
 
-/// This test ensures that no more TCP connections from the same IP
-/// than the specified limit are able to connect at the same time.
+/// This test ensures that remote forwarding is not allowed for low UDP ports.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn tcp_ip_connections_limit() {
+async fn udp_reject_low_ports() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -52,15 +47,16 @@ async fn tcp_ip_connections_limit() {
             std::env::var("CARGO_MANIFEST_DIR").unwrap()
         )),
         "--disable-directory-creation",
-        "--listen-address=::",
+        "--listen-address=127.0.0.1",
         "--ssh-port=18022",
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
+        "--bind-hostnames=none",
         "--allow-requested-ports",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
-        "--max-simultaneous-connections-per-ip=1",
+        "--http-request-timeout=5s",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -74,7 +70,7 @@ async fn tcp_ip_connections_limit() {
         panic!("Timeout waiting for Sandhole to start.")
     };
 
-    // 2. Start SSH client that will be proxied
+    // 2. Start SSH client that will fail to bind
     let key = load_secret_key(
         std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
             .join("tests/data/private_keys/key1"),
@@ -99,46 +95,18 @@ async fn tcp_ip_connections_limit() {
             .success(),
         "authentication didn't succeed"
     );
-    session
-        .tcpip_forward("localhost", 12345)
-        .await
-        .expect("tcpip_forward failed");
-
-    // 3. Start long-running request that takes the spot for the IP
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let started = Instant::now();
-    let mut tcp_stream = TcpStream::connect("127.0.0.1:12345")
-        .await
-        .expect("TCP connection failed");
-    let jh = tokio::spawn(async move {
-        let mut data = [0u8; 10];
-        tcp_stream.read_exact(&mut data).await.unwrap();
-        assert_eq!(data, b"0123456789"[..]);
-    });
-
-    // 4. Start request that gets rate-limited from IP connection exhaustion
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let mut tcp_stream = TcpStream::connect("127.0.0.1:12345")
-        .await
-        .expect("TCP connection failed");
-    let mut data = [0u8; 10];
-    assert!(tcp_stream.read_exact(&mut data).await.is_err());
-
-    // 5. Start request from different IP that succeeds
-    let mut tcp_stream = TcpStream::connect("[::1]:12345")
-        .await
-        .expect("TCP connection failed");
-    let mut data = [0u8; 10];
-    assert!(started.elapsed() < Duration::from_secs(5));
-    tcp_stream.read_exact(&mut data).await.unwrap();
-    assert!(started.elapsed() > Duration::from_secs(5));
-    assert_eq!(data, b"0123456789"[..]);
-
-    timeout(Duration::from_secs(10), async move {
-        jh.await.unwrap();
-    })
-    .await
-    .expect("timeout waiting for join handle to finish");
+    assert!(
+        session.tcpip_forward("udp.sandhole", 20555).await.is_ok(),
+        "should allow binding on high port"
+    );
+    assert!(
+        session.tcpip_forward("udp.sandhole", 1024).await.is_ok(),
+        "should allow binding ports greater than or equal to 1024"
+    );
+    assert!(
+        session.tcpip_forward("udp.sandhole", 1023).await.is_err(),
+        "shouldn't allow binding ports under 1024"
+    );
 }
 
 struct SshClient;
@@ -163,10 +131,7 @@ impl russh::client::Handler for SshClient {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            channel.data(&b"0123456789"[..]).await.unwrap();
-            channel.eof().await.unwrap();
-            channel.close().await.unwrap();
+            channel.data(&b"\x00\x13Hello, world!"[..]).await.unwrap();
         });
         Ok(())
     }
