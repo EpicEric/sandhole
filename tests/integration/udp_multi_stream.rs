@@ -149,12 +149,7 @@ async fn udp_multi_stream() {
                                 .expect("socket closed unexpectedly"),
                             size_of::<usize>()
                         );
-                        assert_eq!(
-                            u16::from_be_bytes(
-                                *buf[..size_of::<u16>()].as_array().expect("size checked")
-                            ) as usize,
-                            chunk.len()
-                        );
+                        assert_eq!(u16::from_be_bytes([buf[0], buf[1]]) as usize, chunk.len());
                     }
                 });
                 jh.abort();
