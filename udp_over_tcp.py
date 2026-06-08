@@ -58,9 +58,8 @@ class UdpProxyProtocol(asyncio.Protocol):
 
 # -- Remote forwarding --
 class TcpServerProtocol(TcpProxyProtocol):
-    def __init__(self, udp_address, udp_port):
+    def __init__(self, udp_address):
         self.udp_address = udp_address
-        self.udp_port = udp_port
         self.task = None
         self.tcp_transport = None
         self.on_connection_lost = asyncio.get_running_loop().create_future()
@@ -80,7 +79,7 @@ class TcpServerProtocol(TcpProxyProtocol):
         loop = asyncio.get_running_loop()
         udp_transport, _ = await loop.create_datagram_endpoint(
             lambda: UdpClientProtocol(self.tcp_transport),
-            remote_addr=(self.udp_address, self.udp_port),
+            remote_addr=self.udp_address,
         )
         self.udp_transport = udp_transport
 
@@ -98,6 +97,9 @@ class UdpClientProtocol(UdpProxyProtocol):
     def __init__(self, tcp_transport):
         self.tcp_transport = tcp_transport
         self.buffered_data = []
+
+    def error_received(self, exc):
+        pass
 
 
 # -- Local forwarding --
@@ -183,7 +185,7 @@ async def main():
             udp_transport.close()
     else:
         server = await loop.create_server(
-            lambda: TcpServerProtocol(args.udp_address or "127.0.0.1", args.udp_port),
+            lambda: TcpServerProtocol((args.udp_address or "127.0.0.1", args.udp_port)),
             args.tcp_address or "0.0.0.0",
             args.tcp_port,
         )

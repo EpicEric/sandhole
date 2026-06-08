@@ -16,8 +16,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     admin::interface::AdminInterface, connection_handler::ConnectionHttpData,
-    droppable_handle::DroppableHandle, ip::IpFilter, quota::TokenHolder, ssh::FingerprintFn,
-    sock_addr_alias::SockAddrAlias,
+    droppable_handle::DroppableHandle, ip::IpFilter, quota::TokenHolder,
+    sock_addr_alias::SockAddrAlias, ssh::FingerprintFn,
 };
 
 pub(crate) struct ProxyAutoCancellation {

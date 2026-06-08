@@ -1,4 +1,4 @@
-# UDP-over-TCP
+# UDP-over-TCP (experimental)
 
 Sandhole has experimental support for UDP over SSH, with a thin TCP-based protocol.
 

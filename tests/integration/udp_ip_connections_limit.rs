@@ -111,7 +111,7 @@ async fn udp_ip_connections_limit() {
         .await
         .expect("UDP connection failed");
     udp_socket
-        .connect(format!("127.0.0.1:12345"))
+        .connect("127.0.0.1:12345".to_string())
         .await
         .unwrap();
     udp_socket.send(b"0123456789").await.unwrap();
@@ -134,7 +134,7 @@ async fn udp_ip_connections_limit() {
         .await
         .expect("UDP connection failed");
     udp_socket
-        .connect(format!("127.0.0.1:12345"))
+        .connect("127.0.0.1:12345".to_string())
         .await
         .unwrap();
     udp_socket.send(b"0123456789").await.unwrap();
@@ -153,7 +153,7 @@ async fn udp_ip_connections_limit() {
     let udp_socket = UdpSocket::bind("[::1]:0")
         .await
         .expect("UDP connection failed");
-    udp_socket.connect(format!("[::1]:12345")).await.unwrap();
+    udp_socket.connect("[::1]:12345".to_string()).await.unwrap();
     udp_socket.send(b"0123456789").await.unwrap();
     assert!(started.elapsed() < Duration::from_secs(5));
     let mut data = [0u8; 16];

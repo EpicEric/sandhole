@@ -8,8 +8,8 @@ use rustls_pki_types::DnsName;
 use crate::{
     SandholeServer,
     admin::interface::AdminInterface,
-    ssh::{AuthenticatedData, ServerHandlerSender, auth::UserSessionRestriction},
     sock_addr_alias::SockAddrAlias,
+    ssh::{AuthenticatedData, ServerHandlerSender, auth::UserSessionRestriction},
 };
 
 #[bitflags]

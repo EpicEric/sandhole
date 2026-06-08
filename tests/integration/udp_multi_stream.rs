@@ -133,7 +133,7 @@ async fn udp_multi_stream() {
                     .expect("UDP connection failed"),
             );
             udp_socket_read
-                .connect(format!("127.0.0.1:12345"))
+                .connect("127.0.0.1:12345".to_string())
                 .await
                 .unwrap();
             let udp_socket_write = Arc::clone(&udp_socket_read);

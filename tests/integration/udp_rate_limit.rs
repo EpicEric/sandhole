@@ -119,13 +119,19 @@ async fn udp_rate_limit() {
         .await
         .expect("UDP connection failed");
     udp_socket
-        .connect(format!("127.0.0.1:12345"))
+        .connect("127.0.0.1:12345".to_string())
         .await
         .unwrap();
     let start = Instant::now();
     udp_socket.send(&data[..]).await.unwrap();
     let mut buf = [0u8; 32];
-    assert_eq!(udp_socket.recv(&mut buf).await.unwrap(), 2);
+    assert_eq!(
+        timeout(Duration::from_secs(5), udp_socket.recv(&mut buf))
+            .await
+            .unwrap()
+            .unwrap(),
+        2
+    );
     let elapsed = start.elapsed();
     assert_eq!(&buf[..2], b"OK");
     assert!(

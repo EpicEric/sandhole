@@ -16,7 +16,7 @@
 - [Exposing your first service](./exposing_your_first_service.md)
 - [Local forwarding](./local_forwarding.md)
 - [Custom domains](./custom_domains.md)
-- [UDP-over-TCP](./udp_over_tcp.md)
+- [UDP-over-TCP (experimental)](./udp_over_tcp.md)
 - [Advanced options](./advanced_options.md)
 
 # Reference
