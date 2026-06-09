@@ -535,6 +535,15 @@ pub struct ApplicationConfig {
     /// By default, these connections are not terminated by Sandhole.
     #[arg(long, value_parser = validate_duration, value_name = "DURATION")]
     pub tcp_connection_timeout: Option<Duration>,
+
+    /// How long until SSH channels from UDP sockets are automatically garbage-collected.
+    #[arg(
+        long,
+        default_value = "60s",
+        value_parser = validate_duration,
+        value_name = "DURATION"
+    )]
+    pub udp_timeout: Duration,
 }
 
 fn validate_domain(value: &str) -> color_eyre::Result<String> {
@@ -655,7 +664,8 @@ mod application_config_tests {
                 unproxied_connection_timeout: None,
                 authentication_request_timeout: Duration::from_secs(5),
                 http_request_timeout: None,
-                tcp_connection_timeout: None
+                tcp_connection_timeout: None,
+                udp_timeout: Duration::from_secs(60),
             }
         )
     }
@@ -725,6 +735,7 @@ mod application_config_tests {
             "--authentication-request-timeout=6s",
             "--http-request-timeout=15s",
             "--tcp-connection-timeout=30s",
+            "--udp-timeout=30s",
         ]);
         assert_eq!(
             config,
@@ -796,7 +807,8 @@ mod application_config_tests {
                 unproxied_connection_timeout: Some(Duration::from_secs(4)),
                 authentication_request_timeout: Duration::from_secs(6),
                 http_request_timeout: Some(Duration::from_secs(15)),
-                tcp_connection_timeout: Some(Duration::from_secs(30))
+                tcp_connection_timeout: Some(Duration::from_secs(30)),
+                udp_timeout: Duration::from_secs(30),
             }
         )
     }

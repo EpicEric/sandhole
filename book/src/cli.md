@@ -7,7 +7,8 @@ Sandhole exposes several options, which you can see by running `sandhole --help`
 <pre class="terminal">
 Expose HTTP/SSH/TCP services through SSH port forwarding.
 
-<b><u>Usage:</u></b> <b>sandhole</b> [OPTIONS] &lt;--domain &lt;DOMAIN&gt;|--no-domain&gt;
+<b><u>Usage:</u></b> <b>sandhole</b> [OPTIONS] &lt;--domain &lt;DOMAIN&gt;|--no-domain|--completions &lt;COMPLETIONS&gt;&gt;
+
 
 <b><u>Options:</u></b>
       <b>--domain</b> &lt;DOMAIN&gt;
@@ -419,6 +420,12 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           forwardings) are automatically garbage-collected.
 
           By default, these connections are not terminated by Sandhole.
+
+      <b>--udp-timeout</b> &lt;DURATION&gt;
+          How long until SSH channels from UDP sockets are automatically
+          garbage-collected
+
+          [default: 60s]
 
   <b>-h</b>, <b>--help</b>
           Print help (see a summary with &#39;-h&#39;)

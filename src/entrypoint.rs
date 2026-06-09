@@ -341,6 +341,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .conn_manager(Arc::clone(&udp_connections))
             .ip_filter(Arc::clone(&ip_filter))
             .disable_udp_logs(config.disable_udp_logs)
+            .udp_timeout(config.udp_timeout)
             .build(),
     );
     // Add udp handler service as a listener for udp port updates.

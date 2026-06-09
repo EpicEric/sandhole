@@ -3,6 +3,7 @@ use std::{
     mem::size_of,
     net::{IpAddr, SocketAddr},
     sync::Arc,
+    time::Duration,
 };
 
 use crate::{
@@ -19,10 +20,13 @@ use ahash::RandomState;
 use bon::Builder;
 use color_eyre::eyre::Context;
 use dashmap::DashMap;
+use futures_util::pin_mut;
 use metrics::counter;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, WriteHalf},
+    select,
     sync::Mutex,
+    time::sleep,
 };
 
 pub const MAX_PACKET_SIZE: usize = size_of::<u16>() + u16::MAX as usize;
@@ -38,7 +42,10 @@ fn datagram_buffer() -> Box<[u8; MAX_PACKET_SIZE]> {
 }
 
 // Type for a UDP socket with the write and read halves.
-type UdpSocketHandler = (Arc<Mutex<WriteHalf<SshChannel>>>, DroppableHandle<()>);
+struct UdpSocketHandler {
+    write: Arc<Mutex<WriteHalf<SshChannel>>>,
+    _read_task: DroppableHandle<()>,
+}
 
 // Service that handles creating UDP sockets for reverse forwarding connections.
 #[derive(Builder)]
@@ -57,6 +64,8 @@ pub(crate) struct UdpHandler {
     ip_filter: Arc<IpFilter>,
     // Whether to send UDP logs to the SSH handles behind the forwarded connections.
     disable_udp_logs: bool,
+    // How long until SSH channels from UDP sockets are automatically garbage-collected.
+    udp_timeout: Duration,
 }
 
 pub(crate) trait UdpPortHandler {
@@ -99,8 +108,10 @@ impl UdpPortHandler for Arc<UdpHandler> {
                             .copy_from_slice(&buf[..len]);
 
                         // Check for an existing SSH channel
-                        if let Some(entry) = clone.sockets.get(&(port, address)) {
-                            let channel = Arc::clone(&entry.value().0);
+                        if let Some(mut entry) = clone.sockets.get_mut(&(port, address)) {
+                            let value = entry.value_mut();
+                            let channel = Arc::clone(&value.write);
+                            drop(entry);
                             if channel
                                 .lock()
                                 .await
@@ -145,39 +156,54 @@ impl UdpPortHandler for Arc<UdpHandler> {
                                 continue;
                             }
 
-                            let read_handle = DroppableHandle(tokio::spawn(async move {
+                            let clone_2 = Arc::clone(&clone);
+                            let _read_task = DroppableHandle(tokio::spawn(async move {
                                 let mut write_buf = datagram_buffer();
                                 loop {
-                                    match ssh_read.read_u16().await {
-                                        Ok(len) => {
-                                            if let Err(error) = ssh_read
-                                                .read_exact(&mut write_buf[..len as usize])
-                                                .await
-                                            {
+                                    let sleep_fut = sleep(clone_2.udp_timeout);
+                                    let read_fut = async {
+                                        match ssh_read.read_u16().await {
+                                            Ok(len) => {
+                                                if let Err(error) = ssh_read
+                                                    .read_exact(&mut write_buf[..len as usize])
+                                                    .await
+                                                {
+                                                    #[cfg(not(coverage_nightly))]
+                                                    tracing::warn!(%port, %error, "Error reading UDP datagram from SSH channel.");
+                                                    return false;
+                                                } else if let Err(error) = udp_write
+                                                    .send_to(&write_buf[..len as usize], address)
+                                                    .await
+                                                {
+                                                    #[cfg(not(coverage_nightly))]
+                                                    tracing::warn!(%port, %error, "Error reading from SSH channel for UDP.");
+                                                    return false;
+                                                }
+                                                true
+                                            }
+                                            Err(error) => {
                                                 #[cfg(not(coverage_nightly))]
-                                                tracing::warn!(%port, %error, "Error reading UDP datagram from SSH channel.");
-                                                break;
-                                            } else if let Err(error) = udp_write
-                                                .send_to(&write_buf[..len as usize], address)
-                                                .await
-                                            {
-                                                #[cfg(not(coverage_nightly))]
-                                                tracing::warn!(%port, %error, "Error reading from SSH channel for UDP.");
-                                                break;
+                                                tracing::warn!(%port, %error, "Error reading UDP datagram size from SSH channel.");
+                                                false
                                             }
                                         }
-                                        Err(error) => {
-                                            #[cfg(not(coverage_nightly))]
-                                            tracing::warn!(%port, %error, "Error reading UDP datagram size from SSH channel.");
-                                            break;
-                                        }
+                                    };
+                                    pin_mut!(sleep_fut);
+                                    pin_mut!(read_fut);
+                                    select! {
+                                        success = read_fut => if !success { break; },
+                                        _ = sleep_fut => break,
                                     }
                                 }
+                                clone_2.sockets.remove(&(port, address));
                             }));
 
                             clone.sockets.insert(
                                 (port, address),
-                                (Arc::new(Mutex::new(ssh_write)), read_handle),
+                                UdpSocketHandler {
+                                    write: Arc::new(Mutex::new(ssh_write)),
+                                    _read_task,
+                                },
                             );
                         }
                     }

@@ -105,5 +105,6 @@ mod udp_no_valid_forwarding;
 mod udp_rate_limit;
 mod udp_reject_low_ports;
 mod udp_reject_port_above_max;
+mod udp_timeout;
 mod websocket_connection;
 mod websocket_timeout;

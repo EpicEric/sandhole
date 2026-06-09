@@ -7,10 +7,11 @@
 - Add experimental UDP support via `udp.sandhole` alias.
 - Add `tcp.sandhole` alias for TCP proxying.
 - Add `--completions` CLI flag.
+- Add `--udp-timeout` CLI flag.
 
 ### Changed
 
-- **BREAKING**: Use gauges for `system_used_memory` and `system_total_memory`.
+- **BREAKING**: Use gauges for `system_used_memory` and `system_total_memory` Prometheus metrics.
 - **BREAKING**: Reserve `.sandhole` aliases for Sandhole.
 - Update dependencies.
 

@@ -1,14 +1,10 @@
-use std::time::Instant;
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
-
-use rand::Rng;
-use russh::ChannelMsg;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     Channel,
     client::{Msg, Session},
-    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
 };
 use sandhole::{ApplicationConfig, entrypoint};
 use tokio::net::UdpSocket;
@@ -19,10 +15,10 @@ use tokio::{
 
 use crate::common::SandholeHandle;
 
-/// This test ensures that rate limiting works as expected for UDP
-/// services.
+/// This test ensures that a UDP socket times out after a certain time
+/// configured by the server.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn udp_rate_limit() {
+async fn udp_timeout() {
     // 1. Initialize Sandhole
     let config = ApplicationConfig::parse_from([
         "sandhole",
@@ -63,8 +59,7 @@ async fn udp_rate_limit() {
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
         "--http-request-timeout=5s",
-        "--buffer-size=20KB",
-        "--rate-limit-per-user=20KB",
+        "--udp-timeout=500ms",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -113,47 +108,64 @@ async fn udp_rate_limit() {
         .expect("tcpip_forward failed");
 
     // 3. Connect to the UDP port of our proxy
-    let mut data = vec![0u8; 55_000];
-    rand::rng().fill_bytes(&mut data);
     let udp_socket = UdpSocket::bind("127.0.0.1:0")
         .await
         .expect("UDP connection failed");
-    udp_socket
-        .connect("127.0.0.1:12345".to_string())
-        .await
-        .unwrap();
-    let start = Instant::now();
+    udp_socket.connect("127.0.0.1:12345").await.unwrap();
+
+    // 4. Send messages without timeout
     let mut buf = [0u8; 32];
-    let chunk_size = 548;
-    assert_ne!(
-        data.len() % chunk_size,
-        0,
-        "chunk_size should not equally divide the data"
-    );
-    let mut chunks = data.chunks_exact(chunk_size);
-    assert!(
-        timeout(Duration::from_secs(10), async {
-            for chunk in &mut chunks {
-                udp_socket.send(chunk).await.unwrap();
-                assert_eq!(udp_socket.recv(&mut buf).await.unwrap(), 2);
-                assert_eq!(&buf[..2], b"OK");
-            }
-            udp_socket.send(chunks.remainder()).await.unwrap();
-            assert_eq!(udp_socket.recv(&mut buf).await.unwrap(), 4);
-            assert_eq!(&buf[..4], b"Done");
-        })
+    udp_socket.send(b"Some message").await.unwrap();
+    if timeout(Duration::from_secs(5), async {
+        assert_eq!(udp_socket.recv(&mut buf).await.unwrap(), 1);
+    })
+    .await
+    .is_err()
+    {
+        panic!("Timeout waiting for UDP socket to reply.")
+    };
+    assert_eq!(&buf[..1], b"1");
+    udp_socket.send(b"Another message").await.unwrap();
+    let mut buf = [0u8; 32];
+    if timeout(Duration::from_secs(5), async {
+        assert_eq!(udp_socket.recv(&mut buf).await.unwrap(), 1);
+    })
+    .await
+    .is_err()
+    {
+        panic!("Timeout waiting for UDP socket to reply.")
+    };
+    assert_eq!(&buf[..1], b"2");
+
+    // 5. Wait for timeout then receive same messages again
+    sleep(Duration::from_secs(1)).await;
+    udp_socket.send(b"Some message again").await.unwrap();
+    if timeout(Duration::from_secs(5), async {
+        assert_eq!(udp_socket.recv(&mut buf).await.unwrap(), 1);
+    })
+    .await
+    .is_err()
+    {
+        panic!("Timeout waiting for UDP socket to reply.")
+    };
+    assert_eq!(&buf[..1], b"1");
+    udp_socket.send(b"Another message again").await.unwrap();
+    let mut buf = [0u8; 32];
+    if timeout(Duration::from_secs(5), async {
+        assert_eq!(udp_socket.recv(&mut buf).await.unwrap(), 1);
+    })
+    .await
+    .is_err()
+    {
+        panic!("Timeout waiting for UDP socket to reply.")
+    };
+    assert_eq!(&buf[..1], b"2");
+
+    // 6. Attempt to close UDP forwarding
+    session_one
+        .cancel_tcpip_forward("udp.sandhole", 12345)
         .await
-        .is_ok()
-    );
-    let elapsed = start.elapsed();
-    assert!(
-        elapsed > Duration::from_millis(2_000),
-        "must've taken more than 2 seconds, but was {elapsed:?}"
-    );
-    assert!(
-        elapsed < Duration::from_millis(6_000),
-        "must've taken less than 6 seconds, but was {elapsed:?}"
-    );
+        .expect("cancel_tcpip_forward failed");
 }
 
 struct SshClient;
@@ -178,15 +190,23 @@ impl russh::client::Handler for SshClient {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
-            let mut expected_len = 55_000;
-            while let Some(msg) = channel.wait().await {
-                if let ChannelMsg::Data { data } = msg {
-                    expected_len -= u16::from_be_bytes([data[0], data[1]]);
-                    if expected_len == 0 {
-                        channel.data(&b"\x00\x04Done"[..]).await.unwrap();
-                        return;
-                    } else {
-                        channel.data(&b"\x00\x02OK"[..]).await.unwrap();
+            let mut counter = 0;
+            loop {
+                while let Some(msg) = &mut channel.wait().await {
+                    match msg {
+                        russh::ChannelMsg::Data { .. } => {
+                            counter += 1;
+                            channel
+                                .data(match counter {
+                                    1 => &b"\x00\x011"[..],
+                                    2 => &b"\x00\x012"[..],
+                                    _ => &b"\x00\x00"[..],
+                                })
+                                .await
+                                .unwrap();
+                        }
+                        russh::ChannelMsg::Close => break,
+                        msg => panic!("Unexpected message {msg:?}"),
                     }
                 }
             }
