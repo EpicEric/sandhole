@@ -1,0 +1,18 @@
+[package]
+name = "sandhole_socket"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88.0"
+description = "Sandhole utilities for handling TCP and UDP sockets."
+repository = "https://github.com/EpicEric/sandhole"
+homepage = "https://sandhole.com.br/"
+license = "MIT"
+authors = ["Eric Rodrigues Pires <eric@eric.dev.br>"]
+readme = "../README.md"
+keywords = ["ssh", "proxy", "reverse-proxy", "tcp", "udp"]
+categories = ["network-programming"]
+
+[dependencies]
+color-eyre = { workspace = true }
+socket2 = { workspace = true }
+tokio = { workspace = true }

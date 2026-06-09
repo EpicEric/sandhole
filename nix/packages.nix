@@ -1,7 +1,8 @@
 {
   pkgs,
   sandhole,
-  sandhole-no-default-features,
+  sandhole-no_default_features,
+  udp_over_tcp,
   ...
 }:
 let
@@ -26,19 +27,8 @@ let
   };
 in
 {
-  inherit sandhole sandhole-no-default-features;
+  inherit sandhole sandhole-no_default_features udp_over_tcp;
   default = sandhole;
-
-  udp_over_tcp = pkgs.python313Packages.buildPythonApplication (finalAttrs: {
-    name = "udp_over_tcp";
-    pyproject = false;
-    doCheck = false;
-    dontUnpack = true;
-    installPhase = ''
-      install -Dm755 "${../udp_over_tcp.py}" "$out/bin/${finalAttrs.name}"
-    '';
-    meta.mainProgram = finalAttrs.name;
-  });
 
   _docs =
     (pkgs.nixosOptionsDoc {

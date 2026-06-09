@@ -59,18 +59,40 @@ let
     }
   );
 
-  sandhole-no-default-features = sandhole.overrideAttrs {
+  sandhole-no_default_features = sandhole.overrideAttrs {
     cargoExtraArgs = "--locked --no-default-features";
   };
+
+  udp_over_tcp = craneLib.buildPackage (
+    commonArgs
+    // {
+      inherit cargoArtifacts;
+      inherit (craneLib.crateNameFromCargoToml { cargoToml = ../udp_over_tcp/Cargo.toml; })
+        pname
+        version
+        ;
+      doCheck = false;
+      cargoExtraArgs = "-p sandhole_udp_over_tcp";
+      meta = {
+        name = "sandhole_udp_over_tcp";
+        description = "Proxy UDP traffic for Sandhole via SSH";
+        homepage = "https://sandhole.com.br";
+        license = lib.licenses.mit;
+        mainProgram = "sandhole_udp_over_tcp";
+        platforms = lib.platforms.linux ++ lib.platforms.darwin;
+      };
+    }
+  );
 in
 {
-  inherit sandhole sandhole-no-default-features;
+  inherit sandhole sandhole-no_default_features;
 
   packages = import ./packages.nix {
     inherit
       pkgs
       sandhole
-      sandhole-no-default-features
+      sandhole-no_default_features
+      udp_over_tcp
       ;
   };
 
@@ -81,7 +103,8 @@ in
       craneLib
       pkgs
       sandhole
-      sandhole-no-default-features
+      sandhole-no_default_features
+      udp_over_tcp
       src
       ;
   };

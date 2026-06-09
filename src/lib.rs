@@ -64,11 +64,9 @@ mod reactor;
 mod sock_addr_alias;
 mod ssh;
 mod tcp;
-mod tcp_listener;
 mod telemetry;
 mod tls;
 mod udp;
-mod udp_listener;
 
 // Data collected from the system and displayed on the admin interface.
 #[derive(Default, Clone)]

@@ -4503,9 +4503,9 @@ dependencies = [
  "rustls-pki-types",
  "rustls-webpki",
  "rustrict",
+ "sandhole_socket",
  "serde",
  "serde_json",
- "socket2 0.6.3",
  "sysinfo",
  "test-log",
  "thiserror 2.0.18",
@@ -4522,6 +4522,27 @@ dependencies = [
  "trie-rs",
  "vt100-ctt",
  "webpki-roots 1.0.7",
+]
+
+[[package]]
+name = "sandhole_socket"
+version = "0.1.0"
+dependencies = [
+ "color-eyre",
+ "socket2 0.6.3",
+ "tokio",
+]
+
+[[package]]
+name = "sandhole_udp_over_tcp"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "clap",
+ "color-eyre",
+ "dashmap",
+ "sandhole_socket",
+ "tokio",
 ]
 
 [[package]]

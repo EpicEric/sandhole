@@ -7,7 +7,6 @@ use crate::{
     ip::IpFilter,
     reactor::TcpReactor,
     ssh::connection_handler::SshTunnelHandler,
-    tcp_listener::get_tcp_listener,
     telemetry::{TELEMETRY_COUNTER_TCP_CONNECTIONS, TELEMETRY_KEY_PORT},
 };
 use ahash::RandomState;
@@ -15,6 +14,7 @@ use bon::Builder;
 use color_eyre::eyre::Context;
 use dashmap::DashMap;
 use metrics::counter;
+use sandhole_socket::tcp_listener::get_tcp_listener;
 use tokio::{io::copy_bidirectional_with_sizes, time::timeout};
 
 // Service that handles creating TCP sockets for reverse forwarding connections.

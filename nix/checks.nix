@@ -4,12 +4,13 @@
   craneLib,
   pkgs,
   sandhole,
-  sandhole-no-default-features,
+  sandhole-no_default_features,
   src,
+  udp_over_tcp,
   ...
 }:
 {
-  inherit sandhole sandhole-no-default-features;
+  inherit sandhole sandhole-no_default_features udp_over_tcp;
 
   sandhole-clippy = craneLib.cargoClippy (
     commonArgs

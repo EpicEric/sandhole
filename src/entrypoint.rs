@@ -25,6 +25,7 @@ use rustls::ServerConfig;
 #[cfg(feature = "acme")]
 use rustls_acme::acme::ACME_TLS_ALPN_NAME;
 use rustls_pki_types::ServerName;
+use sandhole_socket::tcp_listener::get_tcp_listener;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
 #[cfg_attr(not(feature = "acme"), allow(unused_imports))]
 use tokio::io::AsyncWriteExt;
@@ -63,7 +64,6 @@ use crate::{
     reactor::{AliasReactor, HttpReactor, SniReactor, SshReactor, TcpReactor, UdpReactor},
     ssh::Server,
     tcp::TcpHandler,
-    tcp_listener::get_tcp_listener,
     telemetry::{
         TELEMETRY_COUNTER_NETWORK_RX, TELEMETRY_COUNTER_NETWORK_TX,
         TELEMETRY_COUNTER_SNI_CONNECTIONS, TELEMETRY_GAUGE_CPU_USAGE, TELEMETRY_GAUGE_TOTAL_MEMORY,

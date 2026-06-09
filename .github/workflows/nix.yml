@@ -45,4 +45,5 @@ jobs:
           CACHIX_NAME: ${{ vars.CACHIX_NAME }}
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: |
-          nix build --no-link --print-out-paths | cachix push ${CACHIX_NAME}
+          nix build .#sandhole --no-link --print-out-paths | cachix push ${CACHIX_NAME}
+          nix build .#udp_over_tcp --no-link --print-out-paths | cachix push ${CACHIX_NAME}

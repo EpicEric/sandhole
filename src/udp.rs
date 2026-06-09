@@ -2,6 +2,7 @@ use std::{
     collections::HashSet,
     mem::size_of,
     net::{IpAddr, SocketAddr},
+    pin::pin,
     sync::Arc,
     time::Duration,
 };
@@ -14,32 +15,22 @@ use crate::{
     reactor::UdpReactor,
     ssh::connection_handler::{SshChannel, SshTunnelHandler},
     telemetry::{TELEMETRY_COUNTER_UDP_CONNECTIONS, TELEMETRY_KEY_PORT},
-    udp_listener::get_udp_socket,
 };
 use ahash::RandomState;
 use bon::Builder;
 use color_eyre::eyre::Context;
 use dashmap::DashMap;
-use futures_util::pin_mut;
 use metrics::counter;
+use sandhole_socket::{
+    udp_listener::get_udp_socket,
+    udp_over_tcp::{datagram_buffer, deserialize_datagram, serialize_datagram},
+};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, WriteHalf},
+    io::{AsyncWriteExt, WriteHalf},
     select,
     sync::Mutex,
     time::sleep,
 };
-
-pub const MAX_PACKET_SIZE: usize = size_of::<u16>() + u16::MAX as usize;
-
-// Creates and returns a buffer on the heap with enough space to contain any possible
-// UDP datagram.
-//
-// This is put on the heap and in a separate function to avoid the 64k buffer from ending
-// up on the stack and blowing up the size of the futures using it.
-#[inline]
-fn datagram_buffer() -> Box<[u8; MAX_PACKET_SIZE]> {
-    Box::new([0u8; MAX_PACKET_SIZE])
-}
 
 // Type for a UDP socket with the write and read halves.
 struct UdpSocketHandler {
@@ -102,10 +93,7 @@ impl UdpPortHandler for Arc<UdpHandler> {
 
                         // Prepare data to be sent to SSH channel
                         let mut read_buf = datagram_buffer();
-                        read_buf[..size_of::<u16>()]
-                            .copy_from_slice(&(len as u16).to_be_bytes()[..]);
-                        read_buf[size_of::<u16>()..size_of::<u16>() + len]
-                            .copy_from_slice(&buf[..len]);
+                        serialize_datagram(&mut read_buf[..], &buf[..len]);
 
                         // Check for an existing SSH channel
                         if let Some(mut entry) = clone.sockets.get_mut(&(port, address)) {
@@ -145,7 +133,7 @@ impl UdpPortHandler for Arc<UdpHandler> {
                             }
 
                             let udp_write = Arc::clone(&socket);
-                            let (mut ssh_read, mut ssh_write) = tokio::io::split(channel);
+                            let (ssh_read, mut ssh_write) = tokio::io::split(channel);
 
                             if let Err(error) = ssh_write
                                 .write_all(&read_buf[..size_of::<u16>() + len])
@@ -159,37 +147,37 @@ impl UdpPortHandler for Arc<UdpHandler> {
                             let clone_2 = Arc::clone(&clone);
                             let _read_task = DroppableHandle(tokio::spawn(async move {
                                 let mut write_buf = datagram_buffer();
+                                let mut ssh_read = pin!(ssh_read);
                                 loop {
                                     let sleep_fut = sleep(clone_2.udp_timeout);
                                     let read_fut = async {
-                                        match ssh_read.read_u16().await {
-                                            Ok(len) => {
-                                                if let Err(error) = ssh_read
-                                                    .read_exact(&mut write_buf[..len as usize])
-                                                    .await
-                                                {
-                                                    #[cfg(not(coverage_nightly))]
-                                                    tracing::warn!(%port, %error, "Error reading UDP datagram from SSH channel.");
-                                                    return false;
-                                                } else if let Err(error) = udp_write
-                                                    .send_to(&write_buf[..len as usize], address)
-                                                    .await
-                                                {
-                                                    #[cfg(not(coverage_nightly))]
-                                                    tracing::warn!(%port, %error, "Error reading from SSH channel for UDP.");
-                                                    return false;
-                                                }
-                                                true
-                                            }
+                                        match deserialize_datagram(
+                                            &mut write_buf[..],
+                                            &mut ssh_read,
+                                        )
+                                        .await
+                                        {
                                             Err(error) => {
                                                 #[cfg(not(coverage_nightly))]
-                                                tracing::warn!(%port, %error, "Error reading UDP datagram size from SSH channel.");
+                                                tracing::warn!(%port, %error, "Error deserializing UDP datagram from SSH channel.");
                                                 false
+                                            }
+                                            Ok(len) => {
+                                                if let Err(error) = udp_write
+                                                    .send_to(&write_buf[..len], address)
+                                                    .await
+                                                {
+                                                    #[cfg(not(coverage_nightly))]
+                                                    tracing::warn!(%port, %error, "Error sending UDP datagram.");
+                                                    false
+                                                } else {
+                                                    true
+                                                }
                                             }
                                         }
                                     };
-                                    pin_mut!(sleep_fut);
-                                    pin_mut!(read_fut);
+                                    let sleep_fut = pin!(sleep_fut);
+                                    let read_fut = pin!(read_fut);
                                     select! {
                                         success = read_fut => if !success { break; },
                                         _ = sleep_fut => break,

@@ -1,0 +1,21 @@
+[package]
+name = "sandhole_udp_over_tcp"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88.0"
+description = "Proxy UDP traffic for Sandhole via SSH."
+repository = "https://github.com/EpicEric/sandhole"
+homepage = "https://sandhole.com.br/"
+license = "MIT"
+authors = ["Eric Rodrigues Pires <eric@eric.dev.br>"]
+readme = "README.md"
+keywords = ["ssh", "proxy", "reverse-proxy", "tcp", "udp"]
+categories = ["network-programming"]
+
+[dependencies]
+ahash = { workspace = true }
+clap = { workspace = true }
+color-eyre = { workspace = true }
+dashmap = { workspace = true }
+sandhole_socket = { workspace = true }
+tokio = { workspace = true }

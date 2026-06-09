@@ -1,11 +1,10 @@
 use std::{io, net::ToSocketAddrs};
 
 use socket2::{Domain, Socket, Type};
-use tokio::net::TcpListener;
+use tokio::net::UdpSocket;
 
-// Create an async TCP listener with Nagle's algorithm disabled
-// and any necessary configurations for dualstack.
-pub(crate) fn get_tcp_listener<A: ToSocketAddrs>(addr: A) -> io::Result<TcpListener> {
+/// Create an async UDP listener.
+pub fn get_udp_socket<A: ToSocketAddrs>(addr: A) -> io::Result<UdpSocket> {
     let addr = addr.to_socket_addrs()?.next().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -16,12 +15,11 @@ pub(crate) fn get_tcp_listener<A: ToSocketAddrs>(addr: A) -> io::Result<TcpListe
 
     let socket = Socket::new(
         if is_ipv6 { Domain::IPV6 } else { Domain::IPV4 },
-        Type::STREAM,
+        Type::DGRAM,
         None,
     )?;
 
     socket.set_nonblocking(true)?;
-    socket.set_tcp_nodelay(true)?;
     if is_ipv6 {
         socket.set_only_v6(false)?;
     }
@@ -34,19 +32,12 @@ pub(crate) fn get_tcp_listener<A: ToSocketAddrs>(addr: A) -> io::Result<TcpListe
     // which allows “socket hijacking”, so we explicitly don't set it here.
     // https://docs.microsoft.com/en-us/windows/win32/winsock/using-so-reuseaddr-and-so-exclusiveaddruse
     #[cfg(not(windows))]
-    socket.set_reuse_address(true)?;
+    {
+        socket.set_reuse_address(true)?;
+        socket.set_reuse_port(true)?;
+    }
 
     socket.bind(&addr.into())?;
-    socket.listen({
-        #[cfg(not(windows))]
-        {
-            -1
-        }
-        #[cfg(windows)]
-        {
-            128
-        }
-    })?;
 
-    TcpListener::from_std(socket.into())
+    UdpSocket::from_std(socket.into())
 }

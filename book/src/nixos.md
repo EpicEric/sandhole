@@ -118,8 +118,8 @@ in
                   {
                     # Change these from `sandhole.com.br` to your domain
                     domains = [ "sandhole.com.br" "*.sandhole.com.br" ];
-                    fullchain_output_file = "${certificatesDirectory}/sandhole.com.br/fullchain.pem";
-                    key_output_file = "${certificatesDirectory}/sandhole.com.br/privkey.pem";
+                    fullchain_output_file = "${certificates-directory}/sandhole.com.br/fullchain.pem";
+                    key_output_file = "${certificates-directory}/sandhole.com.br/privkey.pem";
                   }
                 ];
             }
@@ -202,17 +202,15 @@ You can then connect services with the provided keys. For example, to use a Vaul
 
 ## Binary caching
 
-In order to avoid re-building Sandhole for each update, you can use either of the Sandhole binary caches. In `configuration.nix`:
+In order to avoid re-building Sandhole for each update, you can use Sandhole's binary cache. In `configuration.nix`:
 
 ```nix
   nix.settings = {
     substituters = [
       "https://sandhole.cachix.org"
-      "https://cache.garnix.io"
     ];
     trusted-public-keys = [
       "sandhole.cachix.org-1:cZadr6kgjQcRvsr++Nv9kgtMOrbLahiZBpuI9WpIXvA="
-      "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
     ];
   };
 ```
