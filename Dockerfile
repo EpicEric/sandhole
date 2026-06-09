@@ -8,6 +8,8 @@ RUN rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
 # Cache pre-build of dependency crates (useful for development)
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
+COPY sandhole_socket ./sandhole_socket
+COPY udp_over_tcp ./udp_over_tcp
 RUN mkdir src \
     && echo "fn main() {}" > src/main.rs \
     && cargo zigbuild --release --locked --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl \
