@@ -11,6 +11,13 @@ python3 udp_over_tcp.py --udp-port 12345 --tcp-port 6789
 
 This will create a TCP server listening on port 6789 which proxies UDP-over-TCP data to port 12345.
 
+Alternatively, for better performance, a Rust version can be installed and run with:
+
+```bash
+cargo install --locked sandhole_udp_over_tcp
+sandhole_udp_over_tcp --udp-port 12345 --tcp-port 6789
+```
+
 In order to create an UDP socket on port 9999 of Sandhole, use the reserved `udp.sandhole` remote host:
 
 ```bash
@@ -25,6 +32,8 @@ You can also local-forward with the same script by passing the `--local-forwardi
 
 ```bash
 python3 udp_over_tcp.py --udp-port 33333 --tcp-port 4000 --local-forwarding
+# -- or --
+sandhole_udp_over_tcp --udp-port 33333 --tcp-port 4000 --local-forwarding
 ```
 
 ```bash
