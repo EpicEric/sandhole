@@ -3,15 +3,15 @@
 
   inputs = {
     crane = {
-      url = "path:./nix/dummy.nix";
+      url = "github:EpicEric/dummy.nix/main";
       flake = false;
     };
     nixpkgs = {
-      url = "path:./nix/dummy.nix";
+      url = "github:EpicEric/dummy.nix/main";
       flake = false;
     };
     rust-overlay = {
-      url = "path:./nix/dummy.nix";
+      url = "github:EpicEric/dummy.nix/main";
       flake = false;
     };
   };

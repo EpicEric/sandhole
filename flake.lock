@@ -3,26 +3,36 @@
     "crane": {
       "flake": false,
       "locked": {
-        "path": "./nix/dummy.nix",
-        "type": "path"
+        "lastModified": 1781033631,
+        "narHash": "sha256-fA+Sl81N7afKXvd0AzPB45e164CgEyX/96OnedaKhbY=",
+        "owner": "EpicEric",
+        "repo": "dummy.nix",
+        "rev": "7ee5540ff5cb7eb0b01d66a97d66772c9af99d1c",
+        "type": "github"
       },
       "original": {
-        "path": "./nix/dummy.nix",
-        "type": "path"
-      },
-      "parent": []
+        "owner": "EpicEric",
+        "ref": "main",
+        "repo": "dummy.nix",
+        "type": "github"
+      }
     },
     "nixpkgs": {
       "flake": false,
       "locked": {
-        "path": "./nix/dummy.nix",
-        "type": "path"
+        "lastModified": 1781033631,
+        "narHash": "sha256-fA+Sl81N7afKXvd0AzPB45e164CgEyX/96OnedaKhbY=",
+        "owner": "EpicEric",
+        "repo": "dummy.nix",
+        "rev": "7ee5540ff5cb7eb0b01d66a97d66772c9af99d1c",
+        "type": "github"
       },
       "original": {
-        "path": "./nix/dummy.nix",
-        "type": "path"
-      },
-      "parent": []
+        "owner": "EpicEric",
+        "ref": "main",
+        "repo": "dummy.nix",
+        "type": "github"
+      }
     },
     "root": {
       "inputs": {
@@ -34,14 +44,19 @@
     "rust-overlay": {
       "flake": false,
       "locked": {
-        "path": "./nix/dummy.nix",
-        "type": "path"
+        "lastModified": 1781033631,
+        "narHash": "sha256-fA+Sl81N7afKXvd0AzPB45e164CgEyX/96OnedaKhbY=",
+        "owner": "EpicEric",
+        "repo": "dummy.nix",
+        "rev": "7ee5540ff5cb7eb0b01d66a97d66772c9af99d1c",
+        "type": "github"
       },
       "original": {
-        "path": "./nix/dummy.nix",
-        "type": "path"
-      },
-      "parent": []
+        "owner": "EpicEric",
+        "ref": "main",
+        "repo": "dummy.nix",
+        "type": "github"
+      }
     }
   },
   "root": "root",
