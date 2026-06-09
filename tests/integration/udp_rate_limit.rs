@@ -123,24 +123,36 @@ async fn udp_rate_limit() {
         .await
         .unwrap();
     let start = Instant::now();
-    udp_socket.send(&data[..]).await.unwrap();
     let mut buf = [0u8; 32];
-    assert_eq!(
-        timeout(Duration::from_secs(5), udp_socket.recv(&mut buf))
-            .await
-            .unwrap()
-            .unwrap(),
-        2
+    let chunk_size = 548;
+    assert_ne!(
+        data.len() % chunk_size,
+        0,
+        "chunk_size should not equally divide the data"
+    );
+    let mut chunks = data.chunks_exact(chunk_size);
+    assert!(
+        timeout(Duration::from_secs(5), async {
+            for chunk in &mut chunks {
+                udp_socket.send(chunk).await.unwrap();
+                assert_eq!(udp_socket.recv(&mut buf).await.unwrap(), 2);
+                assert_eq!(&buf[..2], b"OK");
+            }
+            udp_socket.send(chunks.remainder()).await.unwrap();
+            assert_eq!(udp_socket.recv(&mut buf).await.unwrap(), 4);
+            assert_eq!(&buf[..4], b"Done");
+        })
+        .await
+        .is_ok()
     );
     let elapsed = start.elapsed();
-    assert_eq!(&buf[..2], b"OK");
     assert!(
         elapsed > Duration::from_millis(2_000),
         "must've taken more than 2 seconds, but was {elapsed:?}"
     );
     assert!(
-        elapsed < Duration::from_millis(3_500),
-        "must've taken less than 3.5 seconds, but was {elapsed:?}"
+        elapsed < Duration::from_millis(6_000),
+        "must've taken less than 6 seconds, but was {elapsed:?}"
     );
 }
 
@@ -166,13 +178,15 @@ impl russh::client::Handler for SshClient {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
-            let mut expected_len = 55_000 + std::mem::size_of::<u16>();
+            let mut expected_len = 55_000;
             while let Some(msg) = channel.wait().await {
                 if let ChannelMsg::Data { data } = msg {
-                    expected_len -= data.len();
+                    expected_len -= u16::from_be_bytes([data[0], data[1]]);
                     if expected_len == 0 {
-                        channel.data(&b"\x00\x02OK"[..]).await.unwrap();
+                        channel.data(&b"\x00\x04Done"[..]).await.unwrap();
                         return;
+                    } else {
+                        channel.data(&b"\x00\x02OK"[..]).await.unwrap();
                     }
                 }
             }
