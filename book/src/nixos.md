@@ -4,13 +4,13 @@ Sandhole is available as a flake, containing an overlay and a NixOS service.
 
 ## Setup
 
-If you're using Nix Flakes for your system, you can install the NixOS service like so:
+If you're using Nix flakes for your system, you can install the NixOS service like so:
 
 ```nix
 {
   inputs = {
     # ...
-    sandhole.url = "github:EpicEric/sandhole";
+    sandhole.url = "github:EpicEric/sandhole/main";
   };
 
   outputs =
@@ -42,7 +42,7 @@ Here's an example `configuration.nix` with Sandhole and Agnos. You can find full
 let
   # ...
 
-  # Add admin keys to this directory
+  # Add admin keys to this link farm
   adminKeys = pkgs.linkFarm "sandhole-admin-keys" [
     {
       name = "example-admin.pub";
@@ -52,7 +52,7 @@ let
     }
   ];
 
-  # Add user keys to this directory
+  # Add user keys to this link farm
   userKeys = pkgs.linkFarm "sandhole-user-keys" [
     {
       name = "example-user.pub";
@@ -66,11 +66,11 @@ let
   user-keys-directory = "/etc/sandhole/user-keys";
   certificates-directory = "/var/lib/sandhole/certificates";
 in
-
 {
   # ...
 
-  # By symlinking to /etc, Sandhole doesn't have to restart when modifying keys
+  # By symlinking the SSH key directories to /etc,
+  # Sandhole doesn't have to restart when modifying keys
   environment.etc = {
     "sandhole/admin-keys".source = adminKeys;
     "sandhole/user-keys".source = userKeys;
@@ -136,14 +136,13 @@ You can then connect services with the provided keys. For example, to use a Vaul
   lib,
   ...
 }:
-
 {
   # ...
 
   networking.nat = {
     enable = true;
     internalInterfaces = ["ve-+"];
-    externalInterface = "eno0"; # Change to the appropriate interface
+    externalInterface = "eno0"; # Change to the appropriate WAN interface
     enableIPv6 = true;
   };
 
@@ -205,6 +204,9 @@ You can then connect services with the provided keys. For example, to use a Vaul
 In order to avoid re-building Sandhole for each update, you can use Sandhole's binary cache. In `configuration.nix`:
 
 ```nix
+{
+  # ...
+
   nix.settings = {
     substituters = [
       "https://sandhole.cachix.org"
@@ -213,4 +215,5 @@ In order to avoid re-building Sandhole for each update, you can use Sandhole's b
       "sandhole.cachix.org-1:cZadr6kgjQcRvsr++Nv9kgtMOrbLahiZBpuI9WpIXvA="
     ];
   };
+}
 ```

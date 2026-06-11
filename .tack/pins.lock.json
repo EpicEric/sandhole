@@ -1,0 +1,26 @@
+{
+  "crane": {
+    "lastModified": 1780532242,
+    "narHash": "sha256-D+BsdpxmtUwtqGoY0IXPhHgTlmqgcZKCEo1oMyn7ep0=",
+    "owner": "ipetkov",
+    "repo": "crane",
+    "rev": "59a82a1222dd3b2080b5cc52a1a2e8d5f1b77f37",
+    "type": "github"
+  },
+  "nixpkgs": {
+    "lastModified": 1780930886,
+    "narHash": "sha256-rppURzHviaQN131F+nLiLdGfcb0uCd9gGP0E5+iw9MI=",
+    "owner": "NixOS",
+    "repo": "nixpkgs",
+    "rev": "8c3cede7ddc26bd659d2d383b5610efbd2c7a16e",
+    "type": "github"
+  },
+  "rust-overlay": {
+    "lastModified": 1781147846,
+    "narHash": "sha256-hBdiQYd40xRtBWBiXHUxuQYWmJBiK19YO1FiYgrmEo0=",
+    "owner": "oxalica",
+    "repo": "rust-overlay",
+    "rev": "107c334f141854f563f8adf1db781dc453d92639",
+    "type": "github"
+  }
+}
