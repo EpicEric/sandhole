@@ -29,6 +29,8 @@ pub(crate) enum ServerError {
     AliasingNotAllowed,
     #[error("Pool limit reached")]
     PoolLimitReached,
+    #[error("Timed out opening tunneling channel")]
+    TunnelingChannelTimeout,
     #[error("IP connection limit reached")]
     IpConnectionLimitReached,
     #[error("SSH error: {0}")]

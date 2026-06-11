@@ -295,6 +295,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
             *context.peer,
             context.user_data.quota_key.clone(),
             Arc::new(SshTunnelHandler {
+                channel_open_timeout: context.server.channel_open_timeout,
                 allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                 http_data: None,
                 pool: Arc::clone(&semaphore),
@@ -575,6 +576,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 *context.peer,
                 context.user_data.quota_key.clone(),
                 Arc::new(SshTunnelHandler {
+                    channel_open_timeout: context.server.channel_open_timeout,
                     allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                     http_data: Some(Arc::clone(&context.user_data.http_data)),
                     pool: Arc::clone(&semaphore),
@@ -652,6 +654,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                         *context.peer,
                         context.user_data.quota_key.clone(),
                         Arc::new(SshTunnelHandler {
+                            channel_open_timeout: context.server.channel_open_timeout,
                             allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                             http_data: Some(Arc::clone(&context.user_data.http_data)),
                             pool: Arc::clone(&semaphore),
@@ -768,6 +771,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                         *context.peer,
                         context.user_data.quota_key.clone(),
                         Arc::new(SshTunnelHandler {
+                            channel_open_timeout: context.server.channel_open_timeout,
                             allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                             http_data: Some(Arc::clone(&context.user_data.http_data)),
                             pool: Arc::clone(&semaphore),
@@ -1197,6 +1201,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             *context.peer,
             context.user_data.quota_key.clone(),
             Arc::new(SshTunnelHandler {
+                channel_open_timeout: context.server.channel_open_timeout,
                 allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                 http_data: None,
                 pool: Arc::clone(&semaphore),
@@ -1650,6 +1655,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                 *context.peer,
                 context.user_data.quota_key.clone(),
                 Arc::new(SshTunnelHandler {
+                    channel_open_timeout: context.server.channel_open_timeout,
                     allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                     http_data: None,
                     pool: Arc::clone(&semaphore),
@@ -2027,6 +2033,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
                 *context.peer,
                 context.user_data.quota_key.clone(),
                 Arc::new(SshTunnelHandler {
+                    channel_open_timeout: context.server.channel_open_timeout,
                     allow_fingerprint: Arc::clone(&context.user_data.allow_fingerprint),
                     http_data: None,
                     pool: Arc::clone(&semaphore),

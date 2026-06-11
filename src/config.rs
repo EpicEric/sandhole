@@ -471,6 +471,10 @@ pub struct ApplicationConfig {
     #[arg(long, default_value_t = 64, value_name = "SIZE")]
     pub max_simultaneous_connections_per_ip: u16,
 
+    /// How long to wait for SSH clients to confirm a forwarded channel open.
+    #[arg(long, default_value = "15s", value_parser = validate_duration, value_name = "DURATION")]
+    pub channel_open_timeout: Duration,
+
     /// How long to wait between each keepalive message that is sent to an unresponsive SSH connection.
     #[arg(long, default_value = "15s", value_parser = validate_duration, value_name = "DURATION")]
     pub ssh_keepalive_interval: Duration,
@@ -657,6 +661,7 @@ mod application_config_tests {
                 http_pool_max_idle_time: Duration::from_secs(60),
                 http_pool_max_reuse: 1_000,
                 max_simultaneous_connections_per_ip: 64,
+                channel_open_timeout: Duration::from_secs(15),
                 ssh_keepalive_interval: Duration::from_secs(15),
                 ssh_keepalive_max: 3,
                 directory_poll_interval: Duration::from_secs(15),
@@ -727,6 +732,7 @@ mod application_config_tests {
             "--http-pool-max-idle-time=120s",
             "--http-pool-max-reuse=500",
             "--max-simultaneous-connections-per-ip=32",
+            "--channel-open-timeout=20s",
             "--ssh-keepalive-interval=10s",
             "--ssh-keepalive-max=2",
             "--directory-poll-interval=10s",
@@ -800,6 +806,7 @@ mod application_config_tests {
                 http_pool_max_idle_time: Duration::from_secs(120),
                 http_pool_max_reuse: 500,
                 max_simultaneous_connections_per_ip: 32,
+                channel_open_timeout: Duration::from_secs(20),
                 ssh_keepalive_interval: Duration::from_secs(10),
                 ssh_keepalive_max: 2,
                 directory_poll_interval: Duration::from_secs(10),

@@ -444,7 +444,7 @@ impl AdminState {
             }
             Tab::Http => {
                 // Get data for HTTP
-                let data = self.server.http_data.lock().expect("not poisoned").clone();
+                let data = { self.server.http_data.lock().expect("not poisoned").clone() };
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each host
                 let rows: Vec<Row<'_>> = data
@@ -486,7 +486,7 @@ impl AdminState {
             }
             Tab::Sni => {
                 // Get data for aliases
-                let data = self.server.sni_data.lock().expect("not poisoned").clone();
+                let data = { self.server.sni_data.lock().expect("not poisoned").clone() };
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
@@ -530,7 +530,7 @@ impl AdminState {
             }
             Tab::Ssh => {
                 // Get data for SSH
-                let data = self.server.ssh_data.lock().expect("not poisoned").clone();
+                let data = { self.server.ssh_data.lock().expect("not poisoned").clone() };
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each alias
                 let rows: Vec<Row<'_>> = data
@@ -574,7 +574,7 @@ impl AdminState {
             }
             Tab::Tcp => {
                 // Get data for TCP
-                let data = self.server.tcp_data.lock().expect("not poisoned").clone();
+                let data = { self.server.tcp_data.lock().expect("not poisoned").clone() };
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
@@ -618,7 +618,7 @@ impl AdminState {
             }
             Tab::Udp => {
                 // Get data for UDP
-                let data = self.server.udp_data.lock().expect("not poisoned").clone();
+                let data = { self.server.udp_data.lock().expect("not poisoned").clone() };
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
@@ -662,7 +662,7 @@ impl AdminState {
             }
             Tab::Alias => {
                 // Get data for aliases
-                let data = self.server.alias_data.lock().expect("not poisoned").clone();
+                let data = { self.server.alias_data.lock().expect("not poisoned").clone() };
                 self.vertical_scroll = self.vertical_scroll.content_length(data.len());
                 // Create rows for each socket or alias
                 let rows: Vec<Row<'_>> = data
@@ -721,12 +721,13 @@ impl AdminState {
             network_rx,
             cpu_usage,
             duration,
-        } = self
-            .server
-            .system_data
-            .lock()
-            .expect("not poisoned")
-            .clone();
+        } = {
+            self.server
+                .system_data
+                .lock()
+                .expect("not poisoned")
+                .clone()
+        };
         let block = Block::bordered().title("System information");
         // Break into four areas, first horizontally then vertically
         let [left_area, right_area] =
@@ -1079,7 +1080,7 @@ impl AdminInterface {
                 // No prompt, select from table
                 None => match interface.state.table_state.selected() {
                     Some(row) => {
-                        let users: Option<Vec<TokenHolderUser>> =
+                        let users: Option<Vec<TokenHolderUser>> = {
                             match interface.state.tab.current_tab() {
                                 Tab::Notifications => None,
                                 Tab::Http => interface
@@ -1136,7 +1137,8 @@ impl AdminInterface {
                                     .values()
                                     .nth(row)
                                     .map(|value| value.0.values().cloned().collect()),
-                            };
+                            }
+                        };
                         match users {
                             None => {}
                             Some(users) if users.is_empty() => {

@@ -44,7 +44,9 @@ impl ProxyAutoCancellation {
 
 impl Clone for ProxyAutoCancellation {
     fn clone(&self) -> Self {
-        self.timeout_handle.lock().expect("not poisoned").take();
+        {
+            self.timeout_handle.lock().expect("not poisoned").take();
+        }
         self.proxy_count.fetch_add(1, Ordering::Release);
         Self {
             unproxied_connection_timeout: self.unproxied_connection_timeout,

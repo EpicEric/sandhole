@@ -662,8 +662,8 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         let domain_server_name = domain_clone
             .as_ref()
             .and_then(|domain| ServerName::try_from(domain.as_str()).ok());
-        system_data_interval.tick().await;
         loop {
+            system_data_interval.tick().await;
             let mut notifications = vec![];
             if !config.disable_https
                 && let Some(domain) = domain_clone.as_ref()
@@ -688,7 +688,6 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
                 }
             }
             *notifications_clone.lock().expect("not poisoned") = notifications;
-            system_data_interval.tick().await;
         }
     });
 
@@ -787,6 +786,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .rate_limit_per_user
             .map(|rate| rate as f64)
             .unwrap_or(f64::INFINITY),
+        channel_open_timeout: config.channel_open_timeout,
         #[cfg(feature = "login")]
         authentication_request_timeout: config.authentication_request_timeout,
         idle_connection_timeout: config.idle_connection_timeout,

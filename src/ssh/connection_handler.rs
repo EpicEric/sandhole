@@ -85,6 +85,8 @@ impl AsyncWrite for SshChannel {
 // (such as HTTP logs) back to the SSH connection.
 #[derive(Clone)]
 pub(crate) struct SshTunnelHandler {
+    // How long to wait for the SSH client to confirm a forwarded channel open.
+    pub(crate) channel_open_timeout: Duration,
     // Closure to verify valid fingerprints for local forwardings. Default is to allow all.
     pub(crate) allow_fingerprint: Arc<RwLock<Box<FingerprintFn>>>,
     // Optional extra data available for HTTP tunneling/aliasing connections.
@@ -142,16 +144,18 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
             .is_none_or(|filter| filter.is_allowed(ip));
         if tunneling_allowed {
             let (_ip_connection_guard, _pool_permit) = self.get_permits(ip).await?;
-            let channel = self
-                .handle
-                .channel_open_forwarded_tcpip(
+            let channel = timeout(
+                self.channel_open_timeout,
+                self.handle.channel_open_forwarded_tcpip(
                     self.address.clone(),
                     self.port,
                     ip.to_string(),
                     port.into(),
-                )
-                .await?
-                .into_stream();
+                ),
+            )
+            .await
+            .map_err(|_| ServerError::TunnelingChannelTimeout)??
+            .into_stream();
             Ok(SshChannel {
                 inner: self.limiter.clone().limit(channel),
                 _ip_connection_guard,
@@ -181,16 +185,18 @@ impl ConnectionHandler<SshChannel> for SshTunnelHandler {
     ) -> Result<SshChannel, ServerError> {
         if self.can_alias(ip, port, fingerprint) {
             let (_ip_connection_guard, _pool_permit) = self.get_permits(ip).await?;
-            let channel = self
-                .handle
-                .channel_open_forwarded_tcpip(
+            let channel = timeout(
+                self.channel_open_timeout,
+                self.handle.channel_open_forwarded_tcpip(
                     self.address.clone(),
                     self.port,
                     ip.to_string(),
                     port.into(),
-                )
-                .await?
-                .into_stream();
+                ),
+            )
+            .await
+            .map_err(|_| ServerError::TunnelingChannelTimeout)??
+            .into_stream();
             Ok(SshChannel {
                 inner: self.limiter.clone().limit(channel),
                 _ip_connection_guard,

@@ -363,6 +363,11 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           [default: 64]
 
+      <b>--channel-open-timeout</b> &lt;DURATION&gt;
+          How long to wait for SSH clients to confirm a forwarded channel open
+
+          [default: 15s]
+
       <b>--ssh-keepalive-interval</b> &lt;DURATION&gt;
           How long to wait between each keepalive message that is sent to an
           unresponsive SSH connection

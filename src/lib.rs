@@ -181,6 +181,8 @@ pub(crate) struct SandholeServer {
     pub(crate) max_connections_per_ip: usize,
     // Rate limit per second for services of a single user.
     pub(crate) rate_limit: f64,
+    // How long to wait for SSH clients to confirm a forwarded channel open.
+    pub(crate) channel_open_timeout: Duration,
     // How long until a login API request is timed out.
     #[cfg(feature = "login")]
     pub(crate) authentication_request_timeout: Duration,

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add `--channel-open-timeout` CLI flag.
+
 ## 0.10.0 (2026-06-09)
 
 ### Added

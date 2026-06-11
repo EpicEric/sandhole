@@ -96,8 +96,8 @@ impl UdpPortHandler for Arc<UdpHandler> {
                         serialize_datagram(&mut read_buf[..], &buf[..len]);
 
                         // Check for an existing SSH channel
-                        if let Some(mut entry) = clone.sockets.get_mut(&(port, address)) {
-                            let value = entry.value_mut();
+                        if let Some(entry) = clone.sockets.get(&(port, address)) {
+                            let value = entry.value();
                             let channel = Arc::clone(&value.write);
                             drop(entry);
                             if channel
