@@ -68,12 +68,12 @@ where
                             // Return pool item if connection is ready and not expired
                             Ok(pooled) if pooled.connection.is_ready()
                                 && !pooled.is_expired(guard.max_idle_time, guard.max_reuse) => {
-                                    let mut pooled = deadpool::unmanaged::Object::take(pooled);
+                                let mut pooled = deadpool::unmanaged::Object::take(pooled);
                                 pooled.touch();
                                 break (pooled.connection, pooled.log_sender, guard)
                             },
-                            // Connection is closed or expired; discard pool item
-                            Ok(_) => {
+                            Ok(expired) => {
+                                let _ = deadpool::unmanaged::Object::take(expired);
                                 recv = guard.pool.get();
                                 continue;
                             },
@@ -103,10 +103,10 @@ where
                 let guard = proxy_data.get_http2_pool_guard(key.clone());
                 match guard.pool.try_get() {
                     Ok(pooled) => {
+                        let mut pooled = deadpool::unmanaged::Object::take(pooled);
                         if pooled.connection.is_ready()
                             && !pooled.is_expired(guard.max_idle_time, guard.max_reuse)
                         {
-                            let mut pooled = deadpool::unmanaged::Object::take(pooled);
                             pooled.touch();
                             break 'sender (pooled.connection, pooled.log_sender, guard);
                         }

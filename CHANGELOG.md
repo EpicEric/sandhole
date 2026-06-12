@@ -6,6 +6,10 @@
 
 - Add `--channel-open-timeout` CLI flag.
 
+### Fixed
+
+- Fix dropped handlers not being removed from HTTP pools.
+
 ## 0.10.0 (2026-06-09)
 
 ### Added
