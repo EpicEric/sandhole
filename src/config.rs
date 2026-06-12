@@ -540,6 +540,26 @@ pub struct ApplicationConfig {
     #[arg(long, value_parser = validate_duration, value_name = "DURATION")]
     pub tcp_connection_timeout: Option<Duration>,
 
+    /// If set, enables TCP keepalive on accepted client connections,
+    /// sending the first probe after the set idle time.
+    ///
+    /// Set this option to avoid "connection reset by peer" on socket reuse.
+    ///
+    /// By default, keepalive is disabled.
+    #[arg(long, value_parser = validate_duration, value_name = "DURATION")]
+    pub tcp_keepalive_time: Option<Duration>,
+
+    /// Interval between TCP keepalive probes once `--tcp-keepalive-time` has elapsed.
+    ///
+    /// Only applies when `--tcp-keepalive-time` is set.
+    #[arg(
+        long,
+        default_value = "10s",
+        value_parser = validate_duration,
+        value_name = "DURATION"
+    )]
+    pub tcp_keepalive_interval: Duration,
+
     /// How long until SSH channels from UDP sockets are automatically garbage-collected.
     #[arg(
         long,
@@ -670,6 +690,8 @@ mod application_config_tests {
                 authentication_request_timeout: Duration::from_secs(5),
                 http_request_timeout: None,
                 tcp_connection_timeout: None,
+                tcp_keepalive_time: None,
+                tcp_keepalive_interval: Duration::from_secs(10),
                 udp_timeout: Duration::from_secs(60),
             }
         )
@@ -741,6 +763,8 @@ mod application_config_tests {
             "--authentication-request-timeout=6s",
             "--http-request-timeout=15s",
             "--tcp-connection-timeout=30s",
+            "--tcp-keepalive-time=15s",
+            "--tcp-keepalive-interval=5s",
             "--udp-timeout=30s",
         ]);
         assert_eq!(
@@ -815,6 +839,8 @@ mod application_config_tests {
                 authentication_request_timeout: Duration::from_secs(6),
                 http_request_timeout: Some(Duration::from_secs(15)),
                 tcp_connection_timeout: Some(Duration::from_secs(30)),
+                tcp_keepalive_time: Some(Duration::from_secs(15)),
+                tcp_keepalive_interval: Duration::from_secs(5),
                 udp_timeout: Duration::from_secs(30),
             }
         )

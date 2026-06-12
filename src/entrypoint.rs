@@ -25,7 +25,8 @@ use rustls::ServerConfig;
 #[cfg(feature = "acme")]
 use rustls_acme::acme::ACME_TLS_ALPN_NAME;
 use rustls_pki_types::ServerName;
-use sandhole_socket::tcp_listener::get_tcp_listener;
+use sandhole_socket::tcp_listener::{get_tcp_listener, get_tcp_listener_with_keepalive};
+use socket2::TcpKeepalive;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
 #[cfg_attr(not(feature = "acme"), allow(unused_imports))]
 use tokio::io::AsyncWriteExt;
@@ -264,6 +265,11 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         Some(max_quota) => Arc::new(Box::new(Arc::new(QuotaMap::new(max_quota.into())))),
         None => Arc::new(Box::new(DummyQuotaHandler)),
     };
+    let tcp_keepalive = config.tcp_keepalive_time.map(|tcp_keepalive_time| {
+        TcpKeepalive::new()
+            .with_time(tcp_keepalive_time)
+            .with_interval(config.tcp_keepalive_interval)
+    });
     let http_connections = Arc::new(
         ConnectionMap::builder()
             .strategy(config.load_balancing)
@@ -327,6 +333,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             .ip_filter(Arc::clone(&ip_filter))
             .buffer_size(buffer_size)
             .disable_tcp_logs(config.disable_tcp_logs)
+            .maybe_tcp_keepalive(tcp_keepalive.clone())
             .maybe_tcp_connection_timeout(tcp_connection_timeout)
             .build(),
     );
@@ -818,8 +825,17 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     let mut join_handle_http = if config.disable_http {
         DroppableHandle(tokio::spawn(future::pending()))
     } else {
-        let http_listener = get_tcp_listener((config.listen_address, config.http_port.into()))
-            .with_context(|| "Error listening to HTTP port")?;
+        let http_listener = {
+            if let Some(keepalive) = tcp_keepalive.clone() {
+                get_tcp_listener_with_keepalive(
+                    (config.listen_address, config.http_port.into()),
+                    keepalive,
+                )
+            } else {
+                get_tcp_listener((config.listen_address, config.http_port.into()))
+            }
+        }
+        .with_context(|| "Error listening to HTTP port")?;
         #[cfg(not(coverage_nightly))]
         tracing::info!(
             "Listening for HTTP connections on port {}.",
@@ -907,8 +923,15 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     let mut join_handle_https = if config.disable_http || config.disable_https {
         DroppableHandle(tokio::spawn(future::pending()))
     } else {
-        let https_listener = get_tcp_listener((config.listen_address, config.https_port.into()))
-            .with_context(|| "Error listening to HTTPS port")?;
+        let https_listener = if let Some(keepalive) = tcp_keepalive.clone() {
+            get_tcp_listener_with_keepalive(
+                (config.listen_address, config.https_port.into()),
+                keepalive,
+            )
+        } else {
+            get_tcp_listener((config.listen_address, config.https_port.into()))
+        }
+        .with_context(|| "Error listening to HTTPS port")?;
         #[cfg(not(coverage_nightly))]
         tracing::info!(
             "Listening for HTTPS connections on port {}.",
@@ -993,8 +1016,12 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     };
 
     // Start Sandhole on SSH port
-    let ssh_listener = get_tcp_listener((config.listen_address, config.ssh_port.into()))
-        .with_context(|| "Error listening to SSH port")?;
+    let ssh_listener = if let Some(keepalive) = tcp_keepalive {
+        get_tcp_listener_with_keepalive((config.listen_address, config.ssh_port.into()), keepalive)
+    } else {
+        get_tcp_listener((config.listen_address, config.ssh_port.into()))
+    }
+    .with_context(|| "Error listening to SSH port")?;
     #[cfg(not(coverage_nightly))]
     tracing::info!("Listening for SSH connections on port {}.", config.ssh_port);
     #[cfg(not(coverage_nightly))]

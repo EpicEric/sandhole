@@ -5,6 +5,8 @@
 ### Added
 
 - Add `--channel-open-timeout` CLI flag.
+- Add `--tcp-keepalive-time` CLI flag.
+- Add `--tcp-keepalive-interval` CLI flag.
 
 ### Fixed
 

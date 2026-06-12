@@ -4454,7 +4454,7 @@ dependencies = [
 
 [[package]]
 name = "sandhole"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "ahash",
  "async-speed-limit",
@@ -4506,6 +4506,7 @@ dependencies = [
  "sandhole_socket",
  "serde",
  "serde_json",
+ "socket2 0.6.3",
  "sysinfo",
  "test-log",
  "thiserror 2.0.18",
@@ -4526,7 +4527,7 @@ dependencies = [
 
 [[package]]
 name = "sandhole_socket"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "color-eyre",
  "socket2 0.6.3",
@@ -4535,13 +4536,14 @@ dependencies = [
 
 [[package]]
 name = "sandhole_udp_over_tcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ahash",
  "clap",
  "color-eyre",
  "dashmap",
  "sandhole_socket",
+ "socket2 0.6.3",
  "tokio",
 ]
 

@@ -4,6 +4,7 @@ use std::{
     num::NonZeroU16,
     pin::{Pin, pin},
     sync::Arc,
+    time::Duration,
 };
 
 use ahash::RandomState;
@@ -11,10 +12,11 @@ use clap::Parser;
 use color_eyre::eyre::eyre;
 use dashmap::DashMap;
 use sandhole_socket::{
-    tcp_listener::get_tcp_listener,
+    tcp_listener::get_tcp_listener_with_keepalive,
     udp_listener::get_udp_socket,
     udp_over_tcp::{datagram_buffer, deserialize_datagram, serialize_datagram},
 };
+use socket2::TcpKeepalive;
 use tokio::{io::AsyncWriteExt, net::TcpSocket, select, sync::mpsc};
 
 #[doc(hidden)]
@@ -46,11 +48,16 @@ type FutType = Pin<Box<dyn Future<Output = color_eyre::Result<()>> + Send + Sync
 
 // Starts a TCP server that redirects requests to the UDP socket.
 async fn remote_forwarding(args: Cli) -> color_eyre::Result<()> {
-    let listener = get_tcp_listener((
-        args.tcp_address
-            .unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
-        u16::from(args.tcp_port),
-    ))?;
+    let listener = get_tcp_listener_with_keepalive(
+        (
+            args.tcp_address
+                .unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+            u16::from(args.tcp_port),
+        ),
+        TcpKeepalive::new()
+            .with_time(Duration::from_secs(15))
+            .with_interval(Duration::from_secs(15)),
+    )?;
     let udp_address = (
         args.udp_address.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
         u16::from(args.udp_port),

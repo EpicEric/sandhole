@@ -210,7 +210,10 @@ in
     systemd.services.sandhole = {
       description = "Sandhole - Expose HTTP/SSH/TCP services through SSH port forwarding";
       wantedBy = [ "multi-user.target" ];
-      after = [ "network-online.target" ];
+      after = [
+        "network-online.target"
+        "nss-lookup.target"
+      ];
       wants = [ "network-online.target" ];
       serviceConfig = {
         User = cfg.user;

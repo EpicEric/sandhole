@@ -14,7 +14,8 @@ use bon::Builder;
 use color_eyre::eyre::Context;
 use dashmap::DashMap;
 use metrics::counter;
-use sandhole_socket::tcp_listener::get_tcp_listener;
+use sandhole_socket::tcp_listener::{get_tcp_listener, get_tcp_listener_with_keepalive};
+use socket2::TcpKeepalive;
 use tokio::{io::copy_bidirectional_with_sizes, time::timeout};
 
 // Service that handles creating TCP sockets for reverse forwarding connections.
@@ -31,6 +32,8 @@ pub(crate) struct TcpHandler {
     ip_filter: Arc<IpFilter>,
     // Buffer size for bidirectional copying.
     buffer_size: usize,
+    // Parameters (delay + interval) to keep TCP client connections alive.
+    tcp_keepalive: Option<TcpKeepalive>,
     // Optional duration to time out TCP connections.
     tcp_connection_timeout: Option<Duration>,
     // Whether to send TCP logs to the SSH handles behind the forwarded connections.
@@ -50,7 +53,11 @@ impl TcpPortHandler for Arc<TcpHandler> {
             return Ok(port);
         }
         // Check if we're able to bind to the given address and port.
-        let listener = get_tcp_listener((self.listen_address, port))?;
+        let listener = if let Some(keepalive) = self.tcp_keepalive.clone() {
+            get_tcp_listener_with_keepalive((self.listen_address, port), keepalive)
+        } else {
+            get_tcp_listener((self.listen_address, port))
+        }?;
         let port = listener
             .local_addr()
             .with_context(|| "Missing local address when binding port")?

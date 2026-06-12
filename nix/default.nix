@@ -42,7 +42,6 @@ let
       inherit cargoArtifacts;
       doCheck = false;
       postInstall = lib.optionalString (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) ''
-        $out/bin/sandhole --completions bash
         installShellCompletion --cmd sandhole \
           --bash <($out/bin/sandhole --completions bash) \
           --fish <($out/bin/sandhole --completions fish) \

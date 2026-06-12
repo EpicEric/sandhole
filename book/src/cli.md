@@ -426,6 +426,23 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           By default, these connections are not terminated by Sandhole.
 
+      <b>--tcp-keepalive-time</b> &lt;DURATION&gt;
+          If set, enables TCP keepalive on accepted client connections,
+          sending the first probe after the set idle time.
+
+          Set this option to avoid &quot;connection reset by peer&quot; on
+          socket reuse.
+
+          By default, keepalive is disabled.
+
+      <b>--tcp-keepalive-interval</b> &lt;DURATION&gt;
+          Interval between TCP keepalive probes once `--tcp-keepalive-time`
+          has elapsed.
+
+          Only applies when `--tcp-keepalive-time` is set.
+
+          [default: 10s]
+
       <b>--udp-timeout</b> &lt;DURATION&gt;
           How long until SSH channels from UDP sockets are automatically
           garbage-collected
