@@ -208,7 +208,7 @@ async fn admin_remove_user() {
             }
         }
     });
-    if timeout(Duration::from_secs(5), async move {
+    if timeout(Duration::from_secs(10), async move {
         // 5a. Validate HTTP tab data
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",

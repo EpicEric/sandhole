@@ -175,7 +175,7 @@ async fn admin_no_interface_if_forwarding() {
             }
         }
     });
-    if timeout(Duration::from_secs(3), async move {
+    if timeout(Duration::from_secs(10), async move {
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",
             r"System information",

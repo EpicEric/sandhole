@@ -13,6 +13,10 @@
 
 - Remove dropped handlers from HTTP pools.
 
+### Changed
+
+- Update dependencies.
+
 ## 0.10.0 (2026-06-09)
 
 ### Added

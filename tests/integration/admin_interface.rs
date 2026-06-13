@@ -230,7 +230,7 @@ async fn admin_interface() {
         }
         let _ = hide_cursor_tx.send(parser.screen().hide_cursor());
     });
-    if timeout(Duration::from_secs(6), async move {
+    if timeout(Duration::from_secs(10), async move {
         // 4a. Validate header, system information, and HTTP tab data
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",

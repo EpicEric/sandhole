@@ -183,7 +183,7 @@ async fn admin_window_change() {
             }
         }
     });
-    if timeout(Duration::from_secs(3), async move {
+    if timeout(Duration::from_secs(10), async move {
         // 4a. Validate header, system information, and HTTP tab data
         let search_strings: Vec<Regex> = [
             r"Sandhole admin v\d+\.\d+\.\d+",

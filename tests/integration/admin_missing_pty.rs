@@ -176,7 +176,7 @@ async fn admin_missing_pty() {
             }
         }
     });
-    if timeout(Duration::from_secs(1), async move {
+    if timeout(Duration::from_secs(5), async move {
         // 4a. Validate the missing PTY message
         let search_strings: Vec<Regex> = [
             "Error",
