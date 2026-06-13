@@ -540,18 +540,26 @@ pub struct ApplicationConfig {
     #[arg(long, value_parser = validate_duration, value_name = "DURATION")]
     pub tcp_connection_timeout: Option<Duration>,
 
-    /// If set, enables TCP keepalive on accepted client connections,
-    /// sending the first probe after the set idle time.
+    /// Disable TCP keepalive on SSH, HTTP, HTTPS and TCP connections. By default, it is enabled.
     ///
-    /// Set this option to avoid "connection reset by peer" on socket reuse.
+    /// Disabling TCP keepalive may lead to "connection reset by peer" errors on socket reuse.
+    #[arg(long, default_value_t = false)]
+    pub disable_tcp_keepalive: bool,
+
+    /// Time to send the first TCP keepalive probe after the set idle time.
     ///
-    /// By default, keepalive is disabled.
-    #[arg(long, value_parser = validate_duration, value_name = "DURATION")]
-    pub tcp_keepalive_time: Option<Duration>,
+    /// Only applies when `--disable-tcp-keepalive` is unset.
+    #[arg(
+        long,
+        default_value = "20s",
+        value_parser = validate_duration,
+        value_name = "DURATION"
+    )]
+    pub tcp_keepalive_time: Duration,
 
     /// Interval between TCP keepalive probes once `--tcp-keepalive-time` has elapsed.
     ///
-    /// Only applies when `--tcp-keepalive-time` is set.
+    /// Only applies when `--disable-tcp-keepalive` is unset.
     #[arg(
         long,
         default_value = "10s",
@@ -690,7 +698,8 @@ mod application_config_tests {
                 authentication_request_timeout: Duration::from_secs(5),
                 http_request_timeout: None,
                 tcp_connection_timeout: None,
-                tcp_keepalive_time: None,
+                disable_tcp_keepalive: false,
+                tcp_keepalive_time: Duration::from_secs(20),
                 tcp_keepalive_interval: Duration::from_secs(10),
                 udp_timeout: Duration::from_secs(60),
             }
@@ -763,6 +772,7 @@ mod application_config_tests {
             "--authentication-request-timeout=6s",
             "--http-request-timeout=15s",
             "--tcp-connection-timeout=30s",
+            "--disable-tcp-keepalive",
             "--tcp-keepalive-time=15s",
             "--tcp-keepalive-interval=5s",
             "--udp-timeout=30s",
@@ -839,7 +849,8 @@ mod application_config_tests {
                 authentication_request_timeout: Duration::from_secs(6),
                 http_request_timeout: Some(Duration::from_secs(15)),
                 tcp_connection_timeout: Some(Duration::from_secs(30)),
-                tcp_keepalive_time: Some(Duration::from_secs(15)),
+                disable_tcp_keepalive: true,
+                tcp_keepalive_time: Duration::from_secs(15),
                 tcp_keepalive_interval: Duration::from_secs(5),
                 udp_timeout: Duration::from_secs(30),
             }

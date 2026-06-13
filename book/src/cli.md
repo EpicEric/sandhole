@@ -296,7 +296,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
           - <b>default</b>: Default (compact, ANSI-formatted, single-line)
           - <b>json</b>:    JSON format
           - <b>duper</b>:   Duper format
-          
+
           [default: default]
 
       <b>--ip-allowlist</b> &lt;CIDR&gt;
@@ -426,20 +426,25 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
 
           By default, these connections are not terminated by Sandhole.
 
+      <b>--disable-tcp-keepalive</b>
+          Disable TCP keepalive on SSH, HTTP, HTTPS and TCP connections.
+          By default, it is enabled.
+
+          Disabling TCP keepalive may lead to &quot;connection reset by peer&quot;
+          errors on socket reuse.
+
       <b>--tcp-keepalive-time</b> &lt;DURATION&gt;
-          If set, enables TCP keepalive on accepted client connections,
-          sending the first probe after the set idle time.
+          Time to send the first TCP keepalive probe after the set idle time.
 
-          Set this option to avoid &quot;connection reset by peer&quot; on
-          socket reuse.
+          Only applies when `--disable-tcp-keepalive` is unset.
 
-          By default, keepalive is disabled.
+          [default: 20s]
 
       <b>--tcp-keepalive-interval</b> &lt;DURATION&gt;
           Interval between TCP keepalive probes once `--tcp-keepalive-time`
           has elapsed.
 
-          Only applies when `--tcp-keepalive-time` is set.
+          Only applies when `--disable-tcp-keepalive` is unset.
 
           [default: 10s]
 

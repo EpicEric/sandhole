@@ -265,11 +265,15 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         Some(max_quota) => Arc::new(Box::new(Arc::new(QuotaMap::new(max_quota.into())))),
         None => Arc::new(Box::new(DummyQuotaHandler)),
     };
-    let tcp_keepalive = config.tcp_keepalive_time.map(|tcp_keepalive_time| {
-        TcpKeepalive::new()
-            .with_time(tcp_keepalive_time)
-            .with_interval(config.tcp_keepalive_interval)
-    });
+    let tcp_keepalive = if config.disable_tcp_keepalive {
+        None
+    } else {
+        Some(
+            TcpKeepalive::new()
+                .with_time(config.tcp_keepalive_time)
+                .with_interval(config.tcp_keepalive_interval),
+        )
+    };
     let http_connections = Arc::new(
         ConnectionMap::builder()
             .strategy(config.load_balancing)

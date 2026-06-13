@@ -5,12 +5,13 @@
 ### Added
 
 - Add `--channel-open-timeout` CLI flag.
+- Add `--disable-tcp-keepalive` CLI flag.
 - Add `--tcp-keepalive-time` CLI flag.
 - Add `--tcp-keepalive-interval` CLI flag.
 
 ### Fixed
 
-- Fix dropped handlers not being removed from HTTP pools.
+- Remove dropped handlers from HTTP pools.
 
 ## 0.10.0 (2026-06-09)
 
