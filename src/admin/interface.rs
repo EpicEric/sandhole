@@ -12,8 +12,7 @@ use itertools::Itertools;
 use ratatui::{
     Terminal, TerminalOptions, Viewport,
     buffer::Buffer,
-    layout::{Constraint, Flex, Layout, Margin, Rect},
-    prelude::CrosstermBackend,
+    layout::{Constraint, Flex, Layout, Margin, Rect, Size},
     style::{Color, Modifier, Style, Stylize},
     symbols::border,
     text::{Line, Text, ToSpan},
@@ -27,6 +26,7 @@ use tokio::{sync::watch, time::sleep};
 
 use crate::{
     AdminNotification, SandholeServer, SystemData,
+    admin::pty::PtyBackend,
     droppable_handle::DroppableHandle,
     fingerprints::{AuthenticationType, KeyData},
     quota::TokenHolderUser,
@@ -785,7 +785,7 @@ impl AdminState {
 // Data for a terminal interface
 struct AdminTerminal {
     // The underlying terminal backend used by Ratatui
-    terminal: Terminal<CrosstermBackend<BufferedSender>>,
+    terminal: Terminal<PtyBackend<BufferedSender>>,
     // Stateful data for the terminal
     state: AdminState,
 }
@@ -803,10 +803,13 @@ pub(crate) struct AdminInterface {
 impl AdminInterface {
     // Create an admin interface and send its output to the provided UnboundedSender
     pub(crate) fn new(tx: ServerHandlerSender, server: Arc<SandholeServer>) -> Self {
-        let mut backend = CrosstermBackend::new(BufferedSender {
-            tx,
-            buf: Vec::new(),
-        });
+        let mut backend = PtyBackend::new(
+            BufferedSender {
+                tx,
+                buf: Vec::new(),
+            },
+            Size::new(120, 60),
+        );
         let options = TerminalOptions {
             viewport: Viewport::Fixed(Rect::new(0, 0, 120, 60)),
         };
@@ -890,6 +893,10 @@ impl AdminInterface {
         {
             let mut interface = self.interface.lock().expect("not poisoned");
             interface.terminal.resize(rect)?;
+            interface
+                .terminal
+                .backend_mut()
+                .set_size(Size::new(width, height));
             interface.state.is_pty = true;
         }
         let _ = self.change_notifier.send(());
