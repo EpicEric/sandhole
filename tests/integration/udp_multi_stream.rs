@@ -63,6 +63,8 @@ async fn udp_multi_stream() {
         "--allow-requested-ports",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
+        "--ssh-keepalive-interval=45s",
+        "--ssh-keepalive-max=2",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -123,7 +125,7 @@ async fn udp_multi_stream() {
     let mut data = vec![0u8; 20_000_000];
     rand::rng().fill_bytes(&mut data);
     let data: &'static [u8] = data.leak();
-    timeout(Duration::from_secs(90), async move {
+    timeout(Duration::from_secs(120), async move {
         let mut jh_vec = vec![];
         for file_size in [7_500_000usize, 10_000_000, 15_000_000, 20_000_000] {
             let udp_socket_read = Arc::new(

@@ -784,6 +784,12 @@ impl Handler for ServerHandler {
             // Change the size of the pseudo-terminal.
             admin_data.col_width = Some(col_width);
             admin_data.row_height = Some(row_height);
+            if let Some(ref mut admin_interface) = admin_data.admin_interface
+                && let Err(error) = admin_interface.resize(col_width as u16, row_height as u16)
+            {
+                tracing::warn!(peer = %self.peer, %error, "Failed to resize terminal.");
+                return session.channel_failure(channel);
+            }
         }
         session.channel_success(channel)
     }

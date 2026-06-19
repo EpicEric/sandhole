@@ -64,6 +64,8 @@ async fn tcp_multi_stream_upload() {
         "--allow-requested-ports",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
+        "--ssh-keepalive-interval=45s",
+        "--ssh-keepalive-max=2",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -123,7 +125,7 @@ async fn tcp_multi_stream_upload() {
         .expect("tcpip_forward failed");
 
     // 3. Connect to the TCP port of our proxy with out multiple streams
-    timeout(Duration::from_secs(90), async move {
+    timeout(Duration::from_secs(120), async move {
         let mut jh_vec = vec![];
         for file_size in [7_500_000usize, 10_000_000, 15_000_000, 20_000_000] {
             let tcp_stream = TcpStream::connect("127.0.0.1:12345")

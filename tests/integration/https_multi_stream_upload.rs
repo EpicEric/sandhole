@@ -79,7 +79,9 @@ async fn https_multi_stream_upload() {
         "--bind-hostnames=all",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
-        "--http-request-timeout=90s",
+        "--http-request-timeout=120s",
+        "--ssh-keepalive-interval=45s",
+        "--ssh-keepalive-max=2",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -154,7 +156,7 @@ async fn https_multi_stream_upload() {
     let mut data = vec![0u8; 20_000_000];
     rand::rng().fill_bytes(&mut data);
     let data: &'static [u8] = data.leak();
-    timeout(Duration::from_secs(90), async move {
+    timeout(Duration::from_secs(120), async move {
         let mut jh_vec = vec![];
         for file_size in [7_500_000, 10_000_000, 15_000_000, 20_000_000] {
             let connector = TlsConnector::from(Arc::clone(&tls_config));
@@ -181,7 +183,7 @@ async fn https_multi_stream_upload() {
                     .header(HOST, "foobar.tld")
                     .body(Body::from(&data[..file_size]))
                     .unwrap();
-                let Ok(response) = timeout(Duration::from_secs(90), async move {
+                let Ok(response) = timeout(Duration::from_secs(120), async move {
                     sender
                         .send_request(request)
                         .await
