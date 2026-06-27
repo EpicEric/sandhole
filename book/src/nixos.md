@@ -4,9 +4,16 @@ Sandhole is available as a flake, containing an overlay and a NixOS service.
 
 ## Setup
 
-If you're using Nix flakes for your system, you can install the NixOS service like so:
+You can install the NixOS module for the following pinning solutions (click to expand):
+
+<ul>
+
+<li>
+<details>
+    <summary>Flake</summary>
 
 ```nix
+# flake.nix
 {
   inputs = {
     # ...
@@ -31,6 +38,59 @@ If you're using Nix flakes for your system, you can install the NixOS service li
 }
 ```
 
+</details>
+</li>
+
+<li>
+<details>
+    <summary>tack</summary>
+
+```bash
+tack add sandhole github:EpicEric/sandhole --fetch
+```
+
+```nix
+# configuration.nix
+let
+  inputs = import ./.tack;
+in
+{
+  imports = [
+    # ...
+    (import "${inputs.sandhole}/module.nix" { })
+  ];
+}
+```
+
+</details>
+</li>
+
+<li>
+<details>
+    <summary>npins</summary>
+
+```bash
+npins add github EpicEric sandhole
+```
+
+```nix
+# configuration.nix
+let
+  sources = import ./npins;
+in
+{
+  imports = [
+    # ...
+    (import "${sources.sandhole}/module.nix" { })
+  ];
+}
+```
+
+</details>
+</li>
+
+</ul>
+
 Here's an example `configuration.nix` with Sandhole and Agnos. You can find full options in [the NixOS module options page](./nixos_options.md):
 
 ```nix
@@ -40,8 +100,6 @@ Here's an example `configuration.nix` with Sandhole and Agnos. You can find full
 }:
 
 let
-  # ...
-
   # Add admin keys to this link farm
   adminKeys = pkgs.linkFarm "sandhole-admin-keys" [
     {
