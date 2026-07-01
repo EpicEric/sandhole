@@ -456,15 +456,15 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                         let mut stream = channel.into_stream();
                         match tcp_connection_timeout {
                             Some(duration) => {
-                                let _ = timeout(duration, async {
+                                let _ = timeout(
+                                    duration,
                                     copy_bidirectional_with_sizes(
                                         &mut stream,
                                         &mut io,
                                         buffer_size,
                                         buffer_size,
-                                    )
-                                    .await
-                                })
+                                    ),
+                                )
                                 .await;
                             }
                             None => {
@@ -489,15 +489,15 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                         let mut stream = channel.into_stream();
                         match tcp_connection_timeout {
                             Some(duration) => {
-                                let _ = timeout(duration, async {
+                                let _ = timeout(
+                                    duration,
                                     copy_bidirectional_with_sizes(
                                         &mut stream,
                                         &mut io,
                                         buffer_size,
                                         buffer_size,
-                                    )
-                                    .await
-                                })
+                                    ),
+                                )
                                 .await;
                             }
                             None => {
@@ -1013,15 +1013,15 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 tokio::spawn(async move {
                     match tcp_connection_timeout {
                         Some(duration) => {
-                            let _ = timeout(duration, async {
-                                let _ = copy_bidirectional_with_sizes(
+                            let _ = timeout(
+                                duration,
+                                copy_bidirectional_with_sizes(
                                     &mut stream,
                                     &mut channel,
                                     buffer_size,
                                     buffer_size,
-                                )
-                                .await;
-                            })
+                                ),
+                            )
                             .await;
                         }
                         None => {
@@ -1327,15 +1327,15 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                         let mut stream = channel.into_stream();
                         match tcp_connection_timeout {
                             Some(duration) => {
-                                let _ = timeout(duration, async {
+                                let _ = timeout(
+                                    duration,
                                     copy_bidirectional_with_sizes(
                                         &mut stream,
                                         &mut io,
                                         buffer_size,
                                         buffer_size,
-                                    )
-                                    .await
-                                })
+                                    ),
+                                )
                                 .await;
                             }
                             None => {
@@ -1398,15 +1398,15 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                         let mut stream = channel.into_stream();
                         match tcp_connection_timeout {
                             Some(duration) => {
-                                let _ = timeout(duration, async {
+                                let _ = timeout(
+                                    duration,
                                     copy_bidirectional_with_sizes(
                                         &mut stream,
                                         &mut io,
                                         buffer_size,
                                         buffer_size,
-                                    )
-                                    .await
-                                })
+                                    ),
+                                )
                                 .await;
                             }
                             None => {
@@ -1431,15 +1431,15 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                         let mut stream = channel.into_stream();
                         match tcp_connection_timeout {
                             Some(duration) => {
-                                let _ = timeout(duration, async {
+                                let _ = timeout(
+                                    duration,
                                     copy_bidirectional_with_sizes(
                                         &mut stream,
                                         &mut io,
                                         buffer_size,
                                         buffer_size,
-                                    )
-                                    .await
-                                })
+                                    ),
+                                )
                                 .await;
                             }
                             None => {
@@ -1804,15 +1804,15 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                         let mut stream = channel.into_stream();
                         match tcp_connection_timeout {
                             Some(duration) => {
-                                let _ = timeout(duration, async {
+                                let _ = timeout(
+                                    duration,
                                     copy_bidirectional_with_sizes(
                                         &mut stream,
                                         &mut io,
                                         buffer_size,
                                         buffer_size,
-                                    )
-                                    .await
-                                })
+                                    ),
+                                )
                                 .await;
                             }
                             None => {
@@ -1837,15 +1837,15 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                         let mut stream = channel.into_stream();
                         match tcp_connection_timeout {
                             Some(duration) => {
-                                let _ = timeout(duration, async {
+                                let _ = timeout(
+                                    duration,
                                     copy_bidirectional_with_sizes(
                                         &mut stream,
                                         &mut io,
                                         buffer_size,
                                         buffer_size,
-                                    )
-                                    .await
-                                })
+                                    ),
+                                )
                                 .await;
                             }
                             None => {

@@ -210,15 +210,14 @@ impl Handler for ServerHandler {
         {
             if let Some(ref api_login) = self.server.api_login {
                 // Send an auth request with a timeout.
-                match timeout(self.server.authentication_request_timeout, async {
-                    api_login
-                        .authenticate(&AuthenticationRequest {
-                            user,
-                            password,
-                            remote_address: &self.peer,
-                        })
-                        .await
-                })
+                match timeout(
+                    self.server.authentication_request_timeout,
+                    api_login.authenticate(&AuthenticationRequest {
+                        user,
+                        password,
+                        remote_address: &self.peer,
+                    }),
+                )
                 .await
                 {
                     Ok(Ok(is_authenticated)) => {

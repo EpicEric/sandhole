@@ -1145,15 +1145,15 @@ async fn handle_https_connection(
             .increment(1);
         match sandhole.tcp_connection_timeout {
             Some(duration) => {
-                let _ = timeout(duration, async {
-                    let _ = copy_bidirectional_with_sizes(
+                let _ = timeout(
+                    duration,
+                    copy_bidirectional_with_sizes(
                         &mut stream,
                         &mut channel,
                         sandhole.buffer_size,
                         sandhole.buffer_size,
-                    )
-                    .await;
-                })
+                    ),
+                )
                 .await;
             }
             None => {

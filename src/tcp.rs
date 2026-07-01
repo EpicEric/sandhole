@@ -98,15 +98,15 @@ impl TcpPortHandler for Arc<TcpHandler> {
                             match clone.tcp_connection_timeout {
                                 Some(duration) => {
                                     tokio::spawn(async move {
-                                        let _ = timeout(duration, async {
+                                        let _ = timeout(
+                                            duration,
                                             copy_bidirectional_with_sizes(
                                                 &mut stream,
                                                 &mut channel,
                                                 buffer_size,
                                                 buffer_size,
-                                            )
-                                            .await
-                                        })
+                                            ),
+                                        )
                                         .await;
                                     });
                                 }

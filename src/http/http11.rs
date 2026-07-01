@@ -143,15 +143,15 @@ where
                         match websocket_timeout {
                             // If there is a Websocket timeout, copy until the deadline is reached.
                             Some(duration) => {
-                                let _ = timeout(duration, async {
+                                let _ = timeout(
+                                    duration,
                                     copy_bidirectional_with_sizes(
                                         &mut upgraded_response,
                                         &mut upgraded_request,
                                         buffer_size,
                                         buffer_size,
-                                    )
-                                    .await
-                                })
+                                    ),
+                                )
                                 .await;
                             }
                             // If there isn't a Websocket timeout, copy data between both sides unconditionally.
