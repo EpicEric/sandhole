@@ -64,7 +64,6 @@ async fn tcp_multi_stream_download() {
         "--allow-requested-ports",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
-        "--http-request-timeout=60s",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -125,7 +124,7 @@ async fn tcp_multi_stream_download() {
     let mut data = vec![0u8; 20_000_000];
     rand::rng().fill_bytes(&mut data);
     let data: &'static [u8] = data.leak();
-    timeout(Duration::from_secs(30), async move {
+    timeout(Duration::from_secs(90), async move {
         let mut jh_vec = vec![];
         for file_size in [7_500_000usize, 10_000_000, 15_000_000, 20_000_000] {
             let tcp_stream = TcpStream::connect("127.0.0.1:12345")

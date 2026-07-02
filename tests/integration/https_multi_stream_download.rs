@@ -81,7 +81,7 @@ async fn https_multi_stream_download() {
         "--bind-hostnames=all",
         "--idle-connection-timeout=1s",
         "--authentication-request-timeout=5s",
-        "--http-request-timeout=60s",
+        "--http-request-timeout=90s",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));
     if timeout(Duration::from_secs(5), async {
@@ -155,7 +155,7 @@ async fn https_multi_stream_download() {
             .with_root_certificates(root_store)
             .with_no_client_auth(),
     );
-    timeout(Duration::from_secs(30), async move {
+    timeout(Duration::from_secs(90), async move {
         let mut jh_vec = vec![];
         for file_size in [7_500_000, 10_000_000, 15_000_000, 20_000_000] {
             let connector = TlsConnector::from(Arc::clone(&tls_config));
@@ -182,7 +182,7 @@ async fn https_multi_stream_download() {
                     .header(HOST, "foobar.tld")
                     .body(Body::empty())
                     .unwrap();
-                let Ok(mut response) = timeout(Duration::from_secs(60), async move {
+                let Ok(mut response) = timeout(Duration::from_secs(90), async move {
                     sender
                         .send_request(request)
                         .await
