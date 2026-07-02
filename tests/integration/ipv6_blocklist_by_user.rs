@@ -8,10 +8,13 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
 };
-use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     Channel, ChannelId,
     client::{Msg, Session},
+};
+use russh::{
+    client::ChannelOpenHandle,
+    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
 };
 use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
@@ -295,6 +298,7 @@ impl russh::client::Handler for SshClientProxy {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let router = Router::new().route("/", get(async || StatusCode::NO_CONTENT));
@@ -305,6 +309,7 @@ impl russh::client::Handler for SshClientProxy {
                 .await
                 .expect("Invalid request");
         });
+        reply.accept().await;
         Ok(())
     }
 

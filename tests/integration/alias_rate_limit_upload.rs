@@ -4,6 +4,7 @@ use std::{sync::Arc, time::Duration};
 use clap::Parser;
 use rand::{Rng, RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
+use russh::client::ChannelOpenHandle;
 use russh::keys::ssh_key::private::Ed25519Keypair;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
@@ -179,6 +180,7 @@ impl russh::client::Handler for SshClient {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let mut data = vec![0u8; 55_000];
@@ -187,6 +189,7 @@ impl russh::client::Handler for SshClient {
             let mut stream = channel.into_stream();
             stream.write_all(&data).await.unwrap();
         });
+        reply.accept().await;
         Ok(())
     }
 }

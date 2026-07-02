@@ -10,7 +10,7 @@ use rand::{Rng, RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::{
     Channel, ChannelMsg, MethodSet,
-    client::{self, Msg},
+    client::{self, ChannelOpenHandle, Msg},
     keys::ssh_key::private::Ed25519Keypair,
     server::{self, Auth, Server},
 };
@@ -205,6 +205,7 @@ impl client::Handler for SshClient {
         connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
         let handler = self.server.new_client(
@@ -240,6 +241,7 @@ impl client::Handler for SshClient {
                 }
             }
         });
+        reply.accept().await;
         Ok(())
     }
 }
@@ -284,8 +286,9 @@ impl server::Handler for HoneypotHandler {
     async fn channel_open_session(
         &mut self,
         mut channel: russh::Channel<server::Msg>,
+        reply: russh::server::ChannelOpenHandle,
         _session: &mut server::Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
             let mut expected_len = 55_000;
             while let Some(msg) = channel.wait().await {
@@ -298,7 +301,8 @@ impl server::Handler for HoneypotHandler {
                 }
             }
         });
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
 }
 
@@ -321,6 +325,7 @@ impl client::Handler for ProxyClient {
         connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
         let handler = Honeypot.new_client(
@@ -344,6 +349,7 @@ impl client::Handler for ProxyClient {
                 }
             }
         });
+        reply.accept().await;
         Ok(())
     }
 }

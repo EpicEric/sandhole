@@ -9,10 +9,13 @@ use hyper_util::{
     server::conn::auto::Builder,
 };
 use regex::Regex;
-use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     Channel,
     client::{self, Msg, Session},
+};
+use russh::{
+    client::ChannelOpenHandle,
+    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
 };
 use sandhole::{ApplicationConfig, entrypoint};
 use serde::Deserialize;
@@ -430,6 +433,7 @@ impl russh::client::Handler for SshClient {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         #[derive(Debug, Deserialize)]
@@ -458,6 +462,7 @@ impl russh::client::Handler for SshClient {
                 .await
                 .expect("Invalid request");
         });
+        reply.accept().await;
         Ok(())
     }
 }

@@ -7,6 +7,7 @@ use http::header::{COOKIE, HOST};
 use http_body_util::BodyExt;
 use hyper::{StatusCode, body::Incoming, server::conn::http1::Builder, service::service_fn};
 use hyper_util::rt::{TokioExecutor, TokioIo};
+use russh::client::ChannelOpenHandle;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     Channel,
@@ -194,6 +195,7 @@ impl russh::client::Handler for SshClient {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let router = Router::new().route(
@@ -216,6 +218,7 @@ impl russh::client::Handler for SshClient {
                 .await
                 .expect("Invalid request");
         });
+        reply.accept().await;
         Ok(())
     }
 }

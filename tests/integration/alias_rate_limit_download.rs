@@ -5,6 +5,7 @@ use clap::Parser;
 use rand::{Rng, RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use russh::ChannelMsg;
+use russh::client::ChannelOpenHandle;
 use russh::keys::ssh_key::private::Ed25519Keypair;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
@@ -186,6 +187,7 @@ impl russh::client::Handler for SshClient {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
@@ -200,6 +202,7 @@ impl russh::client::Handler for SshClient {
                 }
             }
         });
+        reply.accept().await;
         Ok(())
     }
 }

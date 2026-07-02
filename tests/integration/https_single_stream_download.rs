@@ -19,7 +19,7 @@ use hyper_util::{
 use rand::Rng;
 use russh::{
     Channel, Preferred,
-    client::{Msg, Session},
+    client::{ChannelOpenHandle, Msg, Session},
 };
 use russh::{
     client::Config,
@@ -231,6 +231,7 @@ impl russh::client::Handler for SshClient {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let data = self.0.clone();
@@ -255,6 +256,7 @@ impl russh::client::Handler for SshClient {
                 .await
                 .expect("Invalid request");
         });
+        reply.accept().await;
         Ok(())
     }
 }

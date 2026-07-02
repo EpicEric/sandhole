@@ -6,7 +6,7 @@ use clap::Parser;
 use rand::Rng;
 use russh::{
     Channel, Preferred,
-    client::{Msg, Session},
+    client::{ChannelOpenHandle, Msg, Session},
 };
 use russh::{
     client::Config,
@@ -179,6 +179,7 @@ impl russh::client::Handler for SshClient {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
@@ -201,6 +202,7 @@ impl russh::client::Handler for SshClient {
             stream.write_all(&len_buf[..]).await.unwrap();
             stream.flush().await.unwrap();
         });
+        reply.accept().await;
         Ok(())
     }
 }

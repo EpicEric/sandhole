@@ -40,9 +40,9 @@ use enumflags2::BitFlags;
 use ipnet::IpNet;
 use owo_colors::OwoColorize;
 use russh::{
-    Channel, ChannelId, MethodKind, MethodSet,
+    Channel, ChannelId, ChannelOpenFailure, MethodKind, MethodSet,
     keys::{HashAlg, PublicKey, ssh_key::Fingerprint},
-    server::{Auth, Handler, Msg, Session},
+    server::{Auth, ChannelOpenHandle, Handler, Msg, Session},
 };
 #[cfg_attr(not(feature = "login"), allow(unused_imports))]
 use tokio::time::timeout;
@@ -146,14 +146,18 @@ impl Handler for ServerHandler {
     async fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         // Only the first session will receive data. Others are rejected.
         let Some(mut rx) = self.rx.take() else {
             if matches!(self.auth_data, AuthenticatedData::None { .. }) {
                 return Err(russh::Error::Disconnect);
             }
-            return Ok(false);
+            reply
+                .reject(ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
         };
         self.channel_id = Some(channel.id());
         let graceful_cancellation_token = CancellationToken::new();
@@ -188,15 +192,35 @@ impl Handler for ServerHandler {
             }
         });
         self.open_session_join_handle = Some(DroppableHandle(join_handle));
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
 
     // Return the default authentication method.
     async fn auth_none(&mut self, _user: &str) -> Result<Auth, Self::Error> {
-        Ok(Auth::Reject {
-            proceed_with_methods: Some(MethodSet::from([MethodKind::PublicKey].as_slice())),
-            partial_success: false,
-        })
+        let password_login = {
+            #[cfg(feature = "login")]
+            {
+                self.server.api_login.is_some()
+            }
+            #[cfg(not(feature = "login"))]
+            {
+                false
+            }
+        };
+        if password_login {
+            Ok(Auth::Reject {
+                proceed_with_methods: Some(MethodSet::from(
+                    [MethodKind::Password, MethodKind::PublicKey].as_slice(),
+                )),
+                partial_success: false,
+            })
+        } else {
+            Ok(Auth::Reject {
+                proceed_with_methods: Some(MethodSet::from([MethodKind::PublicKey].as_slice())),
+                partial_success: false,
+            })
+        }
     }
 
     // Authenticate users with a password if the API login service is available.
@@ -918,7 +942,7 @@ impl Handler for ServerHandler {
     // Handle a local forwarding request (i.e. proxy tunnel for aliases).
     #[cfg_attr(
         not(coverage_nightly),
-        tracing::instrument(skip(self, _session), fields(peer = %self.peer), level = "debug")
+        tracing::instrument(skip(self, reply, _session), fields(peer = %self.peer), level = "debug")
     )]
     async fn channel_open_direct_tcpip(
         &mut self,
@@ -927,8 +951,9 @@ impl Handler for ServerHandler {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         // Reject invalid ports
         if port_to_connect > u16::MAX.into() || originator_port > u16::MAX.into() {
             return Err(russh::Error::Disconnect);
@@ -944,7 +969,10 @@ impl Handler for ServerHandler {
                 )
                 .into_bytes(),
             );
-            return Ok(false);
+            reply
+                .reject(ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
         }
         if let AuthenticatedData::Admin { admin_data, .. } = &mut self.auth_data {
             if admin_data.admin_interface.is_some() {
@@ -957,7 +985,10 @@ impl Handler for ServerHandler {
                     .into_bytes(),
                 );
                 self.cancellation_token.cancel();
-                return Ok(false);
+                reply
+                    .reject(ChannelOpenFailure::AdministrativelyProhibited)
+                    .await;
+                return Ok(());
             } else {
                 admin_data.is_forwarding = true;
             }
@@ -979,10 +1010,13 @@ impl Handler for ServerHandler {
         )
         .await?
         {
-            Ok(true)
+            reply.accept().await;
         } else {
-            Ok(false)
+            reply
+                .reject(ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
         }
+        Ok(())
     }
 }
 

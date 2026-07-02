@@ -2,10 +2,6 @@ use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
-use russh::{
-    Channel,
-    client::{Msg, Session},
-};
 use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     net::TcpStream,
@@ -119,20 +115,5 @@ impl russh::client::Handler for SshClient {
         _key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
-    }
-
-    async fn server_channel_open_forwarded_tcpip(
-        &mut self,
-        channel: Channel<Msg>,
-        _connected_address: &str,
-        _connected_port: u32,
-        _originator_address: &str,
-        _originator_port: u32,
-        _session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        tokio::spawn(async move {
-            channel.data(&b"\x00\x13Hello, world!"[..]).await.unwrap();
-        });
-        Ok(())
     }
 }
