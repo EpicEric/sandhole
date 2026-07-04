@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Properly handle incomplete TLS handshakes.
+
 ### Changed
 
 - Update dependencies.

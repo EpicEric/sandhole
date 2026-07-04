@@ -28,8 +28,7 @@ use rustls_pki_types::ServerName;
 use sandhole_socket::tcp_listener::{get_tcp_listener, get_tcp_listener_with_keepalive};
 use socket2::TcpKeepalive;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
-#[cfg_attr(not(feature = "acme"), allow(unused_imports))]
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::{
     fs,
     io::copy_bidirectional_with_sizes,
@@ -70,7 +69,7 @@ use crate::{
         TELEMETRY_COUNTER_SNI_CONNECTIONS, TELEMETRY_GAUGE_CPU_USAGE, TELEMETRY_GAUGE_TOTAL_MEMORY,
         TELEMETRY_GAUGE_USED_MEMORY, TELEMETRY_KEY_HOSTNAME, Telemetry,
     },
-    tls::{TlsPeekData, peek_sni_and_alpn},
+    tls::{ClientHelloStatus, RewindStream, TlsPeekData, parse_client_hello},
     udp::UdpHandler,
 };
 #[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
@@ -1084,6 +1083,9 @@ struct HandleHttpsConnectionConfig {
     http11_server_config: Arc<ServerConfig>,
 }
 
+// Maximum number of bytes to buffer while waiting for a complete ClientHello
+const MAX_CLIENT_HELLO_SIZE: usize = 1 << 15;
+
 async fn handle_https_connection(
     HandleHttpsConnectionConfig {
         mut stream,
@@ -1097,11 +1099,16 @@ async fn handle_https_connection(
         http11_server_config,
     }: HandleHttpsConnectionConfig,
 ) {
-    let mut buf = [0u8; 4096];
-    let Ok(Ok(n)) = timeout(sandhole.idle_connection_timeout, stream.peek(&mut buf)).await else {
+    let mut ssh_peek_buf = [0u8; 8];
+    let Ok(Ok(n)) = timeout(
+        sandhole.idle_connection_timeout,
+        stream.peek(&mut ssh_peek_buf),
+    )
+    .await
+    else {
         return;
     };
-    if connect_ssh_on_https_port && buf[..n].starts_with(b"SSH-2.0-") {
+    if connect_ssh_on_https_port && ssh_peek_buf[..n].starts_with(b"SSH-2.0-") {
         // Handle as an SSH connection instead of HTTPS.
         handle_ssh_connection(HandleSshConnectionConfig {
             stream,
@@ -1111,9 +1118,39 @@ async fn handle_https_connection(
         });
         return;
     }
-    let Some(TlsPeekData { sni, alpn }) = peek_sni_and_alpn(&buf[..n]).await else {
-        return;
+
+    let mut consumed: Vec<u8> = Vec::with_capacity(4096);
+    let mut read_buf = [0u8; 4096];
+    let TlsPeekData { sni, alpn } = loop {
+        let n = match timeout(sandhole.idle_connection_timeout, stream.read(&mut read_buf)).await {
+            Ok(Ok(0)) | Ok(Err(_)) | Err(_) => return,
+            Ok(Ok(n)) => n,
+        };
+        consumed.extend_from_slice(&read_buf[..n]);
+        match parse_client_hello(&consumed) {
+            ClientHelloStatus::Ready(peek_data) => break peek_data,
+            ClientHelloStatus::Incomplete if consumed.len() <= MAX_CLIENT_HELLO_SIZE => (),
+            ClientHelloStatus::Incomplete => {
+                #[cfg(not(coverage_nightly))]
+                tracing::debug!(%address, "Rejecting HTTPS connection: ClientHello too large.");
+                return;
+            }
+            ClientHelloStatus::Invalid(alert) => {
+                if !alert.is_empty() {
+                    let _ = stream.write_all(&alert).await;
+                }
+                let _ = stream.shutdown().await;
+                #[cfg(not(coverage_nightly))]
+                tracing::debug!(
+                    %address,
+                    "Rejecting HTTPS connection: invalid ClientHello or missing SNI."
+                );
+                return;
+            }
+        }
     };
+    let mut stream = RewindStream::new(consumed, stream);
+
     #[cfg(feature = "acme")]
     if alpn == [ACME_TLS_ALPN_NAME] {
         if let Some(challenge_config) = certificates.challenge_rustls_config() {
@@ -1134,6 +1171,7 @@ async fn handle_https_connection(
     }
     #[cfg(not(feature = "acme"))]
     let _ = certificates;
+
     let ip = address.ip().to_canonical();
     if let Some(tunnel_handler) = sandhole.sni.get(&sni, ip) {
         let Ok(mut channel) = tunnel_handler.tunneling_channel(ip, address.port()).await else {
