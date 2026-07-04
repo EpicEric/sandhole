@@ -14,25 +14,27 @@ jobs:
   build-book:
     name: Build book
     runs-on: ubuntu-24.04
-    env:
-      MDBOOK_VERSION: 0.5.2
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Install mdBook
-        uses: taiki-e/install-action@3d30e7d625f7c928dccd48823053b03bb2f6ed05 # v2.65.4
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
         with:
-          tool: mdbook@${{ env.MDBOOK_VERSION }}
+          nix_path: nixpkgs=channel:nixpkgs-unstable
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Build with mdBook
-        run: mdbook build book
+        run: nix-build ./nix -A packages._book
+      - name: Install rsync
+        run: |
+          nix-env -iA rsync -f '<nixpkgs>'
       - name: Deploy to Sandhole
         if: github.ref == 'refs/heads/main'
-        uses: up9cloud/action-rsync@e5f52e6a78755fa0ddbfd2d52f61de0490661665 # master
-        env:
-          SOURCE: book/book/
-          HOST: ${{ secrets.BOOK_SSH_HOST }}
-          PORT: ${{ secrets.BOOK_SSH_PORT }}
-          USER: ${{ secrets.BOOK_SSH_USER }}
-          KEY: ${{ secrets.BOOK_SSH_KEY }}
-          TARGET: ${{ secrets.BOOK_SSH_TARGET }}
+        run: |
+          echo "${{ secrets.BOOK_SSH_KEY }}" > /tmp/ssh-key
+          chmod 600 /tmp/ssh-key
+          rsync \
+            --delete-after \
+            -acPe 'ssh -p ${{ secrets.BOOK_SSH_PORT }} -i /tmp/ssh-key -o StrictHostKeyChecking=accept-new' \
+            result/ \
+            ${{ secrets.BOOK_SSH_USER }}@${{ secrets.BOOK_SSH_HOST }}:${{ secrets.BOOK_SSH_TARGET }}

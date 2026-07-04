@@ -18,7 +18,7 @@ jobs:
     name: Check rustfmt formatting on MSRV
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Fetch MSRV
@@ -33,14 +33,14 @@ jobs:
     name: Check Clippy lints on MSRV
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Fetch MSRV
         run: |
           rustup toolchain install ${RUST_MSRV}-x86_64-unknown-linux-gnu
           rustup override set ${RUST_MSRV}-x86_64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - name: Run Clippy
         run: |
           rustup component add clippy
@@ -49,14 +49,14 @@ jobs:
     name: Build on MSRV (default features)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Fetch MSRV
         run: |
           rustup toolchain install ${RUST_MSRV}-x86_64-unknown-linux-gnu
           rustup override set ${RUST_MSRV}-x86_64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
       - name: Build
         run: |
           cargo build --locked
@@ -64,14 +64,14 @@ jobs:
     name: Build on MSRV (no default features)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Fetch MSRV
         run: |
           rustup toolchain install ${RUST_MSRV}-x86_64-unknown-linux-gnu
           rustup override set ${RUST_MSRV}-x86_64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
       - name: Build
         run: |
           cargo build --locked --no-default-features
@@ -91,11 +91,11 @@ jobs:
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@3d30e7d625f7c928dccd48823053b03bb2f6ed05 # v2.65.4
+        uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907 # v2.82.8
         with:
           tool: cargo-nextest@${{ env.CARGO_NEXTEST_VERSION }}
       - name: Fetch nightly Rust
@@ -115,11 +115,11 @@ jobs:
     name: Test coverage on nightly (ubuntu-24.04)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Install cargo-llvm-cov and cargo-nextest
-        uses: taiki-e/install-action@3d30e7d625f7c928dccd48823053b03bb2f6ed05 # v2.65.4
+        uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907 # v2.82.8
         with:
           tool: cargo-llvm-cov@${{ env.CARGO_LLVM_COV_VERSION }},cargo-nextest@${{ env.CARGO_NEXTEST_VERSION }}
       - name: Fetch nightly Rust
@@ -132,7 +132,7 @@ jobs:
         run: |
           cargo llvm-cov nextest --no-fail-fast --verbose --codecov --locked --output-path codecov.json
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: ./codecov.json
           token: ${{ secrets.CODECOV_TOKEN }}
