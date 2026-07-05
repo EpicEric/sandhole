@@ -12,7 +12,7 @@ use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
-    sync::mpsc,
+    sync::watch,
     time::{sleep, timeout},
 };
 
@@ -164,7 +164,8 @@ async fn admin_window_change() {
         .expect("window_change failed");
 
     // 4. Interact with the admin interface and verify displayed data
-    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = watch::channel(String::new());
+    let rx_clone = rx.clone();
     let mut writer = channel.make_writer();
     let jh = tokio::spawn(async move {
         let mut parser = vt100_ctt::Parser::new(30, 140, 0);
@@ -202,7 +203,8 @@ async fn admin_window_change() {
         .map(|re| Regex::new(re).expect("Invalid regex"))
         .collect();
         loop {
-            let screen = rx.recv().await.unwrap();
+            assert!(rx.changed().await.is_ok(), "channel closed unexpectedly");
+            let screen = rx.borrow_and_update();
             if search_strings.iter().all(|re| re.is_match(&screen)) {
                 break;
             }
@@ -216,6 +218,8 @@ async fn admin_window_change() {
     .await
     .is_err()
     {
+        eprintln!("Last screen:");
+        eprintln!("{}", rx_clone.borrow().as_str());
         panic!("Timed out waiting for admin interface.");
     }
     sleep(Duration::from_millis(200)).await;
