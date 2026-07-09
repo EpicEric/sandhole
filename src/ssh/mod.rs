@@ -40,9 +40,9 @@ use enumflags2::BitFlags;
 use ipnet::IpNet;
 use owo_colors::OwoColorize;
 use russh::{
-    Channel, ChannelId, ChannelOpenFailure, MethodKind, MethodSet,
+    Channel, ChannelId, MethodKind, MethodSet,
     keys::{HashAlg, PublicKey, ssh_key::Fingerprint},
-    server::{Auth, ChannelOpenHandle, Handler, Msg, Session},
+    server::{Auth, Handler, Msg, Session},
 };
 #[cfg_attr(not(feature = "login"), allow(unused_imports))]
 use tokio::time::timeout;
@@ -146,18 +146,14 @@ impl Handler for ServerHandler {
     async fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
-        reply: ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<bool, Self::Error> {
         // Only the first session will receive data. Others are rejected.
         let Some(mut rx) = self.rx.take() else {
             if matches!(self.auth_data, AuthenticatedData::None { .. }) {
                 return Err(russh::Error::Disconnect);
             }
-            reply
-                .reject(ChannelOpenFailure::AdministrativelyProhibited)
-                .await;
-            return Ok(());
+            return Ok(false);
         };
         self.channel_id = Some(channel.id());
         let graceful_cancellation_token = CancellationToken::new();
@@ -192,8 +188,7 @@ impl Handler for ServerHandler {
             }
         });
         self.open_session_join_handle = Some(DroppableHandle(join_handle));
-        reply.accept().await;
-        Ok(())
+        Ok(true)
     }
 
     // Return the default authentication method.
@@ -948,7 +943,7 @@ impl Handler for ServerHandler {
     // Handle a local forwarding request (i.e. proxy tunnel for aliases).
     #[cfg_attr(
         not(coverage_nightly),
-        tracing::instrument(skip(self, reply, _session), fields(peer = %self.peer), level = "debug")
+        tracing::instrument(skip(self, _session), fields(peer = %self.peer), level = "debug")
     )]
     async fn channel_open_direct_tcpip(
         &mut self,
@@ -957,9 +952,8 @@ impl Handler for ServerHandler {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
-        reply: ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<bool, Self::Error> {
         // Reject invalid ports
         if port_to_connect > u16::MAX.into() || originator_port > u16::MAX.into() {
             return Err(russh::Error::Disconnect);
@@ -975,10 +969,8 @@ impl Handler for ServerHandler {
                 )
                 .into_bytes(),
             );
-            reply
-                .reject(ChannelOpenFailure::AdministrativelyProhibited)
-                .await;
-            return Ok(());
+
+            return Ok(false);
         }
         if let AuthenticatedData::Admin { admin_data, .. } = &mut self.auth_data {
             if admin_data.admin_interface.is_some() {
@@ -991,10 +983,7 @@ impl Handler for ServerHandler {
                     .into_bytes(),
                 );
                 self.cancellation_token.cancel();
-                reply
-                    .reject(ChannelOpenFailure::AdministrativelyProhibited)
-                    .await;
-                return Ok(());
+                return Ok(false);
             } else {
                 admin_data.is_forwarding = true;
             }
@@ -1016,13 +1005,10 @@ impl Handler for ServerHandler {
         )
         .await?
         {
-            reply.accept().await;
+            Ok(true)
         } else {
-            reply
-                .reject(ChannelOpenFailure::AdministrativelyProhibited)
-                .await;
+            Ok(false)
         }
-        Ok(())
     }
 }
 

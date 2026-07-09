@@ -4,13 +4,10 @@ use std::{
 };
 
 use clap::Parser;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     Channel,
     client::{Msg, Session},
-};
-use russh::{
-    client::ChannelOpenHandle,
-    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
 };
 use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
@@ -163,7 +160,6 @@ impl russh::client::Handler for SshClient {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
-        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
@@ -172,7 +168,6 @@ impl russh::client::Handler for SshClient {
             channel.eof().await.unwrap();
             channel.close().await.unwrap();
         });
-        reply.accept().await;
         Ok(())
     }
 }

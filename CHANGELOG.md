@@ -5,6 +5,7 @@
 ### Changed
 
 - Update dependencies.
+- Downgrade russh to 0.61.2.
 
 ## 0.10.2 (2026-07-05)
 

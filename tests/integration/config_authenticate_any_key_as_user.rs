@@ -12,13 +12,10 @@ use hyper_util::{
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use regex::Regex;
+use russh::keys::{key::PrivateKeyWithHashAlg, ssh_key::private::Ed25519Keypair};
 use russh::{
     Channel,
     client::{Msg, Session},
-};
-use russh::{
-    client::ChannelOpenHandle,
-    keys::{key::PrivateKeyWithHashAlg, ssh_key::private::Ed25519Keypair},
 };
 use rustls::{
     RootCertStore,
@@ -239,7 +236,6 @@ impl russh::client::Handler for SshClient {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
-        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let router = Router::new().route("/", get(async || "Hopefully not a malicious service."));
@@ -250,7 +246,6 @@ impl russh::client::Handler for SshClient {
                 .await
                 .expect("Invalid request");
         });
-        reply.accept().await;
         Ok(())
     }
 }

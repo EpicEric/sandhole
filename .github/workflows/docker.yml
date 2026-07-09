@@ -49,6 +49,10 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      # The runner ships a v1-format /etc/containers/registries.conf, which the
+      # newer skopeo from nixpkgs-unstable rejects. Point it at our own v2 file.
+      CONTAINERS_REGISTRIES_CONF: ${{ github.workspace }}/registries.conf
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -85,6 +89,8 @@ jobs:
         with:
           nix_path: nixpkgs=channel:nixpkgs-unstable
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Write v2 `registries.conf`
+        run: printf 'unqualified-search-registries = ["docker.io"]\n' > "${CONTAINERS_REGISTRIES_CONF}"
       - name: Install skopeo
         run: |
           nix-env -iA skopeo -f '<nixpkgs>'

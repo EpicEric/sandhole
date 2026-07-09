@@ -18,13 +18,10 @@ use hyper_util::{
 };
 
 use rand::Rng;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     Channel,
     client::{Msg, Session},
-};
-use russh::{
-    client::ChannelOpenHandle,
-    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
 };
 use rustls::{
     RootCertStore,
@@ -210,7 +207,6 @@ impl russh::client::Handler for SshClient {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
-        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let router = Router::new().route("/", post(async |_body: Bytes| StatusCode::NO_CONTENT));
@@ -221,7 +217,6 @@ impl russh::client::Handler for SshClient {
                 .await
                 .expect("Invalid request");
         });
-        reply.accept().await;
         Ok(())
     }
 }

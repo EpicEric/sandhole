@@ -1229,7 +1229,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                         "{} {} Cannot listen on port {} for alias {} ({})\r\n",
                         Utc::now().to_rfc3339().dimmed(),
                         " Error ".black().on_red().bold(),
-                        &assigned_port,
+                        assigned_port,
                         address,
                         error,
                     )
@@ -1254,7 +1254,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                         Utc::now().to_rfc3339().dimmed(),
                         "Starting alias".green().bold(),
                         address,
-                        &assigned_port,
+                        assigned_port,
                     )
                     .into_bytes(),
                 );
@@ -1636,7 +1636,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                                     .domain
                                     .as_deref()
                                     .unwrap_or("<Sandhole's IP>"),
-                                &port,
+                                port,
                                 error,
                             )
                             .into_bytes(),
@@ -1688,7 +1688,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                                 .domain
                                 .as_deref()
                                 .unwrap_or("<Sandhole's IP>"),
-                            &assigned_port,
+                            assigned_port,
                             error,
                         )
                         .into_bytes(),
@@ -1716,7 +1716,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                                 .domain
                                 .as_deref()
                                 .unwrap_or("<Sandhole's IP>"),
-                            &assigned_port,
+                            assigned_port,
                         )
                         .into_bytes(),
                     );
@@ -1753,7 +1753,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                         .domain
                         .as_deref()
                         .unwrap_or("<Sandhole's IP>"),
-                    &assigned_port.0,
+                    assigned_port.0,
                 )
                 .into_bytes(),
             );
@@ -2014,7 +2014,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
                                     .domain
                                     .as_deref()
                                     .unwrap_or("<Sandhole's IP>"),
-                                &port,
+                                port,
                                 error,
                             )
                             .into_bytes(),
@@ -2066,7 +2066,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
                                 .domain
                                 .as_deref()
                                 .unwrap_or("<Sandhole's IP>"),
-                            &assigned_port,
+                            assigned_port,
                             error,
                         )
                         .into_bytes(),
@@ -2094,7 +2094,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
                                 .domain
                                 .as_deref()
                                 .unwrap_or("<Sandhole's IP>"),
-                            &assigned_port,
+                            assigned_port,
                         )
                         .into_bytes(),
                     );
@@ -2131,7 +2131,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
                         .domain
                         .as_deref()
                         .unwrap_or("<Sandhole's IP>"),
-                    &assigned_port.0,
+                    assigned_port.0,
                 )
                 .into_bytes(),
             );

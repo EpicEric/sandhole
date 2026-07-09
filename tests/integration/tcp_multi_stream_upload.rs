@@ -6,7 +6,7 @@ use clap::Parser;
 use rand::Rng;
 use russh::{
     Channel, ChannelMsg, Preferred,
-    client::{ChannelOpenHandle, Msg, Session},
+    client::{Msg, Session},
 };
 use russh::{
     client::Config,
@@ -173,7 +173,6 @@ impl russh::client::Handler for SshClient {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
-        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let bytes = self.0.clone();
@@ -192,7 +191,6 @@ impl russh::client::Handler for SshClient {
                     .unwrap();
             }
         });
-        reply.accept().await;
         Ok(())
     }
 }

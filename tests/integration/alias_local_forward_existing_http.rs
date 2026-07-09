@@ -11,13 +11,10 @@ use hyper_util::{
 };
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key, ssh_key::private::Ed25519Keypair};
 use russh::{
     Channel,
     client::{self, Msg, Session},
-};
-use russh::{
-    client::ChannelOpenHandle,
-    keys::{key::PrivateKeyWithHashAlg, load_secret_key, ssh_key::private::Ed25519Keypair},
 };
 use sandhole::{ApplicationConfig, entrypoint};
 use tokio::{
@@ -199,7 +196,6 @@ impl russh::client::Handler for SshClient {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
-        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let router = Router::new().route("/", get(async || "Connected via local forwarding!"));
@@ -210,7 +206,6 @@ impl russh::client::Handler for SshClient {
                 .await
                 .expect("Invalid request");
         });
-        reply.accept().await;
         Ok(())
     }
 }

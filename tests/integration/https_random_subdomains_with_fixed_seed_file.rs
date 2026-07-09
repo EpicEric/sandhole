@@ -9,13 +9,10 @@ use hyper_util::{
     server::conn::auto::Builder,
 };
 use rand::{rng, seq::IndexedRandom};
+use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     Channel,
     client::{Msg, Session},
-};
-use russh::{
-    client::ChannelOpenHandle,
-    keys::{key::PrivateKeyWithHashAlg, load_secret_key},
 };
 use rustls::{
     RootCertStore,
@@ -253,7 +250,6 @@ impl russh::client::Handler for SshClient {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
-        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let router = Router::new().route("/", head(async || "I'm always at the same subdomain!"));
@@ -264,7 +260,6 @@ impl russh::client::Handler for SshClient {
                 .await
                 .expect("Invalid request");
         });
-        reply.accept().await;
         Ok(())
     }
 }
