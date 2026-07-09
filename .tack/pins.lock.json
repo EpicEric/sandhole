@@ -11,16 +11,16 @@
     "type": "github",
     "owner": "NixOS",
     "repo": "nixpkgs",
-    "rev": "6edbf1a6a03e75886a6609c088801a0856449e88",
-    "narHash": "sha256-0lkauQbtrljJqwtzTCILPAiHAJyMvn6XDo264moDv30=",
-    "lastModified": 1783214977
+    "rev": "f205b5574fd0cb7da5b702a2da51507b7f4fdd1b",
+    "narHash": "sha256-/NAkDSsve+GNM0Bt6tleJdCGfsTlK89nPjkVOzZMo0s=",
+    "lastModified": 1783279667
   },
   "rust-overlay": {
     "type": "github",
     "owner": "oxalica",
     "repo": "rust-overlay",
-    "rev": "cb368fd55ced25a1fa12414b9e984cdfb1681d18",
-    "narHash": "sha256-cTDI249Vl2JTQ3aicT9jeJPIBlNlodpJbdO0yLigCzU=",
-    "lastModified": 1783231873
+    "rev": "e8e9d70b96113fd49ccde6c3e08fb260b6ef5dd6",
+    "narHash": "sha256-zSX553aXiIKJHWzUF6nrDKgeNRlfNK/SdyNYSbs2nkM=",
+    "lastModified": 1783614422
   }
 }

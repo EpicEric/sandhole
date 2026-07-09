@@ -149,7 +149,7 @@ jobs:
       - build-msrv-no-default-features
       - tests-nightly
       - coverage-nightly
-    uses: ./.github/workflows/build.yml
+    uses: ./.github/workflows/docker.yml
     secrets:
       dockerhub-push-token: ${{ secrets.DOCKERHUB_PUSH_TOKEN  }}
       ghcr-push-token: ${{ secrets.GITHUB_TOKEN }}

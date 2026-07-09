@@ -30,6 +30,12 @@ in
   inherit sandhole sandhole-no_default_features udp_over_tcp;
   default = sandhole;
 
+  docker = pkgs.dockerTools.buildImage {
+    name = "sandhole";
+    tag = "latest";
+    config.Entrypoint = [ (lib.getExe sandhole) ];
+  };
+
   _docs =
     (pkgs.nixosOptionsDoc {
       options = removeAttrs evalOptions.options [ "_module" ];
