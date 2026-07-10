@@ -29,16 +29,6 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
-  build-docker:
-    name: Build for Docker
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/docker.yml
-    secrets:
-      dockerhub-push-token: ${{ secrets.DOCKERHUB_PUSH_TOKEN  }}
-      ghcr-push-token: ${{ secrets.GITHUB_TOKEN }}
-
   build-linux:
     strategy:
       fail-fast: false
@@ -78,10 +68,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15-intel
+          - runner: macos-26-intel
             target: x86_64-apple-darwin
             key: macos-amd64
-          - runner: macos-15
+          - runner: macos-26
             target: aarch64-apple-darwin
             key: macos-arm64
     name: Build for ${{ matrix.key }}

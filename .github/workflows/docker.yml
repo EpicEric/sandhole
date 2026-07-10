@@ -10,7 +10,7 @@ on:
 
 jobs:
   build-docker-image:
-    name: Build Docker image (${{ matrix.runner }})
+    name: Build Docker image (linux-${{ matrix.key }})
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +31,9 @@ jobs:
         with:
           nix_path: nixpkgs=channel:nixpkgs-unstable
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            extra-substituters = ${{ vars.NIKS3_SERVER_URL }}
+            extra-trusted-public-keys = ${{ vars.NIKS3_PUBLIC_KEY }}
       - name: Build Docker image
         run: |
           DOCKER_PATH=$(nix build .#docker --no-link --print-out-paths)

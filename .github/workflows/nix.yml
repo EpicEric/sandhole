@@ -1,6 +1,7 @@
 on:
   push:
     branches: ["main"]
+    tags: ["v*.*.*"]
 
 permissions:
   contents: read
@@ -31,7 +32,6 @@ jobs:
           nix_path: nixpkgs=channel:nixpkgs-unstable
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
           extra_nix_config: |
-            system = ${{ matrix.system }}
             extra-substituters = ${{ vars.NIKS3_SERVER_URL }}
             extra-trusted-public-keys = ${{ vars.NIKS3_PUBLIC_KEY }}
       - id: build
@@ -62,3 +62,14 @@ jobs:
           UDP_OVER_TCP_PATH: ${{ steps.build.outputs.udp_over_tcp }}
         run: |
           cachix push ${CACHIX_NAME} ${SANDHOLE_PATH} ${UDP_OVER_TCP_PATH}
+  build-docker:
+    name: Build Docker
+    permissions:
+      contents: read
+      packages: write
+    needs:
+      - build-nix-packages
+    uses: ./.github/workflows/docker.yml
+    secrets:
+      dockerhub-push-token: ${{ secrets.DOCKERHUB_PUSH_TOKEN  }}
+      ghcr-push-token: ${{ secrets.GITHUB_TOKEN }}
