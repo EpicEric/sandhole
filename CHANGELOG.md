@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Change license to AGPL-3.0-or-later.
 - Update dependencies.
 - Downgrade russh to 0.61.2.
 

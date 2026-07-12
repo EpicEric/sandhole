@@ -1,3 +1,19 @@
+# sandhole: Expose HTTP/SSH/TCP services through SSH port forwarding
+# Copyright (C) 2024-2026 Eric Rodrigues Pires
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+# more details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <https://www.gnu.org/licenses/>.
+
 {
   system ? builtins.currentSystem,
   inputs ? import ../.tack,
@@ -51,7 +67,7 @@ let
         name = "sandhole";
         description = "Expose HTTP/SSH/TCP services through SSH port forwarding";
         homepage = "https://sandhole.com.br";
-        license = lib.licenses.mit;
+        license = lib.licenses.agpl3Plus;
         mainProgram = "sandhole";
         platforms = lib.platforms.linux ++ lib.platforms.darwin;
       };
@@ -76,7 +92,7 @@ let
         name = "sandhole_udp_over_tcp";
         description = "Proxy UDP traffic for Sandhole via SSH";
         homepage = "https://sandhole.com.br";
-        license = lib.licenses.mit;
+        license = lib.licenses.agpl3Plus;
         mainProgram = "sandhole_udp_over_tcp";
         platforms = lib.platforms.linux ++ lib.platforms.darwin;
       };
