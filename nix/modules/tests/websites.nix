@@ -133,7 +133,6 @@ in
           sandholeHost = "192.168.10.10";
           sandholePort = 2222;
           sandholeKeyPath = "/etc/ssh_key";
-          sandholeExecArguments = "http2";
         };
       };
   };

@@ -77,16 +77,12 @@
           inherit system;
           overlays = [ (import inputs.rust-overlay) ];
         };
-        craneLib = (import inputs.crane { inherit pkgs; }).overrideToolchain (
-          p: p.rust-bin.stable.latest.default
-        );
 
         inherit
           (import ./nix {
             inherit
               system
               pkgs
-              craneLib
               ;
           })
           packages

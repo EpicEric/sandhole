@@ -48,7 +48,7 @@ in
 
   docker = pkgs.dockerTools.buildImage {
     name = "sandhole";
-    tag = "latest";
+    tag = "musl";
     config.Entrypoint = [ (lib.getExe sandhole) ];
   };
 

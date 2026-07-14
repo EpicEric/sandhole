@@ -29,7 +29,3 @@ type = "fetch"
 [inputs.rust-overlay]
 url = "github:oxalica/rust-overlay/master"
 type = "fetch"
-
-[inputs.crane]
-url = "github:ipetkov/crane/master"
-type = "fetch"

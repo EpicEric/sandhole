@@ -21,43 +21,51 @@
     inherit system;
     overlays = [ (import inputs.rust-overlay) ];
   },
-  craneLib ? (import inputs.crane { inherit pkgs; }).overrideToolchain (
-    p: p.rust-bin.stable.latest.default
-  ),
 }:
 let
-  inherit (pkgs) lib;
+  inherit (pkgs) pkgsStatic lib;
+
+  rustPlatform = pkgsStatic.makeRustPlatform {
+    cargo = pkgsStatic.rust-bin.stable.latest.default;
+    rustc = pkgsStatic.rust-bin.stable.latest.default;
+  };
 
   src = lib.fileset.toSource {
     root = ../.;
     fileset = lib.fileset.unions [
-      (craneLib.fileset.commonCargoSources ../.)
+      ../Cargo.toml
+      ../Cargo.lock
       ../README.md
+      ../.cargo
       ../.config/nextest.toml
-      ../tests/data
+      ../sandhole_socket
+      ../src
+      ../udp_over_tcp
+      ../tests
     ];
   };
 
   commonArgs = {
     inherit src;
+    __structuredAttrs = true;
     strictDeps = true;
+    cargoLock.lockFile = ../Cargo.lock;
 
     nativeBuildInputs = [
-      pkgs.cmake
-      pkgs.installShellFiles
-      pkgs.perl
+      pkgsStatic.cmake
+      pkgsStatic.installShellFiles
+      pkgsStatic.perl
     ]
-    ++ lib.optionals (system == "x86_64-darwin" || system == "aarch64-darwin") [ pkgs.lld ];
+    ++ lib.optionals (system == "x86_64-darwin" || system == "aarch64-darwin") [ pkgsStatic.lld ];
   };
 
-  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-
-  sandhole = craneLib.buildPackage (
+  sandhole = rustPlatform.buildRustPackage (
     commonArgs
     // {
-      inherit cargoArtifacts;
+      pname = (lib.importTOML ../Cargo.toml).package.name;
+      version = (lib.importTOML ../Cargo.toml).package.version;
       doCheck = false;
-      postInstall = lib.optionalString (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) ''
+      postInstall = lib.optionalString (pkgsStatic.stdenv.buildPlatform.canExecute pkgsStatic.stdenv.hostPlatform) ''
         installShellCompletion --cmd sandhole \
           --bash <($out/bin/sandhole --completions bash) \
           --fish <($out/bin/sandhole --completions fish) \
@@ -74,20 +82,15 @@ let
     }
   );
 
-  sandhole-no_default_features = sandhole.overrideAttrs {
-    cargoExtraArgs = "--locked --no-default-features";
-  };
+  sandhole-no_default_features = sandhole.overrideAttrs { buildNoDefaultFeatures = true; };
 
-  udp_over_tcp = craneLib.buildPackage (
+  udp_over_tcp = rustPlatform.buildRustPackage (
     commonArgs
     // {
-      inherit cargoArtifacts;
-      inherit (craneLib.crateNameFromCargoToml { cargoToml = ../udp_over_tcp/Cargo.toml; })
-        pname
-        version
-        ;
+      pname = (lib.importTOML ../udp_over_tcp/Cargo.toml).package.name;
+      version = (lib.importTOML ../udp_over_tcp/Cargo.toml).package.version;
+      buildAndTestSubdir = "udp_over_tcp";
       doCheck = false;
-      cargoExtraArgs = "-p sandhole_udp_over_tcp";
       meta = {
         name = "sandhole_udp_over_tcp";
         description = "Proxy UDP traffic for Sandhole via SSH";
@@ -113,20 +116,15 @@ in
 
   checks = import ./checks.nix {
     inherit
-      cargoArtifacts
-      commonArgs
-      craneLib
       pkgs
       sandhole
-      sandhole-no_default_features
-      udp_over_tcp
-      src
       ;
   };
 
-  shell = craneLib.devShell {
+  shell = pkgs.mkShell {
     packages = [
       # General dependencies
+      pkgs.rust-bin.stable.latest.default
       pkgs.just
 
       # Book dependencies
