@@ -15,7 +15,7 @@ ssh -p 2222 -R my.tunnel:3000:localhost:2000 sandhole.com.br allowed-fingerprint
 This option forces proxied HTTP requests to be redirected to HTTPS.
 
 ```bash
-ssh -p 2222 -R my.tunnel:80:localhost:8080 sandhole.com.br force-https
+ssh -p 2222 -R website.com:80:localhost:8080 sandhole.com.br force-https
 ```
 
 ## `host`
@@ -23,7 +23,7 @@ ssh -p 2222 -R my.tunnel:80:localhost:8080 sandhole.com.br force-https
 This option tells Sandhole to modify the `Host` header in proxied HTTP requests to use the provided host.
 
 ```bash
-ssh -p 2222 -R my.tunnel:80:localhost:8080 sandhole.com.br host=some.host
+ssh -p 2222 -R website.com:80:localhost:8080 sandhole.com.br host=some.host
 ```
 
 ## `http2`
@@ -31,7 +31,7 @@ ssh -p 2222 -R my.tunnel:80:localhost:8080 sandhole.com.br host=some.host
 This option tells Sandhole to serve HTTP/2 instead of HTTP/1.1 for your service. This option only works over HTTPS, so you may want to also set `force-https`.
 
 ```bash
-ssh -p 2222 -R my.tunnel:80:localhost:8080 sandhole.com.br http2 force-https
+ssh -p 2222 -R website.com:80:localhost:8080 sandhole.com.br http2 force-https
 ```
 
 ## `ip-allowlist` / `ip-blocklist`
@@ -55,7 +55,7 @@ ssh -p 2222 -R my.tunnel:80:localhost:8080 sandhole.com.br pool=16
 This option tells Sandhole that it should use your provided TLS backend. This guarantees that Sandhole cannot see unencrypted traffic. This option only works over HTTPS, so you may want to also set `force-https`.
 
 ```bash
-ssh -p 2222 -R my.tunnel:80:localhost:8080 sandhole.com.br sni-proxy force-https
+ssh -p 2222 -R website.com:80:localhost:8080 sandhole.com.br sni-proxy force-https
 ```
 
 ## `tcp-alias`

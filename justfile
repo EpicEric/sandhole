@@ -18,7 +18,7 @@ cli:
     echo "" >> book/src/cli.md
     echo "---" >> book/src/cli.md
     echo "" >> book/src/cli.md
-    cat result/cli.html >> book/src/cli.md
+    sed 's/class="terminal"/style="white-space:pre-wrap;word-break:keep-all;"/' result/cli.html >> book/src/cli.md
 
 nixos-docs:
     nix-build ./nix -A packages._docs

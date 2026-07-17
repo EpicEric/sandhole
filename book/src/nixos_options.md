@@ -237,6 +237,38 @@ true
 
 
 
+## services\.sandhole\.settings\.disable-udp
+
+
+
+Disable all UDP port tunneling\. By default, this is enabled globally\.
+
+**Warning:** If this option is false or unset and ` services.sandhole.openFirewall ` is true,
+all unprivileged UDP ports (i\.e\. >= 1024) will be opened\.
+
+
+
+*Type:*
+boolean
+
+
+
+*Default:*
+
+```nix
+false
+```
+
+
+
+*Example:*
+
+```nix
+true
+```
+
+
+
 ## services\.sandhole\.settings\.domain
 
 

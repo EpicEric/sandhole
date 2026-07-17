@@ -1,6 +1,6 @@
 # NixOS
 
-Sandhole is available as a flake, containing an overlay and a NixOS service.
+Sandhole is available as a NixOS module, which runs it as a systemd service.
 
 ## Setup
 
@@ -267,10 +267,12 @@ In order to avoid re-building Sandhole for each update, you can use either of Sa
 
   nix.settings = {
     substituters = [
+      # ...
       "https://cache.eric.dev.br"
       "https://sandhole.cachix.org"
     ];
     trusted-public-keys = [
+      # ...
       "cache.eric.dev.br-1:szEyq5LCjxDCUHYSRaSFU5HdHmR7QlT+FRG3tB9QtpE="
       "sandhole.cachix.org-1:cZadr6kgjQcRvsr++Nv9kgtMOrbLahiZBpuI9WpIXvA="
     ];
