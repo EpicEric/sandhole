@@ -21,9 +21,6 @@
     inherit system;
     overlays = [ (import inputs.rust-overlay) ];
   },
-  craneLib ? (import inputs.crane { inherit pkgs; }).overrideToolchain (
-    p: p.rust-bin.stable.latest.default
-  ),
 }:
 let
   inherit (pkgs) lib;
@@ -37,7 +34,6 @@ in
           system
           inputs
           pkgs
-          craneLib
           ;
       }).sandhole;
 }
