@@ -14,7 +14,14 @@
 // You should have received a copy of the GNU Affero General Public License along
 // with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::{collections::BTreeSet, mem, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeSet,
+    mem,
+    net::{IpAddr, SocketAddr},
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
 
 use color_eyre::eyre::eyre;
 use enumflags2::{BitFlags, bitflags};
@@ -391,7 +398,9 @@ impl SshCommand for HostCommand {
         match context.auth_data {
             AuthenticatedData::User { user_data } | AuthenticatedData::Admin { user_data, .. } => {
                 let host = mem::take(&mut self.0);
-                DnsName::try_from_str(&host).map_err(|_| eyre!("invalid host"))?;
+                if IpAddr::from_str(&host).is_err() && DnsName::try_from_str(&host).is_err() {
+                    return Err(eyre!("invalid host (expected IP or domain, got {host})"));
+                }
                 user_data.http_data.write().expect("not poisoned").host = Some(host);
                 context.commands.insert(self.flag());
                 Ok(())
