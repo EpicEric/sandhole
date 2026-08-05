@@ -259,7 +259,7 @@ You can then connect services with the provided keys. For example, to use a Vaul
 
 ## Binary caching
 
-In order to avoid re-building Sandhole for each update, you can use either of Sandhole's binary caches. In `configuration.nix`:
+In order to avoid re-building Sandhole for each update, you can use Sandhole's binary cache. In `configuration.nix`:
 
 ```nix
 {
@@ -269,12 +269,10 @@ In order to avoid re-building Sandhole for each update, you can use either of Sa
     substituters = [
       # ...
       "https://cache.eric.dev.br"
-      "https://sandhole.cachix.org"
     ];
     trusted-public-keys = [
       # ...
       "cache.eric.dev.br-1:szEyq5LCjxDCUHYSRaSFU5HdHmR7QlT+FRG3tB9QtpE="
-      "sandhole.cachix.org-1:cZadr6kgjQcRvsr++Nv9kgtMOrbLahiZBpuI9WpIXvA="
     ];
   };
 }
