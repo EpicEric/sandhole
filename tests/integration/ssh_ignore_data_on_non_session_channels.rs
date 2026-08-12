@@ -17,6 +17,7 @@
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
+use russh::client::ChannelOpenHandle;
 use russh::keys::{key::PrivateKeyWithHashAlg, load_secret_key};
 use russh::{
     Channel,
@@ -157,6 +158,7 @@ impl russh::client::Handler for SshClient {
         _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         tokio::spawn(async move {
@@ -171,6 +173,7 @@ impl russh::client::Handler for SshClient {
             }
             channel.eof().await.unwrap();
         });
+        reply.accept().await;
         Ok(())
     }
 }

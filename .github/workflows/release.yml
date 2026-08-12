@@ -68,9 +68,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-26-intel
-            target: x86_64-apple-darwin
-            key: macos-amd64
           - runner: macos-26
             target: aarch64-apple-darwin
             key: macos-arm64
@@ -154,11 +151,6 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: sandhole-linux-arm64
-          path: out/
-      - name: Download macos-amd64 artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: sandhole-macos-amd64
           path: out/
       - name: Download macos-arm64 artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
