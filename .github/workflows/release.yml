@@ -52,6 +52,8 @@ jobs:
           rustup toolchain install ${RUST_VERSION}
           rustup override set ${RUST_VERSION}
           rustup target add ${{ matrix.target }}
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Build
         run: |
           cargo build --release --locked --target ${{ matrix.target }}

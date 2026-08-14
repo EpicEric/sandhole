@@ -4442,7 +4442,7 @@ dependencies = [
 
 [[package]]
 name = "sandhole"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "ahash",
  "async-speed-limit",
@@ -4524,7 +4524,7 @@ dependencies = [
 
 [[package]]
 name = "sandhole_udp_over_tcp"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "ahash",
  "clap",
