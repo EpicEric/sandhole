@@ -2,21 +2,15 @@
 
 Sandhole has experimental support for UDP over SSH, with a thin TCP-based protocol.
 
-Provided that the Sandhole instance that you wish to connect to has UDP enabled, the quickest way to get UDP running is with the [`udp_over_tcp.py` client provided in the Sandhole repository](https://github.com/EpicEric/sandhole/blob/main/udp_over_tcp.py):
+Provided that the Sandhole instance that you wish to connect to has UDP enabled, the quickest way to get UDP running is with the pre-compiled `sandhole_udp_over_tcp` client:
 
 ```bash
-wget https://raw.githubusercontent.com/EpicEric/sandhole/refs/heads/main/udp_over_tcp.py
-python3 udp_over_tcp.py --udp-port 12345 --tcp-port 6789
+wget --output-document sandhole_udp_over_tcp https://sandhole.com.br/download/latest/sandhole_udp_over_tcp-linux-x86_64
+chmod +x sandhole_udp_over_tcp
+./sandhole_udp_over_tcp --udp-port 12345 --tcp-port 6789
 ```
 
 This will create a TCP server listening on port 6789 which proxies UDP-over-TCP data to port 12345.
-
-Alternatively, for better performance, a Rust version can be installed and run with:
-
-```bash
-cargo install --locked sandhole_udp_over_tcp
-sandhole_udp_over_tcp --udp-port 12345 --tcp-port 6789
-```
 
 In order to create an UDP socket on port 9999 of Sandhole, use the reserved `udp.sandhole` remote host:
 
@@ -31,9 +25,7 @@ Make sure that you're pointing to the local TCP port created from the script abo
 You can also local-forward with the same script by passing the `--local-forwarding` flag. For example, you might forward the connection above (UDP port 9999) as:
 
 ```bash
-python3 udp_over_tcp.py --udp-port 33333 --tcp-port 4000 --local-forwarding
-# -- or --
-sandhole_udp_over_tcp --udp-port 33333 --tcp-port 4000 --local-forwarding
+./sandhole_udp_over_tcp --udp-port 33333 --tcp-port 4000 --local-forwarding
 ```
 
 ```bash

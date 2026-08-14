@@ -55,8 +55,10 @@ jobs:
       - name: Build
         run: |
           cargo build --release --locked --target ${{ matrix.target }}
+          cargo build --release --locked --target ${{ matrix.target }} --package sandhole_udp_over_tcp
           mkdir dist
           cp target/${{ matrix.target }}/release/sandhole dist/sandhole-${{ matrix.key }}
+          cp target/${{ matrix.target }}/release/sandhole_udp_over_tcp dist/sandhole_udp_over_tcp-${{ matrix.key }}
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -89,8 +91,10 @@ jobs:
       - name: Build
         run: |
           cargo build --release --locked --target ${{ matrix.target }}
+          cargo build --release --locked --target ${{ matrix.target }} --package sandhole_udp_over_tcp
           mkdir dist
           cp target/${{ matrix.target }}/release/sandhole dist/sandhole-${{ matrix.key }}
+          cp target/${{ matrix.target }}/release/sandhole_udp_over_tcp dist/sandhole_udp_over_tcp-${{ matrix.key }}
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -121,8 +125,10 @@ jobs:
         shell: bash
         run: |
           cargo build --release --locked --target ${{ matrix.target }}
+          cargo build --release --locked --target ${{ matrix.target }} --package sandhole_udp_over_tcp
           mkdir dist
           cp target/${{ matrix.target }}/release/sandhole.exe dist/sandhole-${{ matrix.key }}.exe
+          cp target/${{ matrix.target }}/release/sandhole_udp_over_tcp.exe dist/sandhole_udp_over_tcp-${{ matrix.key }}.exe
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -166,4 +172,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REF_NAME: ${{ github.ref_name }}
-        run: gh release create "${REF_NAME}" ./out/sandhole-* --draft --verify-tag
+        run: gh release create "${REF_NAME}" ./out/sandhole* --draft --verify-tag

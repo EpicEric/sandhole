@@ -6,6 +6,7 @@
 
 - Change license to AGPL-3.0-or-later.
 - Update dependencies.
+- Change repository redirect URL.
 - Drop Intel macOS support.
 
 ## 0.10.2 (2026-07-05)

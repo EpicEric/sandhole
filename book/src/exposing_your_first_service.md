@@ -54,4 +54,4 @@ ssh -p 2222 -o PubkeyAuthentication=no -o PreferredAuthentications=password user
 
 If you'd like to have persistent tunnels, use a tool like `autossh` to automatically reconnect when disconnected. Note that you might be assigned a new subdomain or port through disconnects, depending on the server configuration.
 
-For a container-based alternative, [check out the Docker Compose example](https://github.com/EpicEric/sandhole/tree/main/docker-compose-example/client) in the repository.
+For a container-based alternative, [check out the Docker Compose example](https://codeberg.org/sandhole/sandhole/src/branch/main/docker-compose-example/client) in the repository.

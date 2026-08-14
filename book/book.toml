@@ -5,4 +5,4 @@ src = "src"
 title = "The Sandhole Book"
 
 [output.html]
-git-repository-url = "https://github.com/EpicEric/sandhole"
+git-repository-url = "https://codeberg.org/sandhole/sandhole"

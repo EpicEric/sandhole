@@ -19,15 +19,15 @@ Download a copy of the latest release:
 
 ```bash
 # x64
-wget --output-document sandhole https://github.com/EpicEric/sandhole/releases/latest/download/sandhole-linux-amd64
+wget --output-document sandhole https://sandhole.com.br/download/latest/sandhole-linux-x86_64
 
 # -- OR --
 
 # AArch64
-wget --output-document sandhole https://github.com/EpicEric/sandhole/releases/latest/download/sandhole-linux-arm64
+wget --output-document sandhole https://sandhole.com.br/download/latest/sandhole-linux-aarch64
 ```
 
-If you prefer, you may also use [Docker Compose](./docker_compose.md) (recommended), [NixOS](./nixos.md), or [compile the binary yourself](./compiling_from_source.md).
+If you prefer, you may also use [Docker Compose](./docker_compose.md), [NixOS](./nixos.md), or [compile the binary yourself](./compiling_from_source.md).
 
 ## 3. Run Sandhole
 
@@ -55,7 +55,7 @@ Now you're ready to dig sandholes like a crab! 🦀
 
 Once Sandhole is up and running, you should:
 
-1. [**Set up authentication**](./configuration.md#adding-users-and-admins) - Add SSH public keys for users and admins.
-2. [**Configure services**](./exposing_your_first_service.md) - Use SSH tunneling to expose your first service.
-3. [**Customize settings**](./configuration.md) - Adjust configuration options for your deployment.
-4. [**Access admin interface**](./administration.md#admin-interface) - Connect via SSH as an admin user for system management.
+1. [Set up authentication](./configuration.md#adding-users-and-admins): Add SSH public keys for users and admins.
+2. [Configure services](./exposing_your_first_service.md): Use SSH tunneling to expose your first service.
+3. [Customize settings](./configuration.md): Adjust configuration options for your deployment.
+4. [Access the admin interface](./administration.md#admin-interface): Connect via SSH as an admin user for system management.

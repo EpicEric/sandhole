@@ -1369,9 +1369,9 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "duper"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c70f9649c4d0e0807705d57bc4a60a72a9edfa48da1cb42be4020597bdc69e7d"
+checksum = "f741a7f53c40e72719e29cf947df3af6eb50398e470420a620e02426b4f11bbd"
 dependencies = [
  "ariadne",
  "base64",
@@ -4524,7 +4524,7 @@ dependencies = [
 
 [[package]]
 name = "sandhole_udp_over_tcp"
-version = "0.1.1"
+version = "0.10.2"
 dependencies = [
  "ahash",
  "clap",

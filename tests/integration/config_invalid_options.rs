@@ -156,7 +156,7 @@ async fn config_invalid_options() {
         "--http-port=18080",
         "--https-port=18443",
         "--acme-use-staging",
-        "--acme-contact-email=someone@github.com",
+        "--acme-contact-email=someone@sandhole.com.br",
         "--bind-hostnames=all",
     ]);
     let _sandhole_handle = SandholeHandle(tokio::spawn(async move { entrypoint(config).await }));

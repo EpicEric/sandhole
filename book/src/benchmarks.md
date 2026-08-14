@@ -4,8 +4,8 @@ This page includes some benchmarks comparing Sandhole and competing solutions.
 
 ## Methodology
 
-- **Test service**: [sandhole-benchmark/service](https://github.com/EpicEric/sandhole-benchmark) in release profile, using the given ciphers, running on the same machine as the proxy.
-- **Test client**: [sandhole-benchmark/measure](https://github.com/EpicEric/sandhole-benchmark) in release profile, running on the same machine as the proxy.
+- **Test service**: [sandhole-benchmark/service](https://codeberg.org/sandhole/sandhole-benchmark) in release profile, using the given ciphers, running on the same machine as the proxy.
+- **Test client**: [sandhole-benchmark/measure](https://codeberg.org/sandhole/sandhole-benchmark) in release profile, running on the same machine as the proxy.
 - **Measurements**: Seven runs in sequence, then average of five best results.
 
 ## Results

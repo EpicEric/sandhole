@@ -653,7 +653,7 @@ mod application_config_tests {
                     no_domain: false,
                     completions: None,
                 },
-                domain_redirect: "https://github.com/EpicEric/sandhole".into(),
+                domain_redirect: "https://codeberg.org/sandhole/sandhole".into(),
                 user_keys_directory: "./deploy/user_keys/".into(),
                 admin_keys_directory: "./deploy/admin_keys/".into(),
                 certificates_directory: "./deploy/certificates/".into(),

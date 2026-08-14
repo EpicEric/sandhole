@@ -5,7 +5,7 @@ To build the project, [Cargo](https://doc.rust-lang.org/cargo/getting-started/in
 If you're compiling from a separate workstation than the one that will be running Sandhole, then grab the source files, build the binary, and copy it over:
 
 ```bash
-git clone https://github.com/EpicEric/sandhole
+git clone https://codeberg.org/sandhole/sandhole
 cd sandhole
 cargo build --locked --release
 scp target/release/sandhole user@sandhole.com.br:/usr/local/bin/sandhole
@@ -20,7 +20,7 @@ cargo install --locked sandhole
 # -- OR --
 #
 # Install the current development version
-cargo install --locked --git https://github.com/EpicEric/sandhole
+cargo install --locked --git https://codeberg.org/sandhole/sandhole
 ```
 
 Cargo should automatically add the binary to your `PATH`.

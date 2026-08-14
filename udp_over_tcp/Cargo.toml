@@ -1,10 +1,10 @@
 [package]
 name = "sandhole_udp_over_tcp"
-version = "0.1.1"
+version = "0.10.2"
 edition = "2024"
 rust-version = "1.88.0"
 description = "Proxy UDP traffic for Sandhole via SSH."
-repository = "https://github.com/EpicEric/sandhole"
+repository = "https://codeberg.org/sandhole/sandhole"
 homepage = "https://sandhole.com.br/"
 license = "AGPL-3.0-or-later"
 authors = ["Eric Rodrigues Pires <eric@eric.dev.br>"]

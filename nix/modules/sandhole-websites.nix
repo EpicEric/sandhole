@@ -114,7 +114,7 @@ in
                 '';
                 example = ''
                   error_page 404 /index.html;
-                  rewrite ^/github https://github.com/EpicEric permanent;
+                  rewrite ^/codeberg https://codeberg.org/sandhole permanent;
                 '';
               };
 

@@ -56,7 +56,9 @@ let
       pkgsStatic.installShellFiles
       pkgsStatic.perl
     ]
-    ++ lib.optionals (system == "x86_64-darwin" || system == "aarch64-darwin") [ pkgsStatic.lld ];
+    ++ lib.optionals (pkgsStatic.stdenv.hostPlatform.isDarwin) [ pkgsStatic.lld ];
+
+    buildInputs = lib.optionals (pkgsStatic.stdenv.hostPlatform.isDarwin) [ pkgsStatic.libiconv ];
   };
 
   sandhole = rustPlatform.buildRustPackage (

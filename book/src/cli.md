@@ -26,7 +26,7 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
       <b>--domain-redirect</b> &lt;URL&gt;
           Where to redirect requests to the root domain
           
-          [default: https://github.com/EpicEric/sandhole]
+          [default: https://codeberg.org/sandhole/sandhole]
 
       <b>--user-keys-directory</b> &lt;DIRECTORY&gt;
           Directory containing public keys of authorized users. Each file must contain at least one key
