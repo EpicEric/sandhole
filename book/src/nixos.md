@@ -17,7 +17,7 @@ You can install the NixOS module for the following pinning solutions (click to e
 {
   inputs = {
     # ...
-    sandhole.url = "github:EpicEric/sandhole/main";
+    sandhole.url = "git+https://codeberg.org/sandhole/sandhole?ref=main";
   };
 
   outputs =
@@ -46,7 +46,7 @@ You can install the NixOS module for the following pinning solutions (click to e
     <summary>tack</summary>
 
 ```bash
-tack add sandhole github:EpicEric/sandhole --fetch
+tack add sandhole git+https://codeberg.org/sandhole/sandhole.git --fetch
 ```
 
 ```nix
@@ -70,7 +70,7 @@ in
     <summary>npins</summary>
 
 ```bash
-npins add github EpicEric sandhole
+npins add git https://codeberg.org/sandhole/sandhole.git
 ```
 
 ```nix
