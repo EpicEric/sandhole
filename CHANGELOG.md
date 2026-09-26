@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Warn user when requested address is not assigned.
+
 ## 0.10.3 (2026-08-14)
 
 ### Changed

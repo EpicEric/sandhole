@@ -39,6 +39,7 @@ use tokio::{io::copy_bidirectional_with_sizes, sync::Semaphore, time::timeout};
 
 use crate::{
     SandholeServer,
+    addressing::AddressDelegation,
     admin::ADMIN_ALIAS_PORT,
     connection_handler::ConnectionHandler,
     connections::ConnectionGetByHttpHost,
@@ -660,7 +661,10 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 .get_http_address(address, context.user, context.key_fingerprint, context.peer)
                 .await
             {
-                Ok(assigned_host) => {
+                Ok(AddressDelegation {
+                    assigned_host,
+                    reason,
+                }) => {
                     // Add handler to TCP connection map
                     let semaphore = Arc::new(Semaphore::new(
                         context.user_data.max_pool_size.load(Ordering::Acquire),
@@ -709,6 +713,17 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                             // Adding to connection map succeeded.
                             #[cfg(not(coverage_nightly))]
                             tracing::info!(peer = %context.peer, host = %address, "Serving SNI proxy...",);
+                            if let Some(reason) = reason {
+                                let _ = context.tx.send(
+                                    format!(
+                                        "{} {:>14} {}\r\n",
+                                        Utc::now().to_rfc3339().dimmed(),
+                                        "Warning".yellow().bold(),
+                                        reason,
+                                    )
+                                    .into_bytes(),
+                                );
+                            }
                             let _ = context.tx.send(
                                 format!(
                                     "{} {:>14} proxy for {}\r\n",
@@ -777,7 +792,10 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 .get_http_address(address, context.user, context.key_fingerprint, context.peer)
                 .await
             {
-                Ok(assigned_host) => {
+                Ok(AddressDelegation {
+                    assigned_host,
+                    reason,
+                }) => {
                     // Add handler to HTTP connection map
                     let semaphore = Arc::new(Semaphore::new(
                         context.user_data.max_pool_size.load(Ordering::Acquire),
@@ -830,6 +848,17 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                             // Adding to connection map succeeded.
                             #[cfg(not(coverage_nightly))]
                             tracing::info!(peer = %context.peer, host = %assigned_host, "Serving HTTP...");
+                            if let Some(reason) = reason {
+                                let _ = context.tx.send(
+                                    format!(
+                                        "{} {:>14} {}\r\n",
+                                        Utc::now().to_rfc3339().dimmed(),
+                                        "Warning".yellow().bold(),
+                                        reason,
+                                    )
+                                    .into_bytes(),
+                                );
+                            }
                             let _ = context.tx.send(
                                 format!(
                                     "{} {:>14} on {} for {}\r\n",
