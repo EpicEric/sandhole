@@ -62,7 +62,7 @@ impl io::Write for BufferedSender {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.tx.send(self.buf.drain(..).collect())
+        self.tx.send(std::mem::take(&mut self.buf))
     }
 }
 

@@ -3,16 +3,24 @@
     "type": "github",
     "owner": "NixOS",
     "repo": "nixpkgs",
-    "rev": "35d3407a3816f3b341d8cf1d60abaf2b7b8166ac",
-    "narHash": "sha256-BoYPdqk6jlKXy+DyUzyGV/CtRGfAhk2MmIgBhsemTGI=",
-    "lastModified": 1784115452
+    "rev": "74435dcdae840e9770652a7bf7754c2ef7b257e1",
+    "narHash": "sha256-ITW3wS8C/f8Ex97WWHfykDC2Zc1DlgChlCKKogMpRa0=",
+    "lastModified": 1790419373
+  },
+  "now": {
+    "type": "git",
+    "url": "https://codeberg.org/now-runner/now.git",
+    "ref": "HEAD",
+    "rev": "e32a978b6b3ae2e3c3103442d54118653b5687bf",
+    "narHash": "sha256-kxg/D50EJPdtExf6CTDvdRFOqfiCvGZzrE1TFcAogqE=",
+    "lastModified": 1790109562
   },
   "rust-overlay": {
     "type": "github",
     "owner": "oxalica",
     "repo": "rust-overlay",
-    "rev": "1f69c7203034a4a974d7a4eac0f19b54af30804d",
-    "narHash": "sha256-bvaxxdk7mmMQ88AuXQGTUtk+PcUujHpgxqpryqTWvTU=",
-    "lastModified": 1784216271
+    "rev": "4e9bb05a9ab6c37dc74c22974ebed6e36dc73eb2",
+    "narHash": "sha256-M8elY2UShg4ZuLTiRLEHO+ae5xQFp3/ReQdxp/R+1UU=",
+    "lastModified": 1790407471
   }
 }

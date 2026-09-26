@@ -29,3 +29,7 @@ type = "fetch"
 [inputs.rust-overlay]
 url = "github:oxalica/rust-overlay/master"
 type = "fetch"
+
+[inputs.now]
+url = "git+https://codeberg.org/now-runner/now.git"
+type = "fetch"

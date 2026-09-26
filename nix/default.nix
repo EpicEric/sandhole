@@ -125,20 +125,8 @@ in
 
   shell = pkgs.mkShell {
     packages = [
-      # General dependencies
       pkgs.rust-bin.stable.latest.default
-      pkgs.just
-
-      # Book dependencies
-      pkgs.mdbook
-      pkgs.to-html
-
-      # Profiling dependencies
-      pkgs.cargo-flamegraph
-
-      # Test dependencies
-      pkgs.cargo-nextest
-      pkgs.minica
+      (import inputs.now { inherit system; })
     ];
   };
 }

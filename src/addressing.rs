@@ -2014,19 +2014,17 @@ mod address_delegator_tests {
             .seed(42)
             .build();
         assert_eq!(
-            format!(
-                "{}",
-                delegator
-                    .get_http_address(
-                        "my-own-domain.com",
-                        &None,
-                        &None,
-                        &"127.0.0.1:12345".parse().unwrap()
-                    )
-                    .await
-                    .unwrap()
-                    .assigned_host
-            ),
+            delegator
+                .get_http_address(
+                    "my-own-domain.com",
+                    &None,
+                    &None,
+                    &"127.0.0.1:12345".parse().unwrap()
+                )
+                .await
+                .unwrap()
+                .assigned_host
+                .to_string(),
             "my-own-domain.com"
         );
     }
