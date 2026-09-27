@@ -1,6 +1,6 @@
-# UDP-over-TCP (experimental)
+# UDP-over-TCP
 
-Sandhole has experimental support for UDP over SSH, with a thin TCP-based protocol.
+Sandhole has support for UDP over SSH, with a thin TCP-based protocol.
 
 Provided that the Sandhole instance that you wish to connect to has UDP enabled, the quickest way to get UDP running is with the pre-compiled `sandhole_udp_over_tcp` client:
 

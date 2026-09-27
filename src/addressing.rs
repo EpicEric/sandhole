@@ -500,7 +500,7 @@ impl<R: Resolver> AddressDelegator<R> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod address_delegator_tests {
-    use std::{assert_matches, collections::HashSet, net::SocketAddr};
+    use std::{collections::HashSet, net::SocketAddr};
 
     use mockall::predicate::*;
     use rand::{RngExt, SeedableRng};
@@ -1118,10 +1118,10 @@ mod address_delegator_tests {
                 "invalid address {}",
                 address.assigned_host
             );
-            assert_matches!(
+            assert!(matches!(
                 address.reason,
                 Some(AddressDelegationReason::ProfaneAddress) | None
-            );
+            ));
             assert!(
                 DnsName::try_from(address.assigned_host.clone()).is_ok(),
                 "non DNS-compatible address {}",
