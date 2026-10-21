@@ -6,6 +6,10 @@
 
 - Warn user when requested address is not assigned.
 
+### Changed
+
+- Update dependencies.
+
 ## 0.10.3 (2026-08-14)
 
 ### Changed

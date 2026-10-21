@@ -206,7 +206,7 @@ impl client::Handler for SshClient {
 
     async fn check_server_key(
         &mut self,
-        _key: &russh::keys::PublicKey,
+        _key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -321,7 +321,7 @@ impl client::Handler for ProxyClient {
 
     async fn check_server_key(
         &mut self,
-        _key: &russh::keys::PublicKey,
+        _key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }

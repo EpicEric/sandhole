@@ -20,7 +20,6 @@ use std::{
     sync::{Arc, atomic::Ordering},
 };
 
-use chrono::Utc;
 use color_eyre::eyre::eyre;
 use http::Request;
 use hyper::{body::Incoming, service::service_fn};
@@ -28,6 +27,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
 };
+use jiff::Timestamp;
 use metrics::{counter, gauge};
 use owo_colors::OwoColorize;
 use russh::{
@@ -278,7 +278,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {} Aliasing is disabled\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     "Error".black().on_red().bold()
                 )
                 .into_bytes(),
@@ -296,7 +296,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {} Alias is required for SSH host\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     " Error ".black().on_red().bold(),
                 )
                 .into_bytes(),
@@ -335,7 +335,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                 let _ = context.tx.send(
                     format!(
                         "{} {} Cannot listen to SSH on {}:{} ({})\r\n",
-                        Utc::now().to_rfc3339().dimmed(),
+                        Timestamp::now().to_string().dimmed(),
                         " Error ".black().on_red().bold(),
                         address,
                         context.server.ssh_port,
@@ -352,7 +352,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
                 let _ = context.tx.send(
                     format!(
                         "{} {:>14} forwarding on {}:{}\r\n{}{}\r\n",
-                        Utc::now().to_rfc3339().dimmed(),
+                        Timestamp::now().to_string().dimmed(),
                         "Starting SSH".green().bold(),
                         address,
                         context.server.ssh_port,
@@ -415,7 +415,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {:>14} forwarding on {}:{}\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     "Stopping SSH".yellow().bold(),
                     address,
                     context.server.ssh_port,
@@ -454,7 +454,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
             let _ = handler.log_channel().send(
                 format!(
                     "{} {:>14} - {}:{} => {}:{}\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     "Proxying SSH".blue().bold(),
                     originator_address,
                     originator_port,
@@ -541,7 +541,7 @@ impl ForwardingHandlerStrategy for SshForwardingHandler {
         let _ = context.tx.send(
             format!(
                 "{} {} Unknown SSH alias '{}'\r\n",
-                Utc::now().to_rfc3339().dimmed(),
+                Timestamp::now().to_string().dimmed(),
                 " Error ".black().on_red().bold(),
                 address,
             )
@@ -575,7 +575,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 let _ = context.tx.send(
                     format!(
                         "{} {} Failed to bind HTTP alias '{}' ({})\r\n",
-                        Utc::now().to_rfc3339().dimmed(),
+                        Timestamp::now().to_string().dimmed(),
                         " Error ".black().on_red().bold(),
                         address,
                         error,
@@ -619,7 +619,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                     let _ = context.tx.send(
                         format!(
                             "{} {} Failed to bind HTTP alias '{}' ({})\r\n",
-                            Utc::now().to_rfc3339().dimmed(),
+                            Timestamp::now().to_string().dimmed(),
                             " Error ".black().on_red().bold(),
                             address,
                             error,
@@ -635,7 +635,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                     let _ = context.tx.send(
                         format!(
                             "{} {:>14} tunneling for HTTP alias {}:{}\r\n",
-                            Utc::now().to_rfc3339().dimmed(),
+                            Timestamp::now().to_string().dimmed(),
                             "Starting alias".green().bold(),
                             address,
                             port,
@@ -700,7 +700,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                             let _ = context.tx.send(
                                 format!(
                                     "{} {} Failed to bind SNI proxy '{}' ({})\r\n",
-                                    Utc::now().to_rfc3339().dimmed(),
+                                    Timestamp::now().to_string().dimmed(),
                                     " Error ".black().on_red().bold(),
                                     address,
                                     error,
@@ -717,7 +717,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                                 let _ = context.tx.send(
                                     format!(
                                         "{} {:>14} {}\r\n",
-                                        Utc::now().to_rfc3339().dimmed(),
+                                        Timestamp::now().to_string().dimmed(),
                                         "Warning".yellow().bold(),
                                         reason,
                                     )
@@ -727,7 +727,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                             let _ = context.tx.send(
                                 format!(
                                     "{} {:>14} proxy for {}\r\n",
-                                    Utc::now().to_rfc3339().dimmed(),
+                                    Timestamp::now().to_string().dimmed(),
                                     "Starting SNI".green().bold(),
                                     match context.server.https_port {
                                         443 => format!("https://{address}"),
@@ -754,7 +754,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                     let _ = context.tx.send(
                         format!(
                             "{} {} Failed to bind SNI proxy '{}' ({})\r\n",
-                            Utc::now().to_rfc3339().dimmed(),
+                            Timestamp::now().to_string().dimmed(),
                             " Error ".black().on_red().bold(),
                             address,
                             error,
@@ -775,7 +775,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {} Cannot listen to HTTP host {} ({})\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     " Error ".black().on_red().bold(),
                     address,
                     error,
@@ -831,7 +831,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                             let _ = context.tx.send(
                                 format!(
                                     "{} {} Cannot listen to HTTP on http://{} for {} ({})\r\n",
-                                    Utc::now().to_rfc3339().dimmed(),
+                                    Timestamp::now().to_string().dimmed(),
                                     " Error ".black().on_red().bold(),
                                     match context.server.http_port {
                                         80 => assigned_host.clone(),
@@ -852,7 +852,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                                 let _ = context.tx.send(
                                     format!(
                                         "{} {:>14} {}\r\n",
-                                        Utc::now().to_rfc3339().dimmed(),
+                                        Timestamp::now().to_string().dimmed(),
                                         "Warning".yellow().bold(),
                                         reason,
                                     )
@@ -862,7 +862,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                             let _ = context.tx.send(
                                 format!(
                                     "{} {:>14} on {} for {}\r\n",
-                                    Utc::now().to_rfc3339().dimmed(),
+                                    Timestamp::now().to_string().dimmed(),
                                     "Starting HTTP".green().bold(),
                                     match context.server.http_port {
                                         80 => format!("http://{assigned_host}"),
@@ -881,7 +881,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                                 let _ = context.tx.send(
                                     format!(
                                         "{} {:>14} on {} for {}\r\n",
-                                        Utc::now().to_rfc3339().dimmed(),
+                                        Timestamp::now().to_string().dimmed(),
                                         "Starting HTTPS".green().bold(),
                                         match context.server.https_port {
                                             443 => format!("https://{assigned_host}"),
@@ -915,7 +915,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                     let _ = context.tx.send(
                         format!(
                             "{} {} Cannot listen to HTTP for {} ({})\r\n",
-                            Utc::now().to_rfc3339().dimmed(),
+                            Timestamp::now().to_string().dimmed(),
                             " Error ".black().on_red().bold(),
                             address,
                             error,
@@ -954,7 +954,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 let _ = context.tx.send(
                     format!(
                         "{} {:>14} for HTTP alias {}\r\n",
-                        Utc::now().to_rfc3339().dimmed(),
+                        Timestamp::now().to_string().dimmed(),
                         "Stopping alias".yellow().bold(),
                         address,
                     )
@@ -983,7 +983,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 let _ = context.tx.send(
                     format!(
                         "{} {:>14} proxy for {}\r\n",
-                        Utc::now().to_rfc3339().dimmed(),
+                        Timestamp::now().to_string().dimmed(),
                         "Stopping SNI".yellow().bold(),
                         address,
                     )
@@ -1009,7 +1009,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                 let _ = context.tx.send(
                     format!(
                         "{} {:>14} for {}\r\n",
-                        Utc::now().to_rfc3339().dimmed(),
+                        Timestamp::now().to_string().dimmed(),
                         "Stopping HTTP".yellow().bold(),
                         address,
                     )
@@ -1019,7 +1019,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
                     let _ = context.tx.send(
                         format!(
                             "{} {:>14} for {}\r\n",
-                            Utc::now().to_rfc3339().dimmed(),
+                            Timestamp::now().to_string().dimmed(),
                             "Stopping HTTPS".yellow().bold(),
                             address,
                         )
@@ -1142,7 +1142,7 @@ impl ForwardingHandlerStrategy for HttpForwardingHandler {
         let _ = context.tx.send(
             format!(
                 "{} {} Unknown HTTP alias '{}'\r\n",
-                Utc::now().to_rfc3339().dimmed(),
+                Timestamp::now().to_string().dimmed(),
                 " Error ".black().on_red().bold(),
                 address,
             )
@@ -1164,7 +1164,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {} Aliasing is disabled\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     " Error ".black().on_red().bold(),
                 )
                 .into_bytes(),
@@ -1182,7 +1182,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {} Cannot listen to random port for alias {} ({})\r\n{}\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     " Error ".black().on_red().bold(),
                     address,
                     error,
@@ -1202,7 +1202,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {} Cannot listen on port {} for alias {} ({})\r\n{}\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     " Error ".black().on_red().bold(),
                     port,
                     address,
@@ -1223,7 +1223,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {} Cannot listen on address {}:{} ({})\r\n{}\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     " Error ".black().on_red().bold(),
                     address,
                     port,
@@ -1272,7 +1272,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                 let _ = context.tx.send(
                     format!(
                         "{} {} Cannot listen on port {} for alias {} ({})\r\n",
-                        Utc::now().to_rfc3339().dimmed(),
+                        Timestamp::now().to_string().dimmed(),
                         " Error ".black().on_red().bold(),
                         assigned_port,
                         address,
@@ -1296,7 +1296,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
                 let _ = context.tx.send(
                     format!(
                         "{} {:>14} tunneling for {}:{}\r\n",
-                        Utc::now().to_rfc3339().dimmed(),
+                        Timestamp::now().to_string().dimmed(),
                         "Starting alias".green().bold(),
                         address,
                         assigned_port,
@@ -1329,7 +1329,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {:>14} for {}:{}\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     "Stopping alias".yellow().bold(),
                     address,
                     port,
@@ -1424,7 +1424,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
             let _ = handler.log_channel().send(
                 format!(
                     "{} {:>14} - {}:{} => {}:{}\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     "Proxying alias".blue().bold(),
                     originator_address,
                     originator_port,
@@ -1511,7 +1511,7 @@ impl ForwardingHandlerStrategy for AliasForwardingHandler {
         let _ = context.tx.send(
             format!(
                 "{} {} Unknown alias '{}:{}'\r\n",
-                Utc::now().to_rfc3339().dimmed(),
+                Timestamp::now().to_string().dimmed(),
                 " Error ".black().on_red().bold(),
                 address,
                 port,
@@ -1541,7 +1541,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {} Cannot listen to TCP on port {}:{} ({})\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     " Error ".black().on_red().bold(),
                     context
                         .server
@@ -1568,7 +1568,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {} Cannot listen to TCP on port {}:{} ({})\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     " Error ".black().on_red().bold(),
                     context
                         .server
@@ -1592,7 +1592,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {} Cannot listen to TCP on port {}:{} ({})\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     " Error ".black().on_red().bold(),
                     context
                         .server
@@ -1619,7 +1619,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                         let _ = context.tx.send(
                             format!(
                                 "{} {} Cannot listen to TCP on random port of {} ({})\r\n",
-                                Utc::now().to_rfc3339().dimmed(),
+                                Timestamp::now().to_string().dimmed(),
                                 " Error ".black().on_red().bold(),
                                 address,
                                 error,
@@ -1645,7 +1645,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                         let _ = context.tx.send(
                             format!(
                                 "{} {} Cannot listen to TCP on random port of {} ({})\r\n",
-                                Utc::now().to_rfc3339().dimmed(),
+                                Timestamp::now().to_string().dimmed(),
                                 " Error ".black().on_red().bold(),
                                 port,
                                 error,
@@ -1674,7 +1674,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                         let _ = context.tx.send(
                             format!(
                                 "{} {} Cannot listen to TCP on {}:{} ({})\r\n",
-                                Utc::now().to_rfc3339().dimmed(),
+                                Timestamp::now().to_string().dimmed(),
                                 " Error ".black().on_red().bold(),
                                 context
                                     .server
@@ -1726,7 +1726,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                     let _ = context.tx.send(
                         format!(
                             "{} {} Cannot listen to TCP on {}:{} ({})\r\n",
-                            Utc::now().to_rfc3339().dimmed(),
+                            Timestamp::now().to_string().dimmed(),
                             " Error ".black().on_red().bold(),
                             context
                                 .server
@@ -1754,7 +1754,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
                     let _ = context.tx.send(
                         format!(
                             "{} {:>14} port on {}:{}\r\n",
-                            Utc::now().to_rfc3339().dimmed(),
+                            Timestamp::now().to_string().dimmed(),
                             "Starting TCP".green().bold(),
                             context
                                 .server
@@ -1791,7 +1791,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {:>14} port on {}:{}\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     "Stopping TCP".yellow().bold(),
                     context
                         .server
@@ -1830,7 +1830,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
             let _ = handler.log_channel().send(
                 format!(
                     "{} {:>14} - {}:{} => {}:{}\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     "Proxying TCP".blue().bold(),
                     originator_address,
                     originator_port,
@@ -1917,7 +1917,7 @@ impl ForwardingHandlerStrategy for TcpForwardingHandler {
         let _ = context.tx.send(
             format!(
                 "{} {} Unknown TCP port '{}'\r\n",
-                Utc::now().to_rfc3339().dimmed(),
+                Timestamp::now().to_string().dimmed(),
                 " Error ".black().on_red().bold(),
                 port
             )
@@ -1946,7 +1946,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {} Cannot listen to UDP on port {}:{} ({})\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     " Error ".black().on_red().bold(),
                     context
                         .server
@@ -1970,7 +1970,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {} Cannot listen to UDP on port {}:{} ({})\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     " Error ".black().on_red().bold(),
                     context
                         .server
@@ -1997,7 +1997,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
                         let _ = context.tx.send(
                             format!(
                                 "{} {} Cannot listen to UDP on random port of {} ({})\r\n",
-                                Utc::now().to_rfc3339().dimmed(),
+                                Timestamp::now().to_string().dimmed(),
                                 " Error ".black().on_red().bold(),
                                 address,
                                 error,
@@ -2023,7 +2023,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
                         let _ = context.tx.send(
                             format!(
                                 "{} {} Cannot listen to UDP on random port of {} ({})\r\n",
-                                Utc::now().to_rfc3339().dimmed(),
+                                Timestamp::now().to_string().dimmed(),
                                 " Error ".black().on_red().bold(),
                                 port,
                                 error,
@@ -2052,7 +2052,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
                         let _ = context.tx.send(
                             format!(
                                 "{} {} Cannot listen to UDP on {}:{} ({})\r\n",
-                                Utc::now().to_rfc3339().dimmed(),
+                                Timestamp::now().to_string().dimmed(),
                                 " Error ".black().on_red().bold(),
                                 context
                                     .server
@@ -2104,7 +2104,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
                     let _ = context.tx.send(
                         format!(
                             "{} {} Cannot listen to UDP on {}:{} ({})\r\n",
-                            Utc::now().to_rfc3339().dimmed(),
+                            Timestamp::now().to_string().dimmed(),
                             " Error ".black().on_red().bold(),
                             context
                                 .server
@@ -2132,7 +2132,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
                     let _ = context.tx.send(
                         format!(
                             "{} {:>14} port on {}:{}\r\n",
-                            Utc::now().to_rfc3339().dimmed(),
+                            Timestamp::now().to_string().dimmed(),
                             "Starting UDP".green().bold(),
                             context
                                 .server
@@ -2169,7 +2169,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
             let _ = context.tx.send(
                 format!(
                     "{} {:>14} port on {}:{}\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     "Stopping UDP".yellow().bold(),
                     context
                         .server
@@ -2208,7 +2208,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
             let _ = handler.log_channel().send(
                 format!(
                     "{} {:>14} - {}:{} => {}:{}\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     "Proxying UDP".blue().bold(),
                     originator_address,
                     originator_port,
@@ -2261,7 +2261,7 @@ impl ForwardingHandlerStrategy for UdpForwardingHandler {
         let _ = context.tx.send(
             format!(
                 "{} {} Unknown UDP port '{}'\r\n",
-                Utc::now().to_rfc3339().dimmed(),
+                Timestamp::now().to_string().dimmed(),
                 " Error ".black().on_red().bold(),
                 port
             )

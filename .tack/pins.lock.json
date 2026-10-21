@@ -1,19 +1,23 @@
 {
+  "$declared": {
+    "nixpkgs": "github:NixOS/nixpkgs/nixpkgs-unstable",
+    "now": "git+https://codeberg.org/now-runner/now.git"
+  },
   "nixpkgs": {
     "type": "github",
     "owner": "NixOS",
     "repo": "nixpkgs",
-    "rev": "74435dcdae840e9770652a7bf7754c2ef7b257e1",
-    "narHash": "sha256-ITW3wS8C/f8Ex97WWHfykDC2Zc1DlgChlCKKogMpRa0=",
-    "lastModified": 1790419373
+    "rev": "5adc50831c259f87faeb09ddf930d43597197473",
+    "narHash": "sha256-Q/8KLB6jNfpaUN1HAedE/u/Et9feE/zYSsutBLKrCFk=",
+    "lastModified": 1792506237
   },
   "now": {
     "type": "git",
     "url": "https://codeberg.org/now-runner/now.git",
     "ref": "HEAD",
-    "rev": "e32a978b6b3ae2e3c3103442d54118653b5687bf",
-    "narHash": "sha256-kxg/D50EJPdtExf6CTDvdRFOqfiCvGZzrE1TFcAogqE=",
-    "lastModified": 1790109562
+    "rev": "f43fb979939d79237df2e0498b3eaac02bdb5b44",
+    "narHash": "sha256-7o6A5mPE2IavwCXOVnJUKycFyn2pwmssUdpjefv+W8c=",
+    "lastModified": 1792455746
   },
   "rust-overlay": {
     "type": "github",

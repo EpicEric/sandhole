@@ -167,7 +167,7 @@ impl russh::client::Handler for SshClientA {
 
     async fn check_server_key(
         &mut self,
-        _key: &russh::keys::PublicKey,
+        _key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -198,7 +198,7 @@ impl russh::client::Handler for SshClientB {
 
     async fn check_server_key(
         &mut self,
-        _key: &russh::keys::PublicKey,
+        _key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }

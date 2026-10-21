@@ -51,9 +51,9 @@ use crate::{
 use crate::login::AuthenticationRequest;
 
 use async_speed_limit::Limiter;
-use chrono::Utc;
 use enumflags2::BitFlags;
 use ipnet::IpNet;
+use jiff::Timestamp;
 use owo_colors::OwoColorize;
 use russh::{
     Channel, ChannelId, ChannelOpenFailure, MethodKind, MethodSet,
@@ -863,7 +863,7 @@ impl Handler for ServerHandler {
                     let _ = self.tx.send(
                         format!(
                             "{} {} Cannot remote forward if admin interface is being used",
-                            Utc::now().to_rfc3339().dimmed(),
+                            Timestamp::now().to_string().dimmed(),
                             " Error ".black().on_red().bold(),
                         )
                         .into_bytes(),
@@ -984,7 +984,7 @@ impl Handler for ServerHandler {
             let _ = self.tx.send(
                 format!(
                     "{} {} Aliasing is disabled\r\n",
-                    Utc::now().to_rfc3339().dimmed(),
+                    Timestamp::now().to_string().dimmed(),
                     " Error ".black().on_red().bold(),
                 )
                 .into_bytes(),
@@ -1000,7 +1000,7 @@ impl Handler for ServerHandler {
                 let _ = self.tx.send(
                     format!(
                         "{} {} Cannot local forward if admin interface is being used\r\n",
-                        Utc::now().to_rfc3339().dimmed(),
+                        Timestamp::now().to_string().dimmed(),
                         " Error ".black().on_red().bold(),
                     )
                     .into_bytes(),

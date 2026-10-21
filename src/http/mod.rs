@@ -220,7 +220,7 @@ fn http_log(
         let _ = tx.map(|tx| {
             let colored_line = format!(
                 "{} {} {} {} => {} {}\r\n",
-                chrono::Utc::now().to_rfc3339().dimmed(),
+                jiff::Timestamp::now().to_string().dimmed(),
                 format!("[{status}]").style(status_style),
                 format!(" {method} ").style(method_style),
                 host,
