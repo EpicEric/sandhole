@@ -61,9 +61,11 @@ use crate::acme::{AcmeResolver, AlpnAcmeResolver};
 #[cfg(feature = "prometheus")]
 use crate::admin::connection_handler::get_prometheus_service;
 #[cfg(feature = "login")]
-use crate::login::{ApiLogin, WebpkiVerifierConfigurer};
+use crate::login::ApiLogin;
 #[cfg_attr(not(feature = "prometheus"), allow(unused_imports))]
 use crate::quota::TokenHolder;
+#[cfg(feature = "login")]
+use crate::webpki::WebpkiVerifierConfigurer;
 use crate::{
     AdminNotification, BindHostnames, SandholeServer, SystemData, TunnelingProxyData,
     addressing::{AddressDelegator, DnsResolver},
@@ -209,7 +211,14 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     #[cfg(feature = "login")]
     let api_login = config
         .password_authentication_url
-        .map(|url| ApiLogin::from(WebpkiVerifierConfigurer, url, http_request_timeout))
+        .map(|url| {
+            ApiLogin::builder()
+                .configurer(WebpkiVerifierConfigurer)
+                .endpoint(url)
+                .maybe_timeout(http_request_timeout)
+                .use_system_ca(config.use_system_ca)
+                .build()
+        })
         .transpose()
         .with_context(|| "Error intializing login API")?;
     // Initialize the ACME ALPN service if a contact email has been provided.
@@ -221,6 +230,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             config.acme_cache_directory,
             contact,
             config.acme_use_staging,
+            config.use_system_ca,
         )),
         Some(_) => {
             #[cfg(not(coverage_nightly))]

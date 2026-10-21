@@ -14,16 +14,14 @@
 // You should have received a copy of the GNU Affero General Public License along
 // with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::{marker::PhantomData, net::SocketAddr, sync::Arc, time::Duration};
+use std::{marker::PhantomData, net::SocketAddr, time::Duration};
 
 use color_eyre::eyre::{ContextCompat, WrapErr};
 use http::uri::Scheme;
 use hyper::Uri;
 use reqwest::Client;
-use rustls::{ClientConfig, RootCertStore, client::WebPkiServerVerifier, crypto::CryptoProvider};
-use webpki_roots::TLS_SERVER_ROOTS;
 
-use crate::error::ServerError;
+use crate::{error::ServerError, webpki::Configurer};
 
 // Parsed data for login HTTP requests.
 pub(crate) struct ApiLogin<C> {
@@ -41,33 +39,15 @@ pub(crate) struct AuthenticationRequest<'a> {
     pub(crate) remote_address: &'a SocketAddr,
 }
 
-// Trait for TLS configuration setup.
-#[cfg_attr(test, mockall::automock)]
-pub(crate) trait Configurer {
-    // Returns the TLS client configuration.
-    fn get_client_config(&self, provider: CryptoProvider) -> color_eyre::Result<ClientConfig>;
-}
-
-pub(crate) struct WebpkiVerifierConfigurer;
-
-impl Configurer for WebpkiVerifierConfigurer {
-    // Returns the CA certificate chain from the operating system.
-    fn get_client_config(&self, provider: CryptoProvider) -> color_eyre::Result<ClientConfig> {
-        let mut store = RootCertStore::empty();
-        store.extend(TLS_SERVER_ROOTS.iter().map(|ta| ta.to_owned()));
-        Ok(ClientConfig::builder_with_provider(Arc::new(provider))
-            .with_safe_default_protocol_versions()?
-            .with_webpki_verifier(WebPkiServerVerifier::builder(Arc::new(store)).build()?)
-            .with_no_client_auth())
-    }
-}
-
+#[bon::bon]
 impl<C: Configurer> ApiLogin<C> {
     // Create the login client with the shared configuration for HTTP requests.
-    pub(crate) fn from(
+    #[builder]
+    pub(crate) fn new(
         configurer: C,
         endpoint: String,
         timeout: Option<Duration>,
+        use_system_ca: bool,
     ) -> color_eyre::Result<Self> {
         // Parse data from the URL
         let mut client_builder = Client::builder()
@@ -91,7 +71,10 @@ impl<C: Configurer> ApiLogin<C> {
             client_builder
                 .tls_backend_preconfigured(
                     configurer
-                        .get_client_config(rustls::crypto::aws_lc_rs::default_provider())
+                        .get_client_config(
+                            rustls::crypto::aws_lc_rs::default_provider(),
+                            use_system_ca,
+                        )
                         .with_context(|| "Unable to get TLS client configuration")?,
                 )
                 .https_only(true)
@@ -144,8 +127,9 @@ mod api_login_tests {
     use tower::Service;
 
     use crate::droppable_handle::DroppableHandle;
+    use crate::webpki::MockConfigurer;
 
-    use super::{ApiLogin, AuthenticationRequest, MockConfigurer};
+    use super::{ApiLogin, AuthenticationRequest};
 
     #[test_log::test(tokio::test)]
     async fn authenticates_on_successful_http_response() {
@@ -166,8 +150,12 @@ mod api_login_tests {
         let listener = TcpListener::bind("127.0.0.1:28011").await.unwrap();
         let jh = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        let api_login =
-            ApiLogin::from(mock, "http://localhost:28011/authentication".into(), None).unwrap();
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("http://localhost:28011/authentication".into())
+            .use_system_ca(false)
+            .build()
+            .unwrap();
         assert!(
             api_login
                 .authenticate(&AuthenticationRequest {
@@ -204,8 +192,12 @@ mod api_login_tests {
         let listener = TcpListener::bind("127.0.0.1:28012").await.unwrap();
         let jh = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        let api_login =
-            ApiLogin::from(mock, "http://localhost:28012/authentication".into(), None).unwrap();
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("http://localhost:28012/authentication".into())
+            .use_system_ca(false)
+            .build()
+            .unwrap();
         assert!(
             !api_login
                 .authenticate(&AuthenticationRequest {
@@ -237,7 +229,7 @@ mod api_login_tests {
         );
         mock.expect_get_client_config()
             .once()
-            .return_once(move |provider| {
+            .return_once(move |provider, _| {
                 Ok(ClientConfig::builder_with_provider(Arc::new(provider))
                     .with_safe_default_protocol_versions()
                     .unwrap()
@@ -297,12 +289,12 @@ mod api_login_tests {
             }
         });
 
-        let api_login = ApiLogin::from(
-            mock,
-            "https://localhost:28013/secure_authentication".into(),
-            None,
-        )
-        .unwrap();
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("https://localhost:28013/secure_authentication".into())
+            .use_system_ca(false)
+            .build()
+            .unwrap();
         assert!(
             api_login
                 .authenticate(&AuthenticationRequest {
@@ -344,8 +336,12 @@ mod api_login_tests {
         let listener = TcpListener::bind("127.0.0.1:28014").await.unwrap();
         let jh = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        let api_login =
-            ApiLogin::from(mock, "http://localhost:28014/authentication".into(), None).unwrap();
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("http://localhost:28014/authentication".into())
+            .use_system_ca(false)
+            .build()
+            .unwrap();
         assert!(
             api_login
                 .authenticate(&AuthenticationRequest {
@@ -367,7 +363,12 @@ mod api_login_tests {
     fn fails_on_empty_url() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        let Err(error) = ApiLogin::from(mock, "".into(), None) else {
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("".into())
+            .use_system_ca(false)
+            .build();
+        let Err(error) = api_login else {
             panic!("should've raised error");
         };
         println!("{error:?}");
@@ -377,7 +378,12 @@ mod api_login_tests {
     fn fails_on_invalid_url() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        let Err(error) = ApiLogin::from(mock, "https://should.fail/\x00".into(), None) else {
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("https://should.fail/\x00".into())
+            .use_system_ca(false)
+            .build();
+        let Err(error) = api_login else {
             panic!("should've raised error");
         };
         println!("{error:?}");
@@ -387,7 +393,12 @@ mod api_login_tests {
     fn fails_on_missing_host() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        let Err(error) = ApiLogin::from(mock, "https:///invalid".into(), None) else {
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("https:///invalid".into())
+            .use_system_ca(false)
+            .build();
+        let Err(error) = api_login else {
             panic!("should've raised error");
         };
         println!("{error:?}");
@@ -397,7 +408,12 @@ mod api_login_tests {
     fn fails_on_invalid_host() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        let Err(error) = ApiLogin::from(mock, "https://should\x00fail".into(), None) else {
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("https://should\x00fail".into())
+            .use_system_ca(false)
+            .build();
+        let Err(error) = api_login else {
             panic!("should've raised error");
         };
         println!("{error:?}");
@@ -407,7 +423,12 @@ mod api_login_tests {
     fn fails_on_missing_scheme() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        let Err(error) = ApiLogin::from(mock, "should.fail".into(), None) else {
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("should.fail".into())
+            .use_system_ca(false)
+            .build();
+        let Err(error) = api_login else {
             panic!("should've raised error");
         };
         println!("{error:?}");
@@ -417,7 +438,12 @@ mod api_login_tests {
     fn fails_on_unknown_scheme() {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
-        let Err(error) = ApiLogin::from(mock, "unknown://should.fail".into(), None) else {
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("unknown://should.fail".into())
+            .use_system_ca(false)
+            .build();
+        let Err(error) = api_login else {
             panic!("should've raised error");
         };
         println!("{error:?}");
@@ -428,8 +454,12 @@ mod api_login_tests {
         let mut mock = MockConfigurer::new();
         mock.expect_get_client_config().never();
 
-        let api_login =
-            ApiLogin::from(mock, "http://localhost:28015/authentication".into(), None).unwrap();
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("http://localhost:28015/authentication".into())
+            .use_system_ca(false)
+            .build()
+            .unwrap();
         let Err(error) = api_login
             .authenticate(&AuthenticationRequest {
                 user: "eric",
@@ -455,8 +485,12 @@ mod api_login_tests {
             }
         }));
 
-        let api_login =
-            ApiLogin::from(mock, "http://localhost:28016/authentication".into(), None).unwrap();
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("http://localhost:28016/authentication".into())
+            .use_system_ca(false)
+            .build()
+            .unwrap();
         let Err(error) = api_login
             .authenticate(&AuthenticationRequest {
                 user: "eric",
@@ -490,8 +524,12 @@ mod api_login_tests {
             }
         }));
 
-        let api_login =
-            ApiLogin::from(mock, "http://localhost:28017/authentication".into(), None).unwrap();
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("http://localhost:28017/authentication".into())
+            .use_system_ca(false)
+            .build()
+            .unwrap();
         let Err(error) = api_login
             .authenticate(&AuthenticationRequest {
                 user: "eric",
@@ -519,7 +557,7 @@ mod api_login_tests {
         );
         mock.expect_get_client_config()
             .once()
-            .return_once(move |provider| {
+            .return_once(move |provider, _| {
                 Ok(ClientConfig::builder_with_provider(Arc::new(provider))
                     .with_safe_default_protocol_versions()
                     .unwrap()
@@ -534,12 +572,12 @@ mod api_login_tests {
             }
         }));
 
-        let api_login = ApiLogin::from(
-            mock,
-            "https://localhost:28018/secure_authentication".into(),
-            None,
-        )
-        .unwrap();
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("https://localhost:28018/secure_authentication".into())
+            .use_system_ca(false)
+            .build()
+            .unwrap();
         let Err(error) = api_login
             .authenticate(&AuthenticationRequest {
                 user: "eric",
@@ -567,7 +605,7 @@ mod api_login_tests {
         );
         mock.expect_get_client_config()
             .once()
-            .return_once(move |provider| {
+            .return_once(move |provider, _| {
                 Ok(ClientConfig::builder_with_provider(Arc::new(provider))
                     .with_safe_default_protocol_versions()
                     .unwrap()
@@ -617,12 +655,12 @@ mod api_login_tests {
             }
         }));
 
-        let api_login = ApiLogin::from(
-            mock,
-            "https://localhost:28019/secure_authentication".into(),
-            None,
-        )
-        .unwrap();
+        let api_login = ApiLogin::builder()
+            .configurer(mock)
+            .endpoint("https://localhost:28019/secure_authentication".into())
+            .use_system_ca(false)
+            .build()
+            .unwrap();
         let Err(error) = api_login
             .authenticate(&AuthenticationRequest {
                 user: "eric",

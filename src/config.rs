@@ -184,6 +184,10 @@ pub struct ApplicationConfig {
     #[arg(long, default_value_t = false)]
     pub disable_directory_creation: bool,
 
+    /// If set, uses the system CA trust store instead of the embedded one.
+    #[arg(long, default_value_t = false)]
+    pub use_system_ca: bool,
+
     /// Address to listen for all client connections.
     #[arg(
         long,
@@ -660,6 +664,7 @@ mod application_config_tests {
                 acme_cache_directory: "./deploy/acme_cache/".into(),
                 private_key_file: "./deploy/server_keys/ssh".into(),
                 disable_directory_creation: false,
+                use_system_ca: false,
                 listen_address: "::".parse().unwrap(),
                 ssh_port: 2222.try_into().unwrap(),
                 http_port: 80.try_into().unwrap(),
@@ -734,6 +739,7 @@ mod application_config_tests {
             "--acme-cache-directory=/etc/acme_cache/",
             "--private-key-file=/etc/private_key.pem",
             "--disable-directory-creation",
+            "--use-system-ca",
             "--listen-address=127.0.0.1",
             "--ssh-port=18022",
             "--http-port=18080",
@@ -808,6 +814,7 @@ mod application_config_tests {
                 acme_cache_directory: "/etc/acme_cache/".into(),
                 private_key_file: "/etc/private_key.pem".into(),
                 disable_directory_creation: true,
+                use_system_ca: true,
                 listen_address: "127.0.0.1".parse().unwrap(),
                 ssh_port: 18022.try_into().unwrap(),
                 http_port: 18080.try_into().unwrap(),

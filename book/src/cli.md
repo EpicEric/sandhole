@@ -58,6 +58,9 @@ Expose HTTP/SSH/TCP services through SSH port forwarding.
       <b>--disable-directory-creation</b>
           If set, disables automatic creation of the directories expected by the application. This may result in application errors if the directories are missing
 
+      <b>--use-system-ca</b>
+          If set, uses the system CA trust store instead of the embedded one
+
       <b>--listen-address</b> &lt;ADDRESS&gt;
           Address to listen for all client connections
           

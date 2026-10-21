@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add `--use-system-ca` CLI flag.
+
 ## 0.10.4 (2026-10-21)
 
 ### Added

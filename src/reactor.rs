@@ -16,6 +16,8 @@
 
 use std::sync::Arc;
 
+use tracing::error;
+
 use crate::{
     certificates::CertificateResolver,
     sock_addr_alias::SockAddrAlias,
@@ -53,8 +55,12 @@ pub(crate) struct HttpReactor {
 // (in order to tell which hostnames are still being tracked or not).
 impl ConnectionMapReactor<String> for HttpReactor {
     fn call(&self, identifiers: Vec<String>) {
-        self.certificates
-            .update_acme_domains(identifiers.as_slice());
+        if let Err(error) = self
+            .certificates
+            .update_acme_domains(identifiers.as_slice())
+        {
+            error!(?error, "Failed to update ACME domains.");
+        }
         self.telemetry.http_reactor(identifiers);
     }
 }

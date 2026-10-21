@@ -83,6 +83,7 @@ mod tcp;
 mod telemetry;
 mod tls;
 mod udp;
+mod webpki;
 
 // Data collected from the system and displayed on the admin interface.
 #[derive(Default, Clone)]
@@ -158,7 +159,7 @@ pub(crate) struct SandholeServer {
     pub(crate) fingerprints_validator: FingerprintsValidator,
     // Service for user+password authentication via a login API via a config-provided URL.
     #[cfg(feature = "login")]
-    pub(crate) api_login: Option<crate::login::ApiLogin<crate::login::WebpkiVerifierConfigurer>>,
+    pub(crate) api_login: Option<crate::login::ApiLogin<crate::webpki::WebpkiVerifierConfigurer>>,
     // Service for assigning automatic addresses according to the addressing policies.
     pub(crate) address_delegator: Arc<AddressDelegator<DnsResolver>>,
     // Service for handling opening and closing TCP sockets for non-aliased services.

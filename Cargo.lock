@@ -4573,6 +4573,7 @@ dependencies = [
  "russh",
  "rustls",
  "rustls-acme",
+ "rustls-native-certs",
  "rustls-pki-types",
  "rustls-webpki",
  "rustrict",
@@ -5936,9 +5937,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.7"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f31141ce3fc3e300ae89b78c0dd67f9708061d1d2eda54b8209346fd6be9a92c"
+checksum = "58ec80e73fd8baf57bf0d9615554c75348bda990d6d5bbeab964dd068319fecb"
 dependencies = [
  "rustls-pki-types",
 ]

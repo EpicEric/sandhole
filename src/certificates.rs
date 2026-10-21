@@ -41,14 +41,16 @@ pub(crate) struct DummyAlpnChallengeResolver;
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait AlpnChallengeResolver: Debug + Send + Sync {
-    fn update_domains(&mut self, domains: Vec<String>);
+    fn update_domains(&mut self, domains: Vec<String>) -> color_eyre::Result<()>;
     #[allow(clippy::needless_lifetimes)]
     fn resolve<'a>(&self, client: ClientHello<'a>) -> Option<Arc<CertifiedKey>>;
     fn challenge_rustls_config(&self) -> Option<Arc<ServerConfig>>;
 }
 
 impl AlpnChallengeResolver for DummyAlpnChallengeResolver {
-    fn update_domains(&mut self, _domains: Vec<String>) {}
+    fn update_domains(&mut self, _domains: Vec<String>) -> color_eyre::Result<()> {
+        Ok(())
+    }
 
     fn resolve(&self, _client: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
         None
@@ -230,7 +232,7 @@ impl CertificateResolver {
     }
 
     // Find the list of domains that don't have a certificate associated with them, and request ACME challenges for them.
-    pub(crate) fn update_acme_domains(&self, hostnames: &[String]) {
+    pub(crate) fn update_acme_domains(&self, hostnames: &[String]) -> color_eyre::Result<()> {
         let domains = hostnames
             .iter()
             .filter(|domain| self.resolve_server_name(domain).is_none())
@@ -239,7 +241,8 @@ impl CertificateResolver {
         self.alpn_resolver
             .write()
             .expect("not poisoned")
-            .update_domains(domains);
+            .update_domains(domains)?;
+        Ok(())
     }
 }
 
@@ -498,7 +501,7 @@ mod certificate_resolver_tests {
         mock.expect_update_domains()
             .once()
             .with(eq(vec!["example.com".to_string()]))
-            .returning(|_| {});
+            .returning(|_| Ok(()));
 
         let resolver = Arc::new(
             CertificateResolver::watch(
@@ -510,6 +513,8 @@ mod certificate_resolver_tests {
             .await
             .unwrap(),
         );
-        resolver.update_acme_domains(&["foobar.tld".into(), "example.com".into()]);
+        resolver
+            .update_acme_domains(&["foobar.tld".into(), "example.com".into()])
+            .unwrap();
     }
 }

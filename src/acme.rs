@@ -31,7 +31,11 @@ use rustls::{
 use rustls_acme::{AcmeConfig, AcmeState, UseChallenge, caches::DirCache};
 use tokio_stream::StreamExt;
 
-use crate::{certificates::AlpnChallengeResolver, droppable_handle::DroppableHandle};
+use crate::{
+    certificates::AlpnChallengeResolver,
+    droppable_handle::DroppableHandle,
+    webpki::{Configurer, WebpkiVerifierConfigurer},
+};
 
 // Struct wrapping an ACME ALPN challenge resolver.
 #[derive(Debug)]
@@ -52,7 +56,8 @@ pub(crate) trait Resolver {
         contact_email: &str,
         cache_dir: &Path,
         use_staging: bool,
-    ) -> Self::State;
+        use_system_ca: bool,
+    ) -> color_eyre::Result<Self::State>;
 }
 
 impl Resolver for AlpnAcmeResolver {
@@ -64,15 +69,20 @@ impl Resolver for AlpnAcmeResolver {
         contact_email: &str,
         cache_dir: &Path,
         use_staging: bool,
-    ) -> Self::State {
-        AlpnAcmeResolverState(
+        use_system_ca: bool,
+    ) -> color_eyre::Result<Self::State> {
+        Ok(AlpnAcmeResolverState(
             AcmeConfig::new(domains)
                 .contact_push(format!("mailto:{contact_email}"))
                 .cache(DirCache::new(cache_dir.to_owned()))
                 .directory_lets_encrypt(!use_staging)
                 .challenge_type(UseChallenge::TlsAlpn01)
+                .client_tls_config(Arc::new(WebpkiVerifierConfigurer {}.get_client_config(
+                    rustls::crypto::aws_lc_rs::default_provider(),
+                    use_system_ca,
+                )?))
                 .state(),
-        )
+        ))
     }
 }
 
@@ -121,6 +131,8 @@ pub(crate) struct AcmeResolver<R: Resolver> {
     contact: String,
     // Whether to use the staging server of Let's Encrypt or not.
     use_staging: bool,
+    // Whether to use the system's CA certificates instead of the embedded ones.
+    use_system_ca: bool,
     // Task that listens for connections.
     join_handle: Option<DroppableHandle<()>>,
     // Configuration used for TLS-ALPN-01 challenges.
@@ -131,11 +143,18 @@ pub(crate) struct AcmeResolver<R: Resolver> {
 }
 
 impl<R: Resolver> AcmeResolver<R> {
-    pub(crate) fn new(resolver: R, cache_dir: PathBuf, contact: String, use_staging: bool) -> Self {
+    pub(crate) fn new(
+        resolver: R,
+        cache_dir: PathBuf,
+        contact: String,
+        use_staging: bool,
+        use_system_ca: bool,
+    ) -> Self {
         AcmeResolver {
             cache_dir,
             contact,
             use_staging,
+            use_system_ca,
             join_handle: None,
             config: None,
             cert_resolver: None,
@@ -150,23 +169,28 @@ where
     R::State: ResolverState + Debug + Sync + Send + Unpin + 'static,
 {
     // Handle the new list of domains to manage certificates for with TLS-ALPN-01 challenges.
-    fn update_domains(&mut self, domains: Vec<String>) {
+    fn update_domains(&mut self, domains: Vec<String>) -> color_eyre::Result<()> {
         // Clear config variables if the list is empty.
         if domains.is_empty() {
             self.config = None;
             self.cert_resolver = None;
             self.join_handle = None;
-            return;
+            return Ok(());
         }
         #[cfg(not(coverage_nightly))]
         tracing::info!(?domains, "Generating ACME certificates.",);
         // Create a new ACME config state.
-        let new_state =
-            self.resolver
-                .state(domains, &self.contact, &self.cache_dir, self.use_staging);
+        let new_state = self.resolver.state(
+            domains,
+            &self.contact,
+            &self.cache_dir,
+            self.use_staging,
+            self.use_system_ca,
+        )?;
         self.config = Some(new_state.config());
         self.cert_resolver = Some(new_state.certificate_resolver());
         self.join_handle = Some(new_state.join_handle());
+        Ok(())
     }
 
     // Return the appropriate certificate for the given TLS ClientHello.
@@ -266,8 +290,9 @@ o6ioYnJQHPsfaym/DY0seYghtg==
                 .join("tests/data/acme_cache/"),
             "foobar@sandhole.com.br".into(),
             true,
+            false,
         );
-        resolver.update_domains(vec![]);
+        resolver.update_domains(vec![]).unwrap();
         assert!(
             resolver.cert_resolver.is_none(),
             "cert resolver should be None"
@@ -322,15 +347,18 @@ o6ioYnJQHPsfaym/DY0seYghtg==
         let mut mock = MockResolver::new();
         mock.expect_state()
             .once()
-            .return_once(|_, _, _, _| mock_state);
+            .return_once(|_, _, _, _, _| Ok(mock_state));
         let mut resolver = AcmeResolver::new(
             mock,
             std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
                 .join("tests/data/acme_cache/"),
             "foobar@sandhole.com.br".into(),
             true,
+            false,
         );
-        resolver.update_domains(vec!["sandhole.com.br".into()]);
+        resolver
+            .update_domains(vec!["sandhole.com.br".into()])
+            .unwrap();
         assert!(resolver.cert_resolver.is_some(), "missing cert resolver");
         assert!(resolver.config.is_some(), "missing config");
         assert!(resolver.join_handle.is_some(), "missing join handle");

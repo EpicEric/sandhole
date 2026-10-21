@@ -14,8 +14,8 @@ In the case that you'd like to make contributions to Sandhole, create an issue f
 
 If you wish to contribute changes to Sandhole, please [fork the repository](https://codeberg.org/sandhole/sandhole/fork), push your modifications to a branch other than main, and create a [pull request](https://codeberg.org/sandhole/sandhole/compare). Make sure to [link to the original issue](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword) in your PR's body.
 
-If possible, make sure that your changes pass all tests and linting/formatting checks before creating a pull request by running `just test` and `just clippy`, respectively. This should ensure that your PR will pass the CI pipeline.
+If possible, make sure that your changes pass all tests and linting/formatting checks before creating a pull request by running `now run test` and `now run clippy`, respectively. This should ensure that your PR will pass the CI pipeline.
 
 Please add a short description of any user-facing changes to the top of [CHANGELOG.md](./CHANGELOG.md), under the "Unreleased" section (or create one if it does not exist). The changelog must adhere to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and it must emphasize any breaking changes.
 
-If you're adding or modifying a command line option, run `just cli` to update the book. This requires you to have `nix` installed.
+If you're adding or modifying a command line option, run `now run cli` to update the book. This requires you to have `nix` installed.

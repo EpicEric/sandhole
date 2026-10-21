@@ -29,7 +29,7 @@ tokio = { version = "1.54.0", features = ["full"] }
 default = ["acme", "duper", "login", "prometheus", "rustrict"]
 acme = ["dep:rustls-acme"]
 duper = ["dep:tracing_duper"]
-login = ["dep:reqwest"]
+login = ["dep:reqwest", "dep:rustls-native-certs"]
 prometheus = ["dep:metrics-exporter-prometheus"]
 
 [dependencies]
@@ -86,6 +86,7 @@ reqwest = { version = "0.13.5", optional = true, default-features = false, featu
 ] }
 russh = "0.64.1"
 rustls = "0.23.46"
+rustls-native-certs = { version = "0.8", optional = true }
 rustls-acme = { version = "0.15.4", optional = true, default-features = false, features = [
   "tokio",
   "aws-lc-rs",
