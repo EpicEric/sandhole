@@ -92,15 +92,19 @@ in
       {
         path = [ pkgs.minica ];
         run = ''
+          set -euo pipefail
           minica -ca-cert tests/data/ca/rootCA.pem -ca-key tests/data/ca/rootCA-key.pem -domains 'localhost'
           mv localhost/cert.pem tests/data/certificates/localhost/fullchain.pem
           mv localhost/key.pem tests/data/certificates/localhost/privkey.pem
+          rm -r localhost/
           minica -ca-cert tests/data/ca/rootCA.pem -ca-key tests/data/ca/rootCA-key.pem -domains 'foobar.tld,*.foobar.tld'
           mv foobar.tld/cert.pem tests/data/certificates/foobar.tld/fullchain.pem
           mv foobar.tld/key.pem tests/data/certificates/foobar.tld/privkey.pem
+          rm -r foobar.tld/
           minica -ca-cert tests/data/ca/rootCA.pem -ca-key tests/data/ca/rootCA-key.pem -domains 'sandhole.com.br'
           mv sandhole.com.br/cert.pem tests/data/custom_certificate/fullchain.pem
           mv sandhole.com.br/key.pem tests/data/custom_certificate/privkey.pem
+          rm -r sandhole.com.br/
         '';
       }
     ];

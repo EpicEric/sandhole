@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Bump MSRV to 1.95.0.
 - Update dependencies.
 
 ## 0.10.3 (2026-08-14)

@@ -2,7 +2,7 @@
 name = "sandhole"
 version = "0.10.3"
 edition = "2024"
-rust-version = "1.88.0"
+rust-version = "1.95.0"
 description = "Expose HTTP/SSH/TCP services through SSH port forwarding."
 repository = "https://codeberg.org/sandhole/sandhole"
 homepage = "https://sandhole.com.br/"
@@ -101,7 +101,7 @@ serde = { version = "1.0.229", default-features = false, features = [
 ] }
 serde_json = "1.0.154"
 socket2 = { workspace = true }
-sysinfo = "0.38.4"  # 0.39.x requires MSRV bump to 1.95.0
+sysinfo = "0.39.6"
 thiserror = "2.0.21"
 tokio = { workspace = true }
 tokio-rustls = "0.26.6"

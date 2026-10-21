@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 env:
-  RUST_MSRV: 1.88.0
+  RUST_MSRV: 1.95.0
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_TEST_DEBUG: 0
   CARGO_LLVM_COV_VERSION: 0.6.20
