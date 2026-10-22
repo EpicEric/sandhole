@@ -54,7 +54,6 @@ let
     nativeBuildInputs = [
       pkgsStatic.cmake
       pkgsStatic.installShellFiles
-      pkgsStatic.perl
     ]
     ++ lib.optionals (pkgsStatic.stdenv.hostPlatform.isDarwin) [ pkgsStatic.lld ];
 

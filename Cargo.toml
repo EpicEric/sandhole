@@ -131,9 +131,6 @@ tokio-tungstenite = "0.30.0"
 tower = "0.5.3"
 vt100-ctt = { version = "0.17.1", default-features = false }
 
-[target.'cfg(unix)'.dependencies]
-openssl = { version = "0.10.81", features = ["vendored"] }
-
 [profile.release]
 strip = true
 lto = true
@@ -144,9 +141,6 @@ lto = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage_nightly)"] }
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["openssl"]
 
 [package.metadata.binstall]
 pkg-url = "https://sandhole.com.br/download/v{ version }/sandhole-{ target-family }-{ target-arch }{ binary-ext }"
