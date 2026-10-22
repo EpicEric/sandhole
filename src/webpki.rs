@@ -6,6 +6,7 @@ use webpki_roots::TLS_SERVER_ROOTS;
 
 // Trait for TLS configuration setup.
 #[cfg_attr(test, mockall::automock)]
+#[cfg_attr(all(not(feature = "acme"), not(feature = "login")), allow(dead_code))]
 pub(crate) trait Configurer {
     // Returns the TLS client configuration.
     fn get_client_config(
@@ -15,6 +16,7 @@ pub(crate) trait Configurer {
     ) -> color_eyre::Result<ClientConfig>;
 }
 
+#[cfg_attr(all(not(feature = "acme"), not(feature = "login")), allow(dead_code))]
 pub(crate) struct WebpkiVerifierConfigurer;
 
 impl Configurer for WebpkiVerifierConfigurer {
