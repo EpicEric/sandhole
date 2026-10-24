@@ -57,8 +57,8 @@ use jiff::Timestamp;
 use owo_colors::OwoColorize;
 use russh::{
     Channel, ChannelId, ChannelOpenFailure, MethodKind, MethodSet,
-    keys::{HashAlg, PublicKey, ssh_key::Fingerprint},
-    server::{Auth, ChannelOpenHandle, Handler, Msg, Session},
+    keys::{HashAlg, ssh_key::Fingerprint},
+    server::{Auth, ChannelOpenHandle, Handler, Msg, Session, VerifiedPublicKey},
 };
 #[cfg_attr(not(feature = "login"), allow(unused_imports))]
 use tokio::time::timeout;
@@ -317,9 +317,9 @@ impl Handler for ServerHandler {
     async fn auth_publickey(
         &mut self,
         user: &str,
-        public_key: &PublicKey,
+        public_key: VerifiedPublicKey<'_>,
     ) -> Result<Auth, Self::Error> {
-        let fingerprint = public_key.fingerprint(HashAlg::Sha256);
+        let fingerprint = public_key.public_key.fingerprint(HashAlg::Sha256);
         self.user = Some(user.into());
         self.key_fingerprint = Some(fingerprint);
         // Check if the fingerprint is known.

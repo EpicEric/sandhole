@@ -1,3 +1,5 @@
+#! /usr/bin/env nix
+#! nix shell git+https://codeberg.org/now-runner/now.git --command now
 { lib, runner, ... }:
 let
   inputs = import ./.tack;

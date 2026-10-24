@@ -9,6 +9,7 @@
 ### Changed
 
 - Remove `openssl` dependency.
+- Update dependencies.
 
 ## 0.10.4 (2026-10-21)
 
