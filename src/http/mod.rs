@@ -386,6 +386,58 @@ type KeepalivePool<P> = deadpool::unmanaged::Pool<P>;
 type Http11KeepalivePool<B> = KeepalivePool<PooledConnection<Http11SendRequest<B>>>;
 type Http2KeepalivePool<B> = KeepalivePool<PooledConnection<Http2SendRequest<B>>>;
 
+// Pooled connections that can report whether another request fits on them.
+pub(crate) trait PooledConnectionReady {
+    fn is_ready(&self) -> bool;
+}
+
+impl<B> PooledConnectionReady for Http11SendRequest<B> {
+    fn is_ready(&self) -> bool {
+        Http11SendRequest::is_ready(self)
+    }
+}
+
+impl<B> PooledConnectionReady for Http2SendRequest<B> {
+    fn is_ready(&self) -> bool {
+        Http2SendRequest::is_ready(self)
+    }
+}
+
+// Take a pooled connection that can serve a request right now, discarding
+// expired or unusable ones as it goes. Dropping a discarded connection closes
+// its channel, so this must never put a stale connection back.
+pub(crate) fn take_ready_connection<T: PooledConnectionReady>(
+    pool: &KeepalivePool<PooledConnection<T>>,
+    max_idle_time: Duration,
+    max_reuse: usize,
+) -> Option<PooledConnection<T>> {
+    while let Ok(object) = pool.try_get() {
+        let mut pooled = deadpool::unmanaged::Object::take(object);
+        if pooled.connection.is_ready() && !pooled.is_expired(max_idle_time, max_reuse) {
+            pooled.touch();
+
+            return Some(pooled);
+        }
+    }
+    None
+}
+
+// Drop every idle connection that outlived its pool limits, closing their
+// channels. Without this, an idle alias keeps its channels open until another
+// request for the same alias happens to evict them.
+pub(crate) fn evict_expired_connections<T: PooledConnectionReady>(
+    pool: &KeepalivePool<PooledConnection<T>>,
+    max_idle_time: Duration,
+    max_reuse: usize,
+) {
+    while let Ok(object) = pool.try_get() {
+        let pooled = deadpool::unmanaged::Object::take(object);
+        if !pooled.is_expired(max_idle_time, max_reuse) {
+            let _ = pool.try_add(pooled);
+        }
+    }
+}
+
 // Data commonly reused between HTTP proxy requests.
 #[derive(Builder)]
 pub(crate) struct ProxyData<B, M, H, T>
@@ -446,6 +498,21 @@ where
 {
     pub(crate) fn conn_manager(&self) -> &M {
         &self.conn_manager
+    }
+
+    // Evict pooled connections that outlived their limits, then forget the
+    // aliases left with nothing. Evicting here (instead of only on the next
+    // request for the same alias) closes channels that would otherwise stay
+    // open for as long as the alias stays idle.
+    pub(crate) fn cleanup_keepalive_pools(&self) {
+        self.keepalive_http11_pool_map.retain(|_, pool| {
+            evict_expired_connections(pool, self.http_pool_max_idle_time, self.http_pool_max_reuse);
+            pool.status().available > 0
+        });
+        self.keepalive_http2_pool_map.retain(|_, pool| {
+            evict_expired_connections(pool, self.http_pool_max_idle_time, self.http_pool_max_reuse);
+            pool.status().available > 0
+        });
     }
 }
 
@@ -1188,7 +1255,7 @@ mod proxy_handler_tests {
             .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(handler));
+            .return_once(move |_, _| Box::pin(async move { Ok(handler) }));
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
@@ -1286,7 +1353,7 @@ mod proxy_handler_tests {
             .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(handler));
+            .return_once(move |_, _| Box::pin(async move { Ok(handler) }));
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
@@ -1397,7 +1464,7 @@ mod proxy_handler_tests {
             .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(handler));
+            .return_once(move |_, _| Box::pin(async move { Ok(handler) }));
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
@@ -1494,7 +1561,7 @@ mod proxy_handler_tests {
             .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(handler));
+            .return_once(move |_, _| Box::pin(async move { Ok(handler) }));
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
@@ -1596,7 +1663,7 @@ mod proxy_handler_tests {
             .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(handler));
+            .return_once(move |_, _| Box::pin(async move { Ok(handler) }));
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
@@ -1700,7 +1767,7 @@ mod proxy_handler_tests {
             .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(handler));
+            .return_once(move |_, _| Box::pin(async move { Ok(handler) }));
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
@@ -1803,7 +1870,7 @@ mod proxy_handler_tests {
             .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_aliasing_channel()
             .once()
-            .return_once(move |_, _, _| Ok(handler));
+            .return_once(move |_, _, _| Box::pin(async move { Ok(handler) }));
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: Some(443),
@@ -1906,7 +1973,7 @@ mod proxy_handler_tests {
             .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(handler));
+            .return_once(move |_, _| Box::pin(async move { Ok(handler) }));
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
@@ -2009,7 +2076,7 @@ mod proxy_handler_tests {
             .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(handler));
+            .return_once(move |_, _| Box::pin(async move { Ok(handler) }));
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
@@ -2136,7 +2203,7 @@ mod proxy_handler_tests {
             .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(handler));
+            .return_once(move |_, _| Box::pin(async move { Ok(handler) }));
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
@@ -2241,7 +2308,7 @@ mod proxy_handler_tests {
             .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(handler));
+            .return_once(move |_, _| Box::pin(async move { Ok(handler) }));
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,
@@ -2369,7 +2436,7 @@ mod proxy_handler_tests {
             .return_once(move || ServerHandlerSender(Some(logging_tx)));
         mock.expect_tunneling_channel()
             .once()
-            .return_once(move |_, _| Ok(handler));
+            .return_once(move |_, _| Box::pin(async move { Ok(handler) }));
         mock.expect_http_data().once().return_once(move || {
             Some(ConnectionHttpData {
                 redirect_http_to_https_port: None,

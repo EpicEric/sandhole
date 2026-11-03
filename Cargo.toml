@@ -84,7 +84,7 @@ reqwest = { version = "0.13.5", optional = true, default-features = false, featu
   "json",
   "rustls",
 ] }
-russh = "0.65.0"
+russh = "0.65.1"
 rustls = "0.23.46"
 rustls-native-certs = "0.8.5"
 rustls-acme = { version = "0.15.4", optional = true, default-features = false, features = [

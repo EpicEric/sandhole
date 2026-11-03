@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License along
 // with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::net::IpAddr;
+use std::{future::Future, net::IpAddr};
 
 use russh::keys::ssh_key::Fingerprint;
 
@@ -40,7 +40,15 @@ pub(crate) trait ConnectionHandler<T: Sync> {
     fn log_channel(&self) -> ServerHandlerSender;
 
     // Return a tunneling channel for this handler.
-    async fn tunneling_channel(&self, ip: IpAddr, port: u16) -> Result<T, ServerError>;
+    //
+    // The future is `Send` so a caller can run an open in its own task: russh
+    // leaves a channel open on the session when the open future is dropped
+    // mid-flight, so cancelling an open must not drop the future.
+    fn tunneling_channel(
+        &self,
+        ip: IpAddr,
+        port: u16,
+    ) -> impl Future<Output = Result<T, ServerError>> + Send;
 
     // Whether the given credentials can create an aliasing channel to this handler.
     #[expect(clippy::needless_lifetimes)]
@@ -48,12 +56,12 @@ pub(crate) trait ConnectionHandler<T: Sync> {
 
     // Return an aliasing channel for this handler.
     #[expect(clippy::needless_lifetimes)]
-    async fn aliasing_channel<'a>(
+    fn aliasing_channel<'a>(
         &self,
         ip: IpAddr,
         port: u16,
         fingerprint: Option<&'a Fingerprint>,
-    ) -> Result<T, ServerError>;
+    ) -> impl Future<Output = Result<T, ServerError>> + Send;
 
     // Returns HTTP-specific data for this handler.
     fn http_data(&self) -> Option<ConnectionHttpData>;

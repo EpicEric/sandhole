@@ -14,16 +14,17 @@
 // You should have received a copy of the GNU Affero General Public License along
 // with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::{error::Error, fmt::Debug, net::SocketAddr, pin::pin, sync::Arc, time::Instant};
+use std::{error::Error, fmt::Debug, net::SocketAddr, sync::Arc, time::Instant};
 
 use crate::{
     connection_handler::ConnectionHandler,
     connections::ConnectionGetByHttpHost,
     http::{
-        ArcProxyData, HttpError, HttpLog, PooledConnection, ProxyData, ProxyResponse, ProxyType,
-        TimedResponse, http_log,
+        ArcProxyData, Http2PoolGuard, Http2SendRequest, HttpError, HttpLog, PooledConnection,
+        ProxyData, ProxyResponse, ProxyType, TimedResponse, http_log, take_ready_connection,
     },
     keepalive::KeepaliveAlias,
+    ssh::ServerHandlerSender,
 };
 
 use http::{Uri, header::CONNECTION, uri::Authority};
@@ -59,107 +60,55 @@ where
 
     loop {
         // Get HTTP/2 sender and remote log channel
-        let (mut sender, tx, _guard) = if proxy_data.pool_queue_timeout.is_some() {
-            let guard = proxy_data.get_http2_pool_guard(key.clone());
-            // Race between new channel and HTTP pool
-            let mut recv = guard.pool.get();
-            let mut channel_future = pin!(async {
-                match proxy_data.proxy_type {
-                    ProxyType::Tunneling => {
-                        handler
-                            .tunneling_channel(tcp_address.ip(), tcp_address.port())
-                            .await
-                    }
-                    ProxyType::Aliasing => {
-                        handler
-                            .aliasing_channel(tcp_address.ip(), tcp_address.port(), key.2.as_ref())
-                            .await
-                    }
-                }
+        let guard = proxy_data.get_http2_pool_guard(key.clone());
+        // Reuse a pooled connection rather than opening a channel for it.
+        let (mut sender, tx, _guard) = if let Some(pooled) =
+            take_ready_connection(&guard.pool, guard.max_idle_time, guard.max_reuse)
+        {
+            (pooled.connection, pooled.log_sender, guard)
+        } else if proxy_data.pool_queue_timeout.is_some() {
+            // Race a new channel against a connection returned to the pool.
+            //
+            // The open runs in its own task: russh only hands back the channel
+            // once the client confirms it, so dropping an open future
+            // mid-flight would leave the channel open on the session with
+            // nobody left to close it. An abandoned task still runs to
+            // completion, and dropping its result drops the channel.
+            let mut open_task = tokio::spawn({
+                let proxy_data = Arc::clone(&proxy_data);
+                let handler = Arc::clone(&handler);
+                let key = key.clone();
+                async move { open_channel(&proxy_data, &handler, tcp_address, &key).await }
             });
+            let mut recv = guard.pool.get();
             loop {
                 tokio::select! {
                     result = recv => {
                         match result {
-                            // Return pool item if connection is ready and not expired
-                            Ok(pooled) if pooled.connection.is_ready()
-                                && !pooled.is_expired(guard.max_idle_time, guard.max_reuse) => {
+                            Ok(pooled) => {
                                 let mut pooled = deadpool::unmanaged::Object::take(pooled);
-                                pooled.touch();
-                                break (pooled.connection, pooled.log_sender, guard)
-                            },
-                            Ok(expired) => {
-                                let _ = deadpool::unmanaged::Object::take(expired);
+                                if pooled.connection.is_ready()
+                                    && !pooled.is_expired(guard.max_idle_time, guard.max_reuse) {
+                                    pooled.touch();
+                                    break (pooled.connection, pooled.log_sender, guard);
+                                }
                                 recv = guard.pool.get();
-                                continue;
                             },
-                            Err(deadpool::unmanaged::PoolError::Timeout) => return Err(HttpError::NoHandlerAvailable),
+                            Err(deadpool::unmanaged::PoolError::Timeout) => {
+                                return Err(HttpError::NoHandlerAvailable);
+                            },
                             Err(_) => return Err(HttpError::PoolClosed),
                         }
                     }
-                    result = &mut channel_future => {
-                        let (sender, conn) = hyper::client::conn::http2::handshake(
-                            TokioExecutor::new(),
-                            TokioIo::new(result?),
-                        )
-                        .await?;
-                        tokio::spawn(Box::pin(async move {
-                            if let Err(error) = conn.await {
-                                #[cfg(not(coverage_nightly))]
-                                tracing::warn!(%error, "HTTP/2 connection failed.");
-                            }
-                        }));
-                        break (sender, handler.log_channel(), guard);
+                    result = &mut open_task => {
+                        let io = result.map_err(|_| HttpError::PoolClosed)??;
+                        break spawn_http2_connection(io, handler.log_channel(), guard).await?;
                     }
                 }
             }
         } else {
-            // No pool timeout - get recycled sender or create new one
-            'sender: loop {
-                let guard = proxy_data.get_http2_pool_guard(key.clone());
-                match guard.pool.try_get() {
-                    Ok(pooled) => {
-                        let mut pooled = deadpool::unmanaged::Object::take(pooled);
-                        if pooled.connection.is_ready()
-                            && !pooled.is_expired(guard.max_idle_time, guard.max_reuse)
-                        {
-                            pooled.touch();
-                            break 'sender (pooled.connection, pooled.log_sender, guard);
-                        }
-                    }
-                    Err(_) => {
-                        let io = match proxy_data.proxy_type {
-                            ProxyType::Tunneling => {
-                                handler
-                                    .tunneling_channel(tcp_address.ip(), tcp_address.port())
-                                    .await
-                            }
-                            ProxyType::Aliasing => {
-                                handler
-                                    .aliasing_channel(
-                                        tcp_address.ip(),
-                                        tcp_address.port(),
-                                        key.2.as_ref(),
-                                    )
-                                    .await
-                            }
-                        };
-                        let (sender, conn) = hyper::client::conn::http2::handshake(
-                            TokioExecutor::new(),
-                            TokioIo::new(io?),
-                        )
-                        .await?;
-                        tokio::spawn(Box::pin(async move {
-                            if let Err(error) = conn.await {
-                                #[cfg(not(coverage_nightly))]
-                                tracing::warn!(%error, "HTTP/2 connection failed.");
-                            }
-                        }));
-                        let guard = proxy_data.get_http2_pool_guard(key.clone());
-                        break (sender, handler.log_channel(), guard);
-                    }
-                }
-            }
+            let io = open_channel(&proxy_data, &handler, tcp_address, &key).await?;
+            spawn_http2_connection(io, handler.log_channel(), guard).await?
         };
 
         // Create entry for pool
@@ -254,4 +203,60 @@ where
             })),
         }));
     }
+}
+
+// Open a channel to the proxied service.
+//
+// The returned future must be driven to completion: russh keeps the channel
+// open on the session if the open is cancelled before the client confirms it.
+async fn open_channel<B, M, H, T>(
+    proxy_data: &ProxyData<B, M, H, T>,
+    handler: &H,
+    tcp_address: SocketAddr,
+    key: &KeepaliveAlias,
+) -> Result<T, HttpError>
+where
+    M: ConnectionGetByHttpHost<Arc<H>> + Send + Sync + 'static,
+    H: ConnectionHandler<T> + Send + Sync + 'static,
+    T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    B: Body + Debug + Send + Unpin + 'static,
+    <B as Body>::Data: Send + Sync + 'static,
+    <B as Body>::Error: Error + Send + Sync + 'static,
+{
+    let channel = match proxy_data.proxy_type {
+        ProxyType::Tunneling => {
+            handler
+                .tunneling_channel(tcp_address.ip(), tcp_address.port())
+                .await
+        }
+        ProxyType::Aliasing => {
+            handler
+                .aliasing_channel(tcp_address.ip(), tcp_address.port(), key.2.as_ref())
+                .await
+        }
+    };
+    Ok(channel?)
+}
+
+// Start an HTTP/2 connection over a freshly opened channel.
+async fn spawn_http2_connection<B, T>(
+    io: T,
+    tx: ServerHandlerSender,
+    guard: Http2PoolGuard<B>,
+) -> Result<(Http2SendRequest<B>, ServerHandlerSender, Http2PoolGuard<B>), HttpError>
+where
+    T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    B: Body + Debug + Send + Unpin + 'static,
+    <B as Body>::Data: Send + Sync + 'static,
+    <B as Body>::Error: Error + Send + Sync + 'static,
+{
+    let (sender, conn) =
+        hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(io)).await?;
+    tokio::spawn(Box::pin(async move {
+        if let Err(error) = conn.await {
+            #[cfg(not(coverage_nightly))]
+            tracing::warn!(%error, "HTTP/2 connection failed.");
+        }
+    }));
+    Ok((sender, tx, guard))
 }

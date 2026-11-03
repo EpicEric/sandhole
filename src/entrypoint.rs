@@ -771,9 +771,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
         cleanup_interval.tick().await;
         loop {
             cleanup_interval.tick().await;
-            proxy_data
-                .keepalive_http11_pool_map
-                .retain(|_, pool| pool.status().available == 0);
+            proxy_data.cleanup_keepalive_pools();
         }
     });
     let mut sandhole = Arc::new(SandholeServer {
@@ -905,9 +903,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             cleanup_interval.tick().await;
             loop {
                 cleanup_interval.tick().await;
-                proxy_data
-                    .keepalive_http11_pool_map
-                    .retain(|_, pool| pool.status().available == 0);
+                proxy_data.cleanup_keepalive_pools();
             }
         });
         DroppableHandle(tokio::spawn(async move {
@@ -1006,9 +1002,7 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
             cleanup_interval.tick().await;
             loop {
                 cleanup_interval.tick().await;
-                proxy_data
-                    .keepalive_http11_pool_map
-                    .retain(|_, pool| pool.status().available == 0);
+                proxy_data.cleanup_keepalive_pools();
             }
         });
         let sandhole_clone = Arc::clone(&sandhole);

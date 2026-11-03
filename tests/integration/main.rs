@@ -59,6 +59,8 @@ mod http_addressing_profanities_domain;
 mod http_addressing_profanities_no_root_domain;
 mod http_addressing_profanities_subdomain;
 mod http_force_https_by_user;
+mod http_pool_discard;
+mod http_pool_leak;
 mod http_pool_limit;
 mod http_pool_timeout;
 mod http_redirects;

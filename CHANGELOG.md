@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Prevent SSH channels from leaking for HTTP.
+
+### Changed
+
+- Update dependencies.
+
 ## 0.10.5 (2026-10-31)
 
 ### Added
