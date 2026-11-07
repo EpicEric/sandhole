@@ -54,10 +54,14 @@ let
     nativeBuildInputs = [
       pkgsStatic.cmake
       pkgsStatic.installShellFiles
+      pkgsStatic.pkg-config
     ]
     ++ lib.optionals (pkgsStatic.stdenv.hostPlatform.isDarwin) [ pkgsStatic.lld ];
 
-    buildInputs = lib.optionals (pkgsStatic.stdenv.hostPlatform.isDarwin) [ pkgsStatic.libiconv ];
+    buildInputs = [
+      pkgsStatic.aws-lc
+    ]
+    ++ lib.optionals (pkgsStatic.stdenv.hostPlatform.isDarwin) [ pkgsStatic.libiconv ];
   };
 
   sandhole = rustPlatform.buildRustPackage (
