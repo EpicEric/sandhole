@@ -430,11 +430,17 @@ pub(crate) fn evict_expired_connections<T: PooledConnectionReady>(
     max_idle_time: Duration,
     max_reuse: usize,
 ) {
+    // Drain the pool before re-adding live connections. Re-adding one while
+    // draining makes `try_get` return it again, spinning until it expires.
+    let mut kept = Vec::new();
     while let Ok(object) = pool.try_get() {
         let pooled = deadpool::unmanaged::Object::take(object);
         if !pooled.is_expired(max_idle_time, max_reuse) {
-            let _ = pool.try_add(pooled);
+            kept.push(pooled);
         }
+    }
+    for pooled in kept.into_iter().rev() {
+        let _ = pool.try_add(pooled);
     }
 }
 

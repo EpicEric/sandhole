@@ -5,6 +5,7 @@
 ### Fixed
 
 - Prevent SSH channels from leaking for HTTP.
+- Prevent a CPU busy loop while evicting idle HTTP connections.
 
 ### Changed
 
