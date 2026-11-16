@@ -650,10 +650,24 @@ pub async fn entrypoint(config: ApplicationConfig) -> color_eyre::Result<()> {
     // Periodically update system data (every second, as to keep network TX/RX rates accurate).
     tokio::spawn(async move {
         let system_refresh = RefreshKind::nothing()
-            .with_cpu(CpuRefreshKind::nothing().with_cpu_usage())
+            .with_cpu(CpuRefreshKind::nothing().with_usage())
             .with_memory(MemoryRefreshKind::nothing().with_ram());
-        let mut system = System::new_with_specifics(system_refresh);
-        let mut networks = Networks::new_with_refreshed_list();
+        let mut system = match System::new_with_specifics(system_refresh) {
+            Ok(system) => system,
+            Err(error) => {
+                #[cfg(not(coverage_nightly))]
+                tracing::error!(%error, "Failed to inspect system.");
+                return;
+            }
+        };
+        let mut networks = match Networks::new_with_refreshed_list() {
+            Ok(networks) => networks,
+            Err(error) => {
+                #[cfg(not(coverage_nightly))]
+                tracing::error!(%error, "Failed to inspect networks.");
+                return;
+            }
+        };
         let mut system_data_interval = interval(Duration::from_millis(1_000));
         system_data_interval.tick().await;
         loop {

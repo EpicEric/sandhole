@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Update dependencies.
+
 ## 0.10.6 (2026-11-13)
 
 ### Fixed
